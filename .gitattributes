@@ -1,0 +1,14 @@
+* text=auto
+
+# Unity / binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.psd binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.dll binary
+*.so binary
+*.a binary
+*.unitypackage binary
