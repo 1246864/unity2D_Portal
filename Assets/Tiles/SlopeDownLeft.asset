@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: SlopeDownLeft
   m_EditorClassIdentifier: 
   m_Sprite: {fileID: 21300000, guid: f086d83a5d0741143b466a0577b5a80a, type: 3}
-  m_Color: {r: 0.4, g: 0.46, b: 0.56, a: 1}
+  m_Color: {r: 0.8784314, g: 0.8784314, b: 0.8784314, a: 1}
   m_Transform:
     e00: 1
     e01: 0

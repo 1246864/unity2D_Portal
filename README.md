@@ -22,7 +22,7 @@
 
 | 资产 | 说明 |
 |---|---|
-| `Assets/Tiles/TerrainTile.asset` | 普通地形瓦片（`#66758F`），1×1 |
+| `Assets/Tiles/TerrainTile.asset` | 普通地形瓦片（`#E0E0E0` 超浅灰），1×1 |
 | `Assets/Tiles/DarkTerrainTile.asset` | 深灰瓦片（`#454C5C`），与普通瓦片不融合、深灰之间融合 |
 | `Assets/Tiles/SlopeUpRight / UpLeft / DownRight / DownLeft` | 1×1 的 45° 斜坡瓦片，4 个方向，普通色 |
 | `Assets/Tiles/Slope*Dark` | 同上 4 个方向的深灰版本 |

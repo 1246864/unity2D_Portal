@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: TerrainTile
   m_EditorClassIdentifier: 
   m_Sprite: {fileID: 21300000, guid: ed2633e5c737df84b8a29d8ecf4b0612, type: 3}
-  m_Color: {r: 0.4, g: 0.46, b: 0.56, a: 1}
+  m_Color: {r: 0.8784314, g: 0.8784314, b: 0.8784314, a: 1}
   m_Transform:
     e00: 1
     e01: 0

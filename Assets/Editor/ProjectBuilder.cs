@@ -44,7 +44,7 @@ namespace Platformer.EditorTools
         static readonly Vector2 Spawn = new Vector2(-9f, 0.75f);
 
         // One colour for every terrain piece: floor, wall, step, platform.
-        static readonly Color TerrainColor = new Color(0.40f, 0.46f, 0.56f);
+        static readonly Color TerrainColor = new Color(0.8784314f, 0.8784314f, 0.8784314f); // #E0E0E0
         static readonly Color DarkTerrainColor = new Color(0.27f, 0.30f, 0.36f);
         static readonly Color BackgroundColor = new Color(0.086f, 0.102f, 0.153f);
         static readonly Color OutlineColor = new Color(0.70f, 0.79f, 0.92f, 1f);
