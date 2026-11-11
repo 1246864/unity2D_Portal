@@ -55,6 +55,36 @@ Level
 2. 在窗口左上角的下拉框里选择 **TerrainPalette**
 3. 选中场景中的 `Grid/Terrain` 对象，用画笔 / 矩形工具逐格绘制；斜坡瓦片有 4 个方向，可直接拼任意坡道
 
+## 区域复制（Region Capture）
+
+场景里有一个 `Capture Region` 对象，显示为**橙色线框**，代表捕获区域。选中它、在 Inspector 里调 `size`、再移动到想去的地方。
+
+然后执行菜单：
+
+```
+Platformer > Capture Region > Capture Into New Object
+```
+
+- 复制区域内的**全部瓦片**（普通 / 深灰 / 斜坡）
+- 复制与区域相交的**全部精灵**（含玩家）
+- 所有复制内容统一挂在新的 `Captured Region` 对象下，默认放在原区域正上方 2 格
+- 复制的地形自带 Grid / Tilemap / 合并碰撞体 / 物理材质，副本可以直接站立和使用
+
+> 复制出的玩家是完整副本（控制器、刚体、碰撞体都在），也会响应键盘输入。如果只想把它当静态模板，选中副本把 `PlayerController2D` 组件禁用即可。
+
+辅助命令：
+
+| 菜单 | 作用 |
+|---|---|
+| `Platformer > Capture Region > Create Region Marker` | 在当前场景新建一个区域标记 |
+| `Platformer > Capture Region > Rebuild, Capture and Render Preview` | 重建关卡 + 捕获 + 出预览图 |
+
+命令行：
+
+```
+Unity.exe -batchmode -projectPath <项目> -executeMethod Platformer.EditorTools.RegionCapture.CaptureAndSave -quit
+```
+
 ## 描边系统
 
 描边分两层：**每个瓦片自带的内描边** + **全屏合并的外轮廓**。

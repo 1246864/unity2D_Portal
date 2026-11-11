@@ -39,22 +39,26 @@ namespace Platformer.Tests
 
             GameObject player = null;
             Tilemap tilemap = null;
+            int cells = 0;
             foreach (GameObject root in scene.GetRootGameObjects())
             {
                 if (root.name == "Player") player = root;
 
-                Tilemap found = root.GetComponentInChildren<Tilemap>(true);
-                if (found != null) tilemap = found;
+                // The scene may contain additional captured regions, so take the
+                // tilemap with the most tiles (the main level terrain).
+                foreach (Tilemap candidate in root.GetComponentsInChildren<Tilemap>(true))
+                {
+                    int candidateCells = CountCells(candidate);
+                    if (candidateCells > cells)
+                    {
+                        cells = candidateCells;
+                        tilemap = candidate;
+                    }
+                }
             }
 
             Assert.IsNotNull(player, "Player not found in Level01.");
             Assert.IsNotNull(tilemap, "Tilemap not found in Level01.");
-
-            int cells = 0;
-            foreach (Vector3Int position in tilemap.cellBounds.allPositionsWithin)
-            {
-                if (tilemap.HasTile(position)) cells++;
-            }
 
             Assert.Greater(cells, 100, $"Expected a populated tilemap, found {cells} cells.");
 
@@ -106,6 +110,17 @@ namespace Platformer.Tests
 
             Assert.Greater(peakY, 2f,
                 $"Player should walk up the tile ramp to the 2-cell plateau, peak y was {peakY:F2}.");
+        }
+
+        static int CountCells(Tilemap tilemap)
+        {
+            int count = 0;
+            foreach (Vector3Int position in tilemap.cellBounds.allPositionsWithin)
+            {
+                if (tilemap.HasTile(position)) count++;
+            }
+
+            return count;
         }
     }
 }

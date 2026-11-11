@@ -517,6 +517,11 @@ namespace Platformer.EditorTools
             player.name = "Player";
             player.transform.position = new Vector3(Spawn.x, Spawn.y, 0f);
 
+            // Region marker consumed by Platformer > Capture Region.
+            var regionGo = new GameObject("Capture Region");
+            regionGo.transform.position = new Vector3(-3f, 3f, 0f);
+            regionGo.AddComponent<CaptureRegion>().size = new Vector2(14f, 10f);
+
             BuildCamera(player);
             BuildGlobalLight();
 
@@ -690,9 +695,23 @@ namespace Platformer.EditorTools
             float gameplaySize = cam.orthographicSize;
             RenderShot(cam, Path.Combine(projectRoot, "Preview_Gameplay.png"), gameplayPos, gameplaySize);
 
-            // Wide overview of the whole level.
+            // Overview framed to fit every terrain and sprite renderer in the scene, so
+            // captured regions stay inside the picture.
+            Bounds bounds = new Bounds();
+            bool hasBounds = false;
+            foreach (var renderer in UnityEngine.Object.FindObjectsOfType<Renderer>())
+            {
+                if (!(renderer is SpriteRenderer) && !(renderer is TilemapRenderer)) continue;
+                if (!hasBounds) { bounds = renderer.bounds; hasBounds = true; }
+                else bounds.Encapsulate(renderer.bounds);
+            }
+
+            if (!hasBounds) bounds = new Bounds(new Vector3(6f, 3.5f, 0f), new Vector3(24f, 14f, 0f));
+
+            const float aspect = 1280f / 720f;
+            float overviewSize = Mathf.Max(bounds.extents.y, bounds.extents.x / aspect) * 1.05f;
             RenderShot(cam, Path.Combine(projectRoot, "Preview.png"),
-                new Vector3(6f, 3.5f, -10f), 10.5f);
+                new Vector3(bounds.center.x, bounds.center.y, -10f), overviewSize);
 
             cam.transform.position = gameplayPos;
             cam.orthographicSize = gameplaySize;

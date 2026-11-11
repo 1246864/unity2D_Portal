@@ -163,6 +163,14 @@
 - 三角形瓦片的边通过「alpha 掩码腐蚀」生成（`ImageFilter.MinFilter`），沿斜边也是 1px。
 - 结果：浅灰地形呈白色块体 + 细网格 + 浅蓝外轮廓；深灰块同样带网格。
 
+### 阶段 14 — 区域捕获复制
+
+- 新增 `Assets/Scripts/CaptureRegion.cs`：挂在空物体上的区域标记，橙色 Gizmo 框，`size` 可在 Inspector 调整。
+- 新增 `Assets/Editor/RegionCapture.cs`：按区域边界取整到格子，把范围内的 Tilemap 瓦片复制到新的 Grid/Tilemap/合并碰撞体（沿用 TerrainPhysicsMaterial），并把与区域相交的 SpriteRenderer 对象整体 `Instantiate`。
+- 复制体统一挂在 `Captured Region` 下，放在原区域上方 2 格，避免与原关卡重叠。
+- 关卡总览预览改为自动取景（遍历 SpriteRenderer / TilemapRenderer 的 bounds），复制区域出现后也会被框进画面。
+- 测试适配：`Tilemap_Level_Has_Grounded_Player` 改为选择格子最多的 Tilemap，避免被捕获区域的小 Tilemap 干扰；8/8 通过。
+
 ---
 
 ## 4. 工程结构
@@ -336,3 +344,4 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | 2026-11-12 | 修复 45° 斜边描边（背景掩码轮廓 + 色差类型边界）；新增 TerrainPalette 调色板 |
 | 2026-11-12 | 普通地形颜色改为超浅灰 `#E0E0E0`（深灰变体不变） |
 | 2026-11-12 | 每个瓦片增加内描边（贴图烘焙 0.929 亮度边），外轮廓阈值提到 0.28 |
+| 2026-11-12 | 新增区域捕获复制工具（CaptureRegion + RegionCapture），关卡预览改为自动取景 |
