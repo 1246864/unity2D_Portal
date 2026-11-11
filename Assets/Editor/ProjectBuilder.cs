@@ -517,10 +517,20 @@ namespace Platformer.EditorTools
             player.name = "Player";
             player.transform.position = new Vector3(Spawn.x, Spawn.y, 0f);
 
-            // Region marker consumed by Platformer > Capture Region.
+            // Region marker consumed by Platformer > Capture Region and by the runtime mirror.
             var regionGo = new GameObject("Capture Region");
             regionGo.transform.position = new Vector3(-3f, 3f, 0f);
-            regionGo.AddComponent<CaptureRegion>().size = new Vector2(14f, 10f);
+            var regionMarker = regionGo.AddComponent<CaptureRegion>();
+            regionMarker.size = new Vector2(14f, 10f);
+
+            // Runtime mirror: every frame it copies whatever is inside the capture window.
+            var mirrorGo = new GameObject("Region Mirror");
+            var mirror = mirrorGo.AddComponent<RegionMirror>();
+            var mirrorOutput = new GameObject("Mirror Output").transform;
+            mirrorOutput.position = new Vector3(-10f, 12f, 0f);
+            mirror.region = regionMarker;
+            mirror.sourceTerrain = tilemap;
+            mirror.destination = mirrorOutput;
 
             BuildCamera(player);
             BuildGlobalLight();
@@ -695,6 +705,11 @@ namespace Platformer.EditorTools
             float gameplaySize = cam.orthographicSize;
             RenderShot(cam, Path.Combine(projectRoot, "Preview_Gameplay.png"), gameplayPos, gameplaySize);
 
+            // The runtime mirror only builds its sprites during play; force one rebuild so
+            // the preview shows the captured copy, then hide the pooled sprites again.
+            var mirror = UnityEngine.Object.FindObjectOfType<RegionMirror>();
+            if (mirror != null) mirror.RebuildNow();
+
             // Overview framed to fit every terrain and sprite renderer in the scene, so
             // captured regions stay inside the picture.
             Bounds bounds = new Bounds();
@@ -712,6 +727,8 @@ namespace Platformer.EditorTools
             float overviewSize = Mathf.Max(bounds.extents.y, bounds.extents.x / aspect) * 1.05f;
             RenderShot(cam, Path.Combine(projectRoot, "Preview.png"),
                 new Vector3(bounds.center.x, bounds.center.y, -10f), overviewSize);
+
+            if (mirror != null) mirror.ClearVisuals();
 
             cam.transform.position = gameplayPos;
             cam.orthographicSize = gameplaySize;

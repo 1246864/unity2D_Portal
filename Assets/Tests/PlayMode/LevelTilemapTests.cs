@@ -112,8 +112,37 @@ namespace Platformer.Tests
                 $"Player should walk up the tile ramp to the 2-cell plateau, peak y was {peakY:F2}.");
         }
 
-        static int CountCells(Tilemap tilemap)
+        [UnityTest]
+        public IEnumerator Mirror_Follows_Capture_Window()
         {
+            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
+
+            Scene scene = SceneManager.GetSceneByName(LevelScene);
+            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
+
+            yield return new WaitForSeconds(0.3f);
+
+            var mirror = Object.FindObjectOfType<RegionMirror>();
+            Assert.IsNotNull(mirror, "RegionMirror not found in Level01.");
+            Assert.Greater(mirror.VisualCount, 0, "Mirror should show the content of the window.");
+
+            int initial = mirror.VisualCount;
+
+            // Shrinking the window must drop visuals on the next frame.
+            mirror.region.size = new Vector2(2f, 2f);
+            yield return null;
+            yield return null;
+            int smaller = mirror.VisualCount;
+            Assert.Less(smaller, initial, "Mirror should shrink when the window shrinks.");
+
+            // Growing it again must add visuals back.
+            mirror.region.size = new Vector2(20f, 14f);
+            yield return null;
+            yield return null;
+            Assert.Greater(mirror.VisualCount, smaller, "Mirror should grow when the window grows.");
+        }
+
+        static int CountCells(Tilemap tilemap)        {
             int count = 0;
             foreach (Vector3Int position in tilemap.cellBounds.allPositionsWithin)
             {

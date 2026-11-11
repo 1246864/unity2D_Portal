@@ -7,7 +7,7 @@ namespace Platformer
     /// tile and sprite inside it into a new parent object.
     /// Add it to an empty GameObject and resize "size" in the Inspector.
     /// </summary>
-    public class CaptureRegion : MonoBehaviour
+    public class CaptureRegion : PlatformerBehaviour
     {
         [Tooltip("Capture area size in world units, centred on this transform.")]
         public Vector2 size = new Vector2(14f, 10f);

@@ -154,6 +154,12 @@ namespace Platformer.EditorTools
                 var copy = Object.Instantiate(source, root);
                 copy.name = source.name + " (Copy)";
                 copy.transform.position = root.position + (source.transform.position - area.min);
+
+                // Copies only render: disable their logic and freeze their physics.
+                foreach (var behaviour in copy.GetComponentsInChildren<PlatformerBehaviour>(true))
+                {
+                    behaviour.MarkAsCopy();
+                }
             }
 
             return sources.Count;

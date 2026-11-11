@@ -12,7 +12,7 @@ namespace Platformer
     /// </summary>
     [RequireComponent(typeof(Rigidbody2D))]
     [RequireComponent(typeof(CapsuleCollider2D))]
-    public class PlayerController2D : MonoBehaviour
+    public class PlayerController2D : PlatformerBehaviour
     {
         [Header("Horizontal Movement")]
         [Tooltip("Top run speed, in units per second.")]

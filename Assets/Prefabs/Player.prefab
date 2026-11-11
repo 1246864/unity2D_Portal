@@ -161,6 +161,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f03793dcfa8c6374bbaa8cbc77ece8a5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  isCopy: 0
   moveSpeed: 9
   groundAcceleration: 115
   groundDeceleration: 150

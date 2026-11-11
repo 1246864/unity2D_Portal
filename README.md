@@ -85,6 +85,27 @@ Platformer > Capture Region > Capture Into New Object
 Unity.exe -batchmode -projectPath <项目> -executeMethod Platformer.EditorTools.RegionCapture.CaptureAndSave -quit
 ```
 
+## 运行时区域镜像（Region Mirror）
+
+场景里除了 `Capture Region`（橙色窗口）还有一个 `Region Mirror` 对象：
+
+- 每帧（`LateUpdate`）读取窗口范围内的**所有瓦片和精灵**，复制成纯显示用的精灵
+- 复制体来自 **对象池**（`SimpleObjectPool`），窗口移动/缩放时只复用对象，不会每帧 `Instantiate/Destroy`
+- 输出到 `Mirror Output` 位置（默认在关卡上方，`(-10, 12)`）
+- 窗口可以**运行时移动和缩放**：移动 `Capture Region` 的 Transform、或改它的 `size`，下一帧镜像自动更新
+- 预览渲染时会临时 `RebuildNow()` 出图，渲染完再隐藏池对象
+
+### 脚本基类
+
+所有运行时脚本都继承 `PlatformerBehaviour`：
+
+| 成员 | 说明 |
+|---|---|
+| `IsCopy` | 是否是只显示的副本 |
+| `MarkAsCopy()` | 禁用自身逻辑、冻结刚体、关闭碰撞体 → **只负责显示** |
+
+编辑器捕获（`RegionCapture`）复制出的对象会自动调用 `MarkAsCopy()`，所以副本不会响应输入或参与物理。
+
 ## 描边系统
 
 描边分两层：**每个瓦片自带的内描边** + **全屏合并的外轮廓**。

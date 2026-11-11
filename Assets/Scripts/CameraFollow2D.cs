@@ -7,7 +7,7 @@ namespace Platformer
     /// Attach to the orthographic main camera and assign a target.
     /// </summary>
     [RequireComponent(typeof(Camera))]
-    public class CameraFollow2D : MonoBehaviour
+    public class CameraFollow2D : PlatformerBehaviour
     {
         [Tooltip("Transform the camera follows (usually the player).")]
         public Transform target;

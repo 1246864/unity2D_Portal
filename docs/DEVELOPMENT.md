@@ -171,6 +171,15 @@
 - 关卡总览预览改为自动取景（遍历 SpriteRenderer / TilemapRenderer 的 bounds），复制区域出现后也会被框进画面。
 - 测试适配：`Tilemap_Level_Has_Grounded_Player` 改为选择格子最多的 Tilemap，避免被捕获区域的小 Tilemap 干扰；8/8 通过。
 
+### 阶段 15 — 运行时镜像、对象池与脚本基类
+
+- 新增 `PlatformerBehaviour` 基类：`PlayerController2D`、`CameraFollow2D`、`CaptureRegion`、`RegionMirror` 全部继承；`MarkAsCopy()` 禁用逻辑、冻结刚体、关闭碰撞体，副本只负责显示。
+- 新增 `SimpleObjectPool`：池化 GameObject，记录创建数，支持预热与批量回收。
+- 新增 `RegionMirror`：每帧从 `CaptureRegion` 读取范围内瓦片（Tile + 每格颜色）与相交精灵，用池中的纯显示精灵输出到 `destination`；窗口移动/缩放下一帧自动跟随。
+- 编辑器捕获工具复制出的对象自动 `MarkAsCopy()`，静态副本也不再响应输入。
+- 场景新增 `Region Mirror` + `Mirror Output`；预览渲染前强制 `RebuildNow()`，渲染后隐藏池对象。
+- 新增测试 `Mirror_Follows_Capture_Window`：缩小/放大窗口验证镜像每帧更新；9/9 通过。
+
 ---
 
 ## 4. 工程结构
@@ -345,3 +354,4 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | 2026-11-12 | 普通地形颜色改为超浅灰 `#E0E0E0`（深灰变体不变） |
 | 2026-11-12 | 每个瓦片增加内描边（贴图烘焙 0.929 亮度边），外轮廓阈值提到 0.28 |
 | 2026-11-12 | 新增区域捕获复制工具（CaptureRegion + RegionCapture），关卡预览改为自动取景 |
+| 2026-11-12 | 运行时镜像 + 对象池 + PlatformerBehaviour 基类；副本只显示 |
