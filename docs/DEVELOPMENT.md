@@ -108,6 +108,13 @@
 - 关卡高台顶部放置 2 个深灰 2×2 方块用于演示。
 - 测试全部通过（跳高仍为 5.999，斜坡峰值 2.76）。
 
+### 阶段 7 — 物理材质统一
+
+- 新增 `Assets/Settings/TerrainPhysicsMaterial.physicsMaterial2D`（friction 0.6 / bounciness 0）。
+- 5 个地形预制体（Block2x2 / Block2x2Dark / Block2x1 / Block1x2 / Slope2x2）的碰撞体全部引用同一个材质资产。
+- `EnsurePhysicsMaterial` 改为「已存在则复用」：重复重建关卡不会覆盖在 Inspector 里手调的摩擦/弹性。
+- 验证脚本增加统计：场景中所有 Ground 层的碰撞体都必须挂载该材质，否则报错。
+
 ---
 
 ## 4. 工程结构
@@ -262,3 +269,4 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | 2026-11-11 | 地形改为 2 格模块 + 统一配色；描边升级为全屏边缘检测 |
 | 2026-11-11 | 描边细化至 1px；初始化 Git；补充开发文档 |
 | 2026-11-11 | 角色缩小到 1.5 格、移速 7→9；新增深灰方块类型（同色合并、异色分离） |
+| 2026-11-12 | 所有障碍物统一使用 TerrainPhysicsMaterial，可单独调摩擦/弹性 |

@@ -56,6 +56,17 @@
 
 > 描边是屏幕空间效果，粗细以像素计，不随镜头缩放变化。
 
+## 物理材质
+
+| 资产 | 使用者 | 默认值 |
+|---|---|---|
+| `Assets/Settings/TerrainPhysicsMaterial.physicsMaterial2D` | **所有障碍物**：Block2x2 / Block2x2Dark / Block2x1 / Block1x2 / Slope2x2 的碰撞体 | friction **0.6** / bounciness **0** |
+| `Assets/Settings/PlayerPhysicsMaterial.physicsMaterial2D` | 玩家胶囊碰撞体 | friction **1.0** / bounciness **0** |
+
+- 所有障碍物**共用同一个材质资产**：在 Inspector 里改一次，全部地形立即生效
+- 选中资产即可单独调 `Friction`（摩擦）和 `Bounciness`（弹性）
+- 重建关卡不会覆盖你在 Inspector 里调过的值：资产已存在时只复用、不重置
+
 ## 开发文档
 
 完整的开发历程、架构说明、关键设计与已知限制见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**。

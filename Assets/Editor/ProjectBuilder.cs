@@ -23,7 +23,8 @@ namespace Platformer.EditorTools
         const string PrefabDir = "Assets/Prefabs";
         const string SceneDir = "Assets/Scenes";
         const string ScenePath = "Assets/Scenes/Level01.unity";
-        const string PhysicsMaterialPath = "Assets/Settings/PlayerPhysicsMaterial.physicsMaterial2D";
+        const string PlayerPhysicsMaterialPath = "Assets/Settings/PlayerPhysicsMaterial.physicsMaterial2D";
+        const string TerrainPhysicsMaterialPath = "Assets/Settings/TerrainPhysicsMaterial.physicsMaterial2D";
         const string OutlineMaterialPath = "Assets/Materials/ScreenOutline.mat";
         const string OutlineFeaturePath = "Assets/Settings/ScreenOutlineFeature.asset";
         const string RendererDataPath = "Assets/Settings/Renderer2D.asset";
@@ -60,16 +61,17 @@ namespace Platformer.EditorTools
 
                 Dictionary<string, Sprite> sprites = LoadSprites();
                 PhysicsMaterial2D playerMaterial = EnsurePlayerMaterial();
+                PhysicsMaterial2D terrainMaterial = EnsureTerrainMaterial();
                 Material litMaterial = LoadLitSpriteMaterial();
                 Material unlitMaterial = LoadUnlitSpriteMaterial();
                 Material outlineMaterial = EnsureOutlineMaterial();
 
                 GameObject playerPrefab = BuildPlayerPrefab(sprites, playerMaterial, litMaterial);
-                GameObject block2x2 = BuildBlockPrefab("Block2x2", sprites["block2x2"], new Vector2(2f, 2f), unlitMaterial, TerrainColor);
-                GameObject block2x2Dark = BuildBlockPrefab("Block2x2Dark", sprites["block2x2"], new Vector2(2f, 2f), unlitMaterial, DarkTerrainColor);
-                GameObject block2x1 = BuildBlockPrefab("Block2x1", sprites["block2x1"], new Vector2(2f, 1f), unlitMaterial, TerrainColor);
-                GameObject block1x2 = BuildBlockPrefab("Block1x2", sprites["block1x2"], new Vector2(1f, 2f), unlitMaterial, TerrainColor);
-                GameObject slope2x2 = BuildSlopePrefab(sprites["slope2x2"], unlitMaterial);
+                GameObject block2x2 = BuildBlockPrefab("Block2x2", sprites["block2x2"], new Vector2(2f, 2f), unlitMaterial, TerrainColor, terrainMaterial);
+                GameObject block2x2Dark = BuildBlockPrefab("Block2x2Dark", sprites["block2x2"], new Vector2(2f, 2f), unlitMaterial, DarkTerrainColor, terrainMaterial);
+                GameObject block2x1 = BuildBlockPrefab("Block2x1", sprites["block2x1"], new Vector2(2f, 1f), unlitMaterial, TerrainColor, terrainMaterial);
+                GameObject block1x2 = BuildBlockPrefab("Block1x2", sprites["block1x2"], new Vector2(1f, 2f), unlitMaterial, TerrainColor, terrainMaterial);
+                GameObject slope2x2 = BuildSlopePrefab(sprites["slope2x2"], unlitMaterial, terrainMaterial);
 
                 EnsureScreenOutlineFeature(outlineMaterial);
                 BuildLevelScene(playerPrefab, block2x2, block2x2Dark, block2x1, block1x2, slope2x2);
@@ -304,16 +306,29 @@ namespace Platformer.EditorTools
 
         static PhysicsMaterial2D EnsurePlayerMaterial()
         {
-            var mat = AssetDatabase.LoadAssetAtPath<PhysicsMaterial2D>(PhysicsMaterialPath);
+            return EnsurePhysicsMaterial(PlayerPhysicsMaterialPath, "PlayerPhysicsMaterial", 1f, 0f);
+        }
+
+        static PhysicsMaterial2D EnsureTerrainMaterial()
+        {
+            // One shared material for every obstacle (blocks and slope) so friction and
+            // bounciness can be tuned from a single asset in the Inspector.
+            return EnsurePhysicsMaterial(TerrainPhysicsMaterialPath, "TerrainPhysicsMaterial", 0.6f, 0f);
+        }
+
+        static PhysicsMaterial2D EnsurePhysicsMaterial(string path, string materialName, float friction, float bounciness)
+        {
+            var mat = AssetDatabase.LoadAssetAtPath<PhysicsMaterial2D>(path);
             if (mat == null)
             {
-                mat = new PhysicsMaterial2D("PlayerPhysicsMaterial");
-                AssetDatabase.CreateAsset(mat, PhysicsMaterialPath);
+                mat = new PhysicsMaterial2D(materialName);
+                mat.friction = friction;
+                mat.bounciness = bounciness;
+                AssetDatabase.CreateAsset(mat, path);
+                EditorUtility.SetDirty(mat);
             }
 
-            mat.friction = 1f;
-            mat.bounciness = 0f;
-            EditorUtility.SetDirty(mat);
+            // An existing asset keeps the values tuned in the Inspector.
             return mat;
         }
 
@@ -353,7 +368,7 @@ namespace Platformer.EditorTools
             return SavePrefab(go, PrefabDir + "/Player.prefab");
         }
 
-        static GameObject BuildBlockPrefab(string name, Sprite sprite, Vector2 size, Material material, Color color)
+        static GameObject BuildBlockPrefab(string name, Sprite sprite, Vector2 size, Material material, Color color, PhysicsMaterial2D physicsMaterial)
         {
             var go = new GameObject(name);
             go.layer = GroundLayer;
@@ -366,11 +381,12 @@ namespace Platformer.EditorTools
 
             var col = go.AddComponent<BoxCollider2D>();
             col.size = size;
+            col.sharedMaterial = physicsMaterial;
 
             return SavePrefab(go, PrefabDir + "/" + name + ".prefab");
         }
 
-        static GameObject BuildSlopePrefab(Sprite sprite, Material material)
+        static GameObject BuildSlopePrefab(Sprite sprite, Material material, PhysicsMaterial2D physicsMaterial)
         {
             var go = new GameObject("Slope2x2");
             go.layer = GroundLayer;
@@ -389,6 +405,7 @@ namespace Platformer.EditorTools
                 new Vector2(1f, -1f),
                 new Vector2(1f, 1f)
             };
+            col.sharedMaterial = physicsMaterial;
 
             return SavePrefab(go, PrefabDir + "/Slope2x2.prefab");
         }
@@ -569,6 +586,26 @@ namespace Platformer.EditorTools
             foreach (var go in scene.GetRootGameObjects())
                 sprites += go.GetComponentsInChildren<SpriteRenderer>(true).Length;
             Debug.Log($"[Platformer] Sprites in scene: {sprites}");
+
+            var terrainMaterial = AssetDatabase.LoadAssetAtPath<PhysicsMaterial2D>(TerrainPhysicsMaterialPath);
+            int obstacleColliders = 0;
+            int withTerrainMaterial = 0;
+            foreach (var go in scene.GetRootGameObjects())
+            {
+                foreach (var collider in go.GetComponentsInChildren<Collider2D>(true))
+                {
+                    if (collider.gameObject.layer != GroundLayer) continue;
+                    obstacleColliders++;
+                    if (collider.sharedMaterial == terrainMaterial) withTerrainMaterial++;
+                }
+            }
+
+            Debug.Log($"[Platformer] Obstacle colliders: {obstacleColliders}, using TerrainPhysicsMaterial: {withTerrainMaterial}");
+            if (terrainMaterial == null || withTerrainMaterial != obstacleColliders)
+            {
+                Debug.LogError("[Platformer] Not every obstacle uses the shared TerrainPhysicsMaterial.");
+                issues++;
+            }
 
             if (issues == 0) Debug.Log("[Platformer] Validation passed.");
             else Debug.LogError($"[Platformer] Validation finished with {issues} issue(s).");
