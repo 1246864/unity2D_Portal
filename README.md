@@ -89,11 +89,23 @@ Unity.exe -batchmode -projectPath <项目> -executeMethod Platformer.EditorTools
 
 场景里除了 `Capture Region`（橙色窗口）还有一个 `Region Mirror` 对象：
 
-- 每帧（`LateUpdate`）读取窗口范围内的**所有瓦片和精灵**，复制成纯显示用的精灵
-- 复制体来自 **对象池**（`SimpleObjectPool`），窗口移动/缩放时只复用对象，不会每帧 `Instantiate/Destroy`
+- **静态内容**（地面 / 各种方块 / 未标记的精灵）：只在**窗口创建、移动、缩放**时复制一次，之后不再更新
+- **动态内容**（玩家、以及以后会动的物理对象）：**每帧**复制一次
+- 两类复制体都来自 **对象池**（`SimpleObjectPool`），不会 `Instantiate/Destroy`
 - 输出到 `Mirror Output` 位置（默认在关卡上方，`(-10, 12)`）
 - 窗口可以**运行时移动和缩放**：移动 `Capture Region` 的 Transform、或改它的 `size`，下一帧镜像自动更新
 - 预览渲染时会临时 `RebuildNow()` 出图，渲染完再隐藏池对象
+
+### 标记动态对象
+
+给需要每帧复制的组件加 `[DynamicCapture]` 特性即可（玩家已经加了）：
+
+```csharp
+[DynamicCapture]
+public class PlayerController2D : PlatformerBehaviour { ... }
+```
+
+没加这个特性的对象一律按静态处理，只在窗口变化时复制。
 
 ### 脚本基类
 

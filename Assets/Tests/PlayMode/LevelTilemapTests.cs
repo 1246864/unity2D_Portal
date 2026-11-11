@@ -142,7 +142,40 @@ namespace Platformer.Tests
             Assert.Greater(mirror.VisualCount, smaller, "Mirror should grow when the window grows.");
         }
 
-        static int CountCells(Tilemap tilemap)        {
+        [UnityTest]
+        public IEnumerator Mirror_Rebuilds_Static_Only_On_Window_Change()
+        {
+            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
+
+            Scene scene = SceneManager.GetSceneByName(LevelScene);
+            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
+
+            yield return new WaitForSeconds(0.3f);
+
+            var mirror = Object.FindObjectOfType<RegionMirror>();
+            Assert.IsNotNull(mirror, "RegionMirror not found in Level01.");
+
+            int staticBefore = mirror.StaticRebuilds;
+            int dynamicBefore = mirror.DynamicRebuilds;
+            Assert.Greater(staticBefore, 0, "Static content should be built once at start.");
+
+            // Idle frames: static content stays, dynamic content keeps updating.
+            yield return null;
+            yield return null;
+            Assert.AreEqual(staticBefore, mirror.StaticRebuilds,
+                "Static content must not rebuild while the window is still.");
+            Assert.Greater(mirror.DynamicRebuilds, dynamicBefore,
+                "Dynamic content must rebuild every frame.");
+
+            // Moving the window rebuilds the static content again.
+            mirror.region.transform.position += new Vector3(2f, 0f, 0f);
+            yield return null;
+            Assert.Greater(mirror.StaticRebuilds, staticBefore,
+                "Moving the window should rebuild the static content.");
+        }
+
+        static int CountCells(Tilemap tilemap)
+        {
             int count = 0;
             foreach (Vector3Int position in tilemap.cellBounds.allPositionsWithin)
             {

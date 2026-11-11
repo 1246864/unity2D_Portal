@@ -180,6 +180,15 @@
 - 场景新增 `Region Mirror` + `Mirror Output`；预览渲染前强制 `RebuildNow()`，渲染后隐藏池对象。
 - 新增测试 `Mirror_Follows_Capture_Window`：缩小/放大窗口验证镜像每帧更新；9/9 通过。
 
+### 阶段 16 — 静态 / 动态分离捕获
+
+- 新增 `[DynamicCapture]` 特性：标记需要每帧复制的组件（玩家已标记）。
+- `RegionMirror` 拆成两条路径：
+  - **静态**：地面、方块、未标记精灵 → 只在窗口创建、移动、缩放时重建一次（`StaticRebuilds` 计数）
+  - **动态**：带 `[DynamicCapture]` 的对象 → 每帧重建（`DynamicRebuilds` 计数）
+- 静态块不再每帧重复复制，窗口静止时只有玩家等实时对象在更新。
+- 新增测试 `Mirror_Rebuilds_Static_Only_On_Window_Change`：静止帧静态计数不变、动态计数增加；移动窗口后静态计数增加；10/10 通过。
+
 ---
 
 ## 4. 工程结构
@@ -355,3 +364,4 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | 2026-11-12 | 每个瓦片增加内描边（贴图烘焙 0.929 亮度边），外轮廓阈值提到 0.28 |
 | 2026-11-12 | 新增区域捕获复制工具（CaptureRegion + RegionCapture），关卡预览改为自动取景 |
 | 2026-11-12 | 运行时镜像 + 对象池 + PlatformerBehaviour 基类；副本只显示 |
+| 2026-11-12 | 静态/动态分离：[DynamicCapture] 标记每帧复制对象，静态块只在窗口变化时复制 |

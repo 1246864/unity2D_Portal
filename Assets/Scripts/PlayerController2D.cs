@@ -10,6 +10,7 @@ namespace Platformer
     /// current gravity every time the player jumps, so changing
     /// Physics2D.gravity keeps the jump height at <see cref="jumpHeight"/>.
     /// </summary>
+    [DynamicCapture]
     [RequireComponent(typeof(Rigidbody2D))]
     [RequireComponent(typeof(CapsuleCollider2D))]
     public class PlayerController2D : PlatformerBehaviour
