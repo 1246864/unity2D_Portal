@@ -60,9 +60,9 @@ Level
 描边不逐块绘制，而是由 **URP 2D Renderer Feature** 在全屏最后阶段统一处理：
 
 - `Assets/Scripts/Rendering/ScreenOutlineFeature.cs` + `Assets/Shaders/ScreenOutline.shader`
-- 检测画面中的**颜色突变**，在其上叠加描边色
-- 同色、紧挨着的地形内部没有颜色突变 → **不会有内部线条**，整片地形只显示一条外轮廓
-- 不同颜色（普通 / 深灰）交界处一定存在颜色突变 → **不会融合**，会画出分界线
+- **轮廓边**：与相机背景色比较判断“内外”，在形状内侧 1px、外侧 1px 画描边。用二值判断而不是直接比色差，斜边（45°）也能得到连续、不闪烁的单像素线
+- **类型边界**：普通 / 深灰地形之间颜色不同 → 画分界线，两种颜色不会融合
+- 同色地形内部既无轮廓边也无类型边界 → **不会有内部线条**，整片地形只显示一条外轮廓
 - 任何形状、任何尺寸都自动合并（包括斜坡与台阶的斜边衔接）
 - 角色也会被同一套描边勾勒
 
@@ -72,11 +72,13 @@ Level
 |---|---|
 | 描边颜色 | `Assets/Materials/ScreenOutline.mat` → Outline Color |
 | 描边宽度（像素） | `ScreenOutline.mat` → Width（默认 **1px**），或 `ScreenOutlineFeature.asset` → Width Pixels |
-| 边缘灵敏度 | `_Threshold`（默认 0.05） |
+| 类型边界灵敏度 | `_Threshold`（默认 0.05） |
+| 背景判定容差 | `ScreenOutlineFeature` 里的 `_BackgroundTolerance`（默认 0.05，背景不是纯色时需调大或关闭轮廓项） |
 | 地形颜色 | `Assets/Tiles/TerrainTile.asset` / `DarkTerrainTile.asset` → Color |
 | 插入时机 | `ScreenOutlineFeature.asset` → Injection Point |
 
 > 描边是屏幕空间效果，粗细以像素计，不随镜头缩放变化。
+> 轮廓边依赖相机的纯色背景（Solid Color），如果以后换成 Skybox / 图片背景，需要相应调整判定方式。
 
 ## 物理材质
 

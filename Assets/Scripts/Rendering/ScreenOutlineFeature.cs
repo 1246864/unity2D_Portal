@@ -47,6 +47,8 @@ namespace Platformer.Rendering
             static readonly int WidthId = Shader.PropertyToID("_OutlineWidth");
             static readonly int ThresholdId = Shader.PropertyToID("_Threshold");
             static readonly int TexelSizeId = Shader.PropertyToID("_SourceTexelSize");
+            static readonly int BackgroundColorId = Shader.PropertyToID("_BackgroundColor");
+            static readonly int BackgroundToleranceId = Shader.PropertyToID("_BackgroundTolerance");
 
             Material _material;
             float _width;
@@ -83,6 +85,15 @@ namespace Platformer.Rendering
                     descriptor.height));
                 _material.SetFloat(WidthId, _width);
                 _material.SetFloat(ThresholdId, _threshold);
+
+                // The silhouette term classifies "inside" pixels by comparing against the
+                // camera clear colour, so the outline stays a clean single pixel on
+                // anti-aliased diagonal edges instead of a checkered line.
+                Color background = renderingData.cameraData.camera.backgroundColor;
+                if (QualitySettings.activeColorSpace == ColorSpace.Linear)
+                    background = background.linear;
+                _material.SetColor(BackgroundColorId, background);
+                _material.SetFloat(BackgroundToleranceId, 0.05f);
 
                 CommandBuffer cmd = CommandBufferPool.Get("Platformer Screen Outline");
                 RTHandle source = renderingData.cameraData.renderer.cameraColorTargetHandle;
