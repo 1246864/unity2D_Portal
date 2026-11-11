@@ -283,7 +283,7 @@ namespace Platformer.EditorTools
 
             mat.SetColor("_OutlineColor", OutlineColor);
             mat.SetFloat("_OutlineWidth", 1f);   // pixels
-            mat.SetFloat("_Threshold", 0.05f);
+            mat.SetFloat("_Threshold", 0.28f);
             EditorUtility.SetDirty(mat);
             return mat;
         }
@@ -329,7 +329,7 @@ namespace Platformer.EditorTools
 
             feature.outlineMaterial = outlineMaterial;
             feature.widthPixels = 1f;
-            feature.edgeThreshold = 0.05f;
+            feature.edgeThreshold = 0.28f;
             EditorUtility.SetDirty(feature);
 
             AssetDatabase.SaveAssets();

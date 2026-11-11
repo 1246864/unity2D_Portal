@@ -16,7 +16,7 @@ namespace Platformer.Rendering
         public Material outlineMaterial;
         public RenderPassEvent injectionPoint = RenderPassEvent.AfterRenderingTransparents;
         [Range(0.25f, 8f)] public float widthPixels = 1f;
-        [Range(0.001f, 0.5f)] public float edgeThreshold = 0.06f;
+        [Range(0.001f, 0.5f)] public float edgeThreshold = 0.28f;
 
         OutlinePass _pass;
 

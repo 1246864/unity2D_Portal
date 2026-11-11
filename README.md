@@ -55,29 +55,41 @@ Level
 2. 在窗口左上角的下拉框里选择 **TerrainPalette**
 3. 选中场景中的 `Grid/Terrain` 对象，用画笔 / 矩形工具逐格绘制；斜坡瓦片有 4 个方向，可直接拼任意坡道
 
-## 合并描边（Screen Outline）
+## 描边系统
 
-描边不逐块绘制，而是由 **URP 2D Renderer Feature** 在全屏最后阶段统一处理：
+描边分两层：**每个瓦片自带的内描边** + **全屏合并的外轮廓**。
+
+### 1. 瓦片内描边（烘焙在贴图里）
+
+- 瓦片贴图本身带一圈 1px 的边，颜色是满亮度的 **0.929 倍**
+- Tile 颜色和贴图相乘，所以每个瓦片的边自动等于它自己的颜色降一档：
+  `#E0E0E0 → #D0D0D0`、`#454C5C → #404750`
+- 因此每个方块都有独立的边，连成一片时也能看清每格
+- 想调暗边强度，改 `Tools/generate_placeholders.py` 里的 `RIM`（237/255 ≈ 0.929）
+
+### 2. 全屏合并外轮廓（Screen Outline）
+
+由 **URP 2D Renderer Feature** 在全屏最后阶段统一处理：
 
 - `Assets/Scripts/Rendering/ScreenOutlineFeature.cs` + `Assets/Shaders/ScreenOutline.shader`
 - **轮廓边**：与相机背景色比较判断“内外”，在形状内侧 1px、外侧 1px 画描边。用二值判断而不是直接比色差，斜边（45°）也能得到连续、不闪烁的单像素线
 - **类型边界**：普通 / 深灰地形之间颜色不同 → 画分界线，两种颜色不会融合
-- 同色地形内部既无轮廓边也无类型边界 → **不会有内部线条**，整片地形只显示一条外轮廓
-- 任何形状、任何尺寸都自动合并（包括斜坡与台阶的斜边衔接）
+- 同色地形内部只有瓦片自身的暗边，不会被外轮廓重复描一次（阈值 0.28 高于内描边的色差）
 - 角色也会被同一套描边勾勒
 
 可调项：
 
 | 内容 | 位置 |
 |---|---|
-| 描边颜色 | `Assets/Materials/ScreenOutline.mat` → Outline Color |
-| 描边宽度（像素） | `ScreenOutline.mat` → Width（默认 **1px**），或 `ScreenOutlineFeature.asset` → Width Pixels |
-| 类型边界灵敏度 | `_Threshold`（默认 0.05） |
+| 外轮廓颜色 | `Assets/Materials/ScreenOutline.mat` → Outline Color |
+| 外轮廓宽度（像素） | `ScreenOutline.mat` → Width（默认 **1px**），或 `ScreenOutlineFeature.asset` → Width Pixels |
+| 类型边界灵敏度 | `_Threshold`（默认 **0.28**，需高于瓦片内描边的色差） |
 | 背景判定容差 | `ScreenOutlineFeature` 里的 `_BackgroundTolerance`（默认 0.05，背景不是纯色时需调大或关闭轮廓项） |
+| 瓦片内描边强度 | `Tools/generate_placeholders.py` → `RIM` |
 | 地形颜色 | `Assets/Tiles/TerrainTile.asset` / `DarkTerrainTile.asset` → Color |
 | 插入时机 | `ScreenOutlineFeature.asset` → Injection Point |
 
-> 描边是屏幕空间效果，粗细以像素计，不随镜头缩放变化。
+> 外轮廓是屏幕空间效果，粗细以像素计，不随镜头缩放变化；瓦片内描边是贴图效果，随镜头缩放。
 > 轮廓边依赖相机的纯色背景（Solid Color），如果以后换成 Skybox / 图片背景，需要相应调整判定方式。
 
 ## 物理材质

@@ -16,4 +16,4 @@ MonoBehaviour:
   outlineMaterial: {fileID: 2100000, guid: 584863547855ec443a8d155a4ef457d3, type: 2}
   injectionPoint: 500
   widthPixels: 1
-  edgeThreshold: 0.05
+  edgeThreshold: 0.28
