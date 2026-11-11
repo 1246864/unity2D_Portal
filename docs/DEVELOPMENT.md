@@ -11,7 +11,7 @@
 
 当前状态：
 
-- 可运行关卡（2 格模块化地形、45° 斜坡、悬浮平台）
+- 可运行关卡（1×1 瓦片地形、45° 斜坡、悬浮平台）
 - 胶囊角色控制器（6 格跳高、土狼时间、跳跃预输入、可变跳高、斜坡行走、坠落重生）
 - 平滑跟随相机（带方向前瞻）
 - 全屏合并描边（URP 2D Renderer Feature）
@@ -128,6 +128,12 @@
   `tilemap.RefreshAllTiles()` → `tilemapCollider.ProcessTilemapChanges()` → `composite.GenerateGeometry()`。
 - 新增集成测试 `Tilemap_Level_Has_Grounded_Player`：加载 Level01，校验瓦片数（132）与玩家站立位置（y=0.75）。
 
+### 阶段 9 — 统一 1×1 瓦片与资产清理
+
+- Tilemap 本身已按 1×1 存储，2×2 / 2×1 / 1×2 的「方块尺寸变体」概念彻底移除：构建脚本改为 `PaintCell / PaintRow / PaintColumn` 逐格绘制，`PaintModule` 删除。
+- 删除官方模板遗留的未使用资产：`Assets/Settings/Lit2DSceneTemplate.scenetemplate`、`Assets/Settings/Scenes/URP2DSceneTemplate.unity`（GUID 引用检查确认无任何使用方）。
+- 在独立副本中重建验证：编译无错误、132 格、预览图 SHA-256 与重构前完全一致。
+
 ---
 
 ## 4. 工程结构
@@ -214,7 +220,7 @@ v₀ = √(2 · g · h) + ½ · g · Δt
 
 ### 5.6 地图构建（Tilemap）
 
-- `Level/Grid/Terrain` 为 1 格网格的 Tilemap；关卡代码按 **2 格模块**调用 `PaintModule` 刷瓦片。
+- `Level/Grid/Terrain` 为 1×1 网格的 Tilemap；关卡代码用 `PaintCell / PaintRow / PaintColumn` 逐格绘制。
 - `TilemapCollider2D`（Used By Composite）+ `CompositeCollider2D`：整张地形合并为一个多边形碰撞体，避免瓦片接缝卡脚，也减少碰撞体数量。
 - 刷瓦片后必须依次调用 `RefreshAllTiles()` → `ProcessTilemapChanges()` → `GenerateGeometry()`，否则保存的场景里碰撞体为空（实测会穿地）。
 - 45° 斜坡是三角形，瓦片无法表达，保留为独立预制体并共用同一物理材质。
@@ -293,3 +299,4 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | 2026-11-11 | 角色缩小到 1.5 格、移速 7→9；新增深灰方块类型（同色合并、异色分离） |
 | 2026-11-12 | 所有障碍物统一使用 TerrainPhysicsMaterial，可单独调摩擦/弹性 |
 | 2026-11-12 | 地图建造重构为 Tilemap（Grid + 合并碰撞体），新增关卡集成测试 |
+| 2026-11-12 | 移除 2 格模块概念，统一 1×1 瓦片；删除未使用的模板资产 |

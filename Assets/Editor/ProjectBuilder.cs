@@ -457,35 +457,27 @@ namespace Platformer.EditorTools
             tilemapCollider.usedByComposite = true;
             tilemapCollider.sharedMaterial = terrainMaterial;
 
-            // ---- Ground: two-cell thick slabs, 4-cell pit between x=4 and x=8 ----
-            for (int x = -12; x <= 2; x += 2)
-                PaintModule(tilemap, terrainTile, x, -2, 2, 2);
-            for (int x = 8; x <= 22; x += 2)
-                PaintModule(tilemap, terrainTile, x, -2, 2, 2);
-
-            // ---- Floating platforms, painted in 2-cell modules ----
-            PaintModule(tilemap, terrainTile, -8, 2, 2, 2);
-            PaintModule(tilemap, terrainTile, -6, 2, 2, 2);
-            PaintModule(tilemap, terrainTile, -4, 6, 2, 2);
-            PaintModule(tilemap, terrainTile, -2, 6, 2, 2);
-
-            // Fine-detail pieces: a 2x1 ledge and a 1x2 pillar.
-            PaintModule(tilemap, terrainTile, 2, 3, 2, 1);
-            PaintModule(tilemap, terrainTile, -2, 0, 1, 2);
-
-            // ---- Stairs: every step is exactly 2 cells high ----
-            PaintModule(tilemap, terrainTile, 12, 0, 2, 2);
-            PaintModule(tilemap, terrainTile, 14, 0, 2, 2);
-
-            for (int x = 16; x <= 22; x += 2)
+            // ---- Ground: 2 cells tall, 4-cell pit between x=4 and x=8 ----
+            for (int y = -2; y <= -1; y++)
             {
-                PaintModule(tilemap, terrainTile, x, 0, 2, 2);
-                PaintModule(tilemap, terrainTile, x, 2, 2, 2);
+                PaintRow(tilemap, terrainTile, -12, 3, y);
+                PaintRow(tilemap, terrainTile, 8, 23, y);
             }
 
-            // ---- Dark tiles: same-colour merges, different colour never merges ----
-            PaintModule(tilemap, darkTile, 20, 4, 2, 2);
-            PaintModule(tilemap, darkTile, 22, 4, 2, 2);
+            // ---- Floating platforms ----
+            for (int y = 2; y <= 3; y++) PaintRow(tilemap, terrainTile, -8, -5, y);
+            for (int y = 6; y <= 7; y++) PaintRow(tilemap, terrainTile, -4, -1, y);
+
+            // ---- Detail cells: a 2-cell ledge and a 1-cell-wide pillar ----
+            PaintRow(tilemap, terrainTile, 2, 3, 3);
+            PaintColumn(tilemap, terrainTile, -2, 0, 1);
+
+            // ---- Stairs: every step is 2 cells high ----
+            for (int y = 0; y <= 1; y++) PaintRow(tilemap, terrainTile, 12, 15, y);
+            for (int y = 0; y <= 3; y++) PaintRow(tilemap, terrainTile, 16, 23, y);
+
+            // ---- Dark tiles: same colour merges, different colour never merges ----
+            for (int y = 4; y <= 5; y++) PaintRow(tilemap, darkTile, 20, 23, y);
 
             // Tiles were written after the collider was created, so force the collider to
             // process them now; otherwise the saved scene contains an empty collider.
@@ -511,15 +503,19 @@ namespace Platformer.EditorTools
             EditorSceneManager.SaveScene(scene, ScenePath);
         }
 
-        static void PaintModule(Tilemap tilemap, Tile tile, int cellX, int cellY, int cellsW, int cellsH)
+        static void PaintCell(Tilemap tilemap, Tile tile, int cellX, int cellY)
         {
-            for (int x = 0; x < cellsW; x++)
-            {
-                for (int y = 0; y < cellsH; y++)
-                {
-                    tilemap.SetTile(new Vector3Int(cellX + x, cellY + y, 0), tile);
-                }
-            }
+            tilemap.SetTile(new Vector3Int(cellX, cellY, 0), tile);
+        }
+
+        static void PaintRow(Tilemap tilemap, Tile tile, int fromX, int toX, int cellY)
+        {
+            for (int x = fromX; x <= toX; x++) PaintCell(tilemap, tile, x, cellY);
+        }
+
+        static void PaintColumn(Tilemap tilemap, Tile tile, int cellX, int fromY, int toY)
+        {
+            for (int y = fromY; y <= toY; y++) PaintCell(tilemap, tile, cellX, y);
         }
 
         static void BuildCamera(GameObject player)
