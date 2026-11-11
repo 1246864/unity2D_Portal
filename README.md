@@ -49,9 +49,11 @@ Level
 
 ### 手动绘制地图
 
-1. 菜单 `Window > 2D > Tile Palette` → `Create New Palette`
-2. 把 `Assets/Tiles` 里的 10 个 Tile 全部拖进调色板
-3. 选中场景中的 `Grid/Terrain` 对象，用画笔 / 矩形工具逐格绘制；斜坡瓦片旋转 4 个方向即可拼任意坡道
+调色板已经准备好了：`Assets/Palettes/TerrainPalette.prefab`，包含全部 10 个瓦片。
+
+1. 菜单 `Window > 2D > Tile Palette` 打开调色板窗口
+2. 在窗口左上角的下拉框里选择 **TerrainPalette**
+3. 选中场景中的 `Grid/Terrain` 对象，用画笔 / 矩形工具逐格绘制；斜坡瓦片有 4 个方向，可直接拼任意坡道
 
 ## 合并描边（Screen Outline）
 
