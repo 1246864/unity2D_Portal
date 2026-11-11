@@ -1,11 +1,15 @@
 """Generate placeholder sprites for the platformer template.
 
 PPU is 32, so 32 px == 1 grid cell (1 world unit). Terrain is painted on a
-1-cell Tilemap grid in 2-cell modules (2x2, 2x1, 1x2).
+1x1 Tilemap grid.
 
 Terrain tiles are flat white (tinted by the Tile asset colour). Outlines come
 from the full-screen ScreenOutline renderer feature, which merges any adjacent
 flat-coloured shapes into one silhouette, so nothing is baked into the textures.
+
+Slope tiles are 1x1 right triangles with a 45-degree hypotenuse in one of four
+orientations. Unity generates their physics shape from the alpha outline, so the
+tile collider is actually triangular.
 """
 import os
 from PIL import Image, ImageDraw
@@ -32,12 +36,11 @@ def make_flat(w, h):
     return Image.new("RGBA", (w * SS, h * SS), (255, 255, 255, 255)).resize((w, h), Image.LANCZOS)
 
 
-def make_slope(size=64):
-    """2x2 cell 45-degree ramp (right triangle), flat white for tinting."""
+def make_triangle(size, points):
+    """1x1 cell 45-degree triangle. Points are image-space corners (y down)."""
     img = Image.new("RGBA", (size * SS, size * SS), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    pts = [(0, size * SS - 1), (size * SS - 1, size * SS - 1), (size * SS - 1, 0)]
-    d.polygon(pts, fill=(255, 255, 255, 255))
+    d.polygon([(x * SS, y * SS) for (x, y) in points], fill=(255, 255, 255, 255))
     return downscale(img, size, size)
 
 
@@ -59,7 +62,21 @@ def make_capsule(w=24, h=48):
     return downscale(img, w, h)
 
 
+# Image-space (y down) corners of the four 45-degree triangle orientations.
+SLOPES = {
+    # Hypotenuse bottom-left -> top-right, solid below it: walkable ramp rising right.
+    "slope_up_right": [(0, 32), (32, 32), (32, 0)],
+    # Hypotenuse bottom-right -> top-left, solid below it: ramp rising left.
+    "slope_up_left": [(0, 32), (32, 32), (0, 0)],
+    # Hypotenuse top-left -> bottom-right, solid above it: ramp falling right.
+    "slope_down_right": [(0, 0), (32, 0), (32, 32)],
+    # Hypotenuse top-right -> bottom-left, solid above it: ramp falling left.
+    "slope_down_left": [(32, 0), (0, 0), (0, 32)],
+}
+
+
 if __name__ == "__main__":
     save(make_flat(32, 32), "tile1x1.png")
-    save(make_slope(), "slope2x2.png")
+    for slope_name, corners in SLOPES.items():
+        save(make_triangle(32, corners), slope_name + ".png")
     save(make_capsule(), "player_capsule.png")

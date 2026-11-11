@@ -134,6 +134,14 @@
 - 删除官方模板遗留的未使用资产：`Assets/Settings/Lit2DSceneTemplate.scenetemplate`、`Assets/Settings/Scenes/URP2DSceneTemplate.unity`（GUID 引用检查确认无任何使用方）。
 - 在独立副本中重建验证：编译无错误、132 格、预览图 SHA-256 与重构前完全一致。
 
+### 阶段 10 — 1×1 斜坡瓦片（4 方向 × 2 色）
+
+- 新增 4 个方向的 1×1 45° 三角形精灵（右上 / 左上 / 右下 / 左下），普通色与深灰各一套，共 **8 个 Tile 资产**。
+- 关卡里的 2×2 斜坡预制体由 3 个瓦片拼成（2 个斜坡瓦片 + 1 个实心瓦片），`Slope2x2.prefab` 与 `slope2x2.png` 删除。
+- 难点 1：三角形的直角边在超采样缩小时留下半透明像素，相邻瓦片接缝被全屏描边检测到，出现内部线条。修复：把三角顶点延伸到画布边缘（0/32 而不是 0/31），直角边变为完全不透明。
+- 难点 2：Unity 自动生成的 fallback 物理形状沿抗锯齿边缘内缩约 0.06 格，玩家会陷进斜坡。修复：通过 `SpriteDataProviderFactories` + `ISpritePhysicsOutlineDataProvider.SetOutlines` 写入**精确三角形物理形状**（注意：坐标是**以轴心为原点的像素**，不是 0..1 归一化）。
+- 合并碰撞体检出精确斜边 (10,0)→(12,2)；新增 `Player_Climbs_Tilemap_Ramp` 集成测试验证玩家能走上斜坡。
+
 ---
 
 ## 4. 工程结构
@@ -141,16 +149,18 @@
 ```
 Assets/
   Art/Placeholders/          占位精灵（纯白，运行时上色）
-    tile1x1.png   slope2x2.png   player_capsule.png
+    tile1x1.png  slope_up_right.png  slope_up_left.png
+    slope_down_right.png  slope_down_left.png  player_capsule.png
   Editor/
     Platformer.Editor.asmdef
     ProjectBuilder.cs        一键重建：贴图设置/预制体/场景/BuildSettings/描边特性
   Materials/
     ScreenOutline.mat        描边材质（颜色/宽度/阈值）
   Prefabs/
-    Player.prefab  Slope2x2.prefab
+    Player.prefab
   Tiles/
     TerrainTile.asset  DarkTerrainTile.asset
+    SlopeUpRight/UpLeft/DownRight/DownLeft（+ 各 Dark 版本）
   Scenes/
     Level01.unity            主场景
   Scripts/
@@ -242,7 +252,8 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | `Camera_Follows_Player` | 通过，误差 **0.000** |
 | `Falls_Below_Limit_Respawn` | 通过 |
 | `Walks_Up_45_Degree_Slope` | 通过，峰值 y = **2.76** |
-| `Tilemap_Level_Has_Grounded_Player` | 通过，132 格瓦片；玩家 y=0.75 站在合并碰撞体上 |
+| `Tilemap_Level_Has_Grounded_Player` | 通过，135 格瓦片；玩家 y=0.75 站在合并碰撞体上 |
+| `Player_Climbs_Tilemap_Ramp` | 通过，沿 1×1 斜坡瓦片走上 2 格高台 |
 
 场景验证（`Platformer > Validate Level`）：
 
@@ -300,3 +311,4 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | 2026-11-12 | 所有障碍物统一使用 TerrainPhysicsMaterial，可单独调摩擦/弹性 |
 | 2026-11-12 | 地图建造重构为 Tilemap（Grid + 合并碰撞体），新增关卡集成测试 |
 | 2026-11-12 | 移除 2 格模块概念，统一 1×1 瓦片；删除未使用的模板资产 |
+| 2026-11-12 | 新增 1×1 斜坡瓦片（4 方向 × 普通/深灰），精确三角物理形状；移除 2×2 斜坡预制体 |

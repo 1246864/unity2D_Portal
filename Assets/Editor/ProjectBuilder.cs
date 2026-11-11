@@ -4,6 +4,7 @@ using System.IO;
 using Platformer.Rendering;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using UnityEditor.U2D.Sprites;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
@@ -68,16 +69,15 @@ namespace Platformer.EditorTools
                 PhysicsMaterial2D playerMaterial = EnsurePlayerMaterial();
                 PhysicsMaterial2D terrainMaterial = EnsureTerrainMaterial();
                 Material litMaterial = LoadLitSpriteMaterial();
-                Material unlitMaterial = LoadUnlitSpriteMaterial();
                 Material outlineMaterial = EnsureOutlineMaterial();
 
                 GameObject playerPrefab = BuildPlayerPrefab(sprites, playerMaterial, litMaterial);
-                GameObject slope2x2 = BuildSlopePrefab(sprites["slope2x2"], unlitMaterial, terrainMaterial);
                 Tile terrainTile = EnsureTile(TerrainTilePath, "TerrainTile", sprites["tile1x1"], TerrainColor);
                 Tile darkTile = EnsureTile(DarkTilePath, "DarkTerrainTile", sprites["tile1x1"], DarkTerrainColor);
+                Tile[] slopeTiles = EnsureSlopeTiles(sprites);
 
                 EnsureScreenOutlineFeature(outlineMaterial);
-                BuildLevelScene(playerPrefab, terrainTile, darkTile, slope2x2, terrainMaterial);
+                BuildLevelScene(playerPrefab, terrainTile, darkTile, slopeTiles, terrainMaterial);
                 RegisterBuildScene();
                 DeleteSampleScene();
 
@@ -174,6 +174,19 @@ namespace Platformer.EditorTools
         // Art import
         // ------------------------------------------------------------------
 
+        // Exact triangular physics shapes for the slope sprites (normalised sprite space,
+        // counter-clockwise). Without this Unity's fallback shape is inset by the
+        // anti-aliased hypotenuse, which makes the player sink into the ramp.
+        // Points are in pixels relative to the sprite pivot (centre), counter-clockwise.
+        const float HalfTilePixels = 16f;
+        static readonly Dictionary<string, Vector2[]> SlopePhysicsShapes = new Dictionary<string, Vector2[]>
+        {
+            { "slope_up_right", new[] { new Vector2(-HalfTilePixels, -HalfTilePixels), new Vector2(HalfTilePixels, -HalfTilePixels), new Vector2(HalfTilePixels, HalfTilePixels) } },
+            { "slope_up_left", new[] { new Vector2(-HalfTilePixels, -HalfTilePixels), new Vector2(HalfTilePixels, -HalfTilePixels), new Vector2(-HalfTilePixels, HalfTilePixels) } },
+            { "slope_down_right", new[] { new Vector2(HalfTilePixels, -HalfTilePixels), new Vector2(HalfTilePixels, HalfTilePixels), new Vector2(-HalfTilePixels, HalfTilePixels) } },
+            { "slope_down_left", new[] { new Vector2(HalfTilePixels, HalfTilePixels), new Vector2(-HalfTilePixels, HalfTilePixels), new Vector2(-HalfTilePixels, -HalfTilePixels) } },
+        };
+
         static void ImportSprites()
         {
             string[] guids = AssetDatabase.FindAssets("t:Texture2D", new[] { ArtDir });
@@ -193,15 +206,41 @@ namespace Platformer.EditorTools
                 importer.wrapMode = TextureWrapMode.Clamp;
                 importer.maxTextureSize = 512;
                 importer.SaveAndReimport();
+
+                string spriteName = Path.GetFileNameWithoutExtension(path);
+                if (SlopePhysicsShapes.TryGetValue(spriteName, out Vector2[] shape))
+                    SetSpritePhysicsShape(path, shape);
             }
 
             AssetDatabase.Refresh();
         }
 
+        static void SetSpritePhysicsShape(string assetPath, Vector2[] outline)
+        {
+            var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            if (importer == null) return;
+
+            var factories = new SpriteDataProviderFactories();
+            factories.Init();
+
+            ISpriteEditorDataProvider provider = factories.GetSpriteEditorDataProviderFromObject(importer);
+            provider.InitSpriteEditorDataProvider();
+
+            SpriteRect[] rects = provider.GetSpriteRects();
+            if (rects.Length == 0) return;
+
+            var physicsProvider = provider.GetDataProvider<ISpritePhysicsOutlineDataProvider>();
+            physicsProvider.SetOutlines(rects[0].spriteID, new List<Vector2[]> { outline });
+            physicsProvider.SetTessellationDetail(rects[0].spriteID, 0.01f);
+            provider.Apply();
+
+            importer.SaveAndReimport();
+        }
+
         static Dictionary<string, Sprite> LoadSprites()
         {
             var result = new Dictionary<string, Sprite>();
-            foreach (string name in new[] { "tile1x1", "slope2x2", "player_capsule" })
+            foreach (string name in new[] { "tile1x1", "slope_up_right", "slope_up_left", "slope_down_right", "slope_down_left", "player_capsule" })
             {
                 string path = ArtDir + "/" + name + ".png";
                 var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
@@ -219,17 +258,6 @@ namespace Platformer.EditorTools
 
             if (mat == null)
                 Debug.LogWarning("[Platformer] Sprite-Lit-Default not found; using default sprite material.");
-
-            return mat;
-        }
-
-        static Material LoadUnlitSpriteMaterial()
-        {
-            var mat = AssetDatabase.LoadAssetAtPath<Material>(
-                "Packages/com.unity.render-pipelines.universal/Runtime/Materials/Sprite-Unlit-Default.mat");
-
-            if (mat == null)
-                Debug.LogWarning("[Platformer] Sprite-Unlit-Default not found; using default sprite material.");
 
             return mat;
         }
@@ -388,28 +416,23 @@ namespace Platformer.EditorTools
             return tile;
         }
 
-        static GameObject BuildSlopePrefab(Sprite sprite, Material material, PhysicsMaterial2D physicsMaterial)
+        static readonly string[] SlopeNames = { "UpRight", "UpLeft", "DownRight", "DownLeft" };
+        static readonly string[] SlopeSpriteNames = { "slope_up_right", "slope_up_left", "slope_down_right", "slope_down_left" };
+
+        static Tile[] EnsureSlopeTiles(Dictionary<string, Sprite> sprites)
         {
-            var go = new GameObject("Slope2x2");
-            go.layer = GroundLayer;
-
-            var sr = go.AddComponent<SpriteRenderer>();
-            sr.sprite = sprite;
-            sr.color = TerrainColor;
-            sr.sortingOrder = 0;
-            if (material != null) sr.sharedMaterial = material;
-
-            // 2x2 cell right triangle: flat bottom, vertical right edge, 45-degree hypotenuse.
-            var col = go.AddComponent<PolygonCollider2D>();
-            col.points = new[]
+            var tiles = new Tile[SlopeNames.Length * 2];
+            for (int i = 0; i < SlopeNames.Length; i++)
             {
-                new Vector2(-1f, -1f),
-                new Vector2(1f, -1f),
-                new Vector2(1f, 1f)
-            };
-            col.sharedMaterial = physicsMaterial;
+                string name = SlopeNames[i];
+                Sprite sprite = sprites[SlopeSpriteNames[i]];
 
-            return SavePrefab(go, PrefabDir + "/Slope2x2.prefab");
+                tiles[i] = EnsureTile($"Assets/Tiles/Slope{name}.asset", $"Slope{name}", sprite, TerrainColor);
+                tiles[i + SlopeNames.Length] =
+                    EnsureTile($"Assets/Tiles/Slope{name}Dark.asset", $"Slope{name}Dark", sprite, DarkTerrainColor);
+            }
+
+            return tiles;
         }
 
         static GameObject SavePrefab(GameObject go, string path)
@@ -424,7 +447,7 @@ namespace Platformer.EditorTools
         // ------------------------------------------------------------------
 
         static void BuildLevelScene(
-            GameObject playerPrefab, Tile terrainTile, Tile darkTile, GameObject slope2x2,
+            GameObject playerPrefab, Tile terrainTile, Tile darkTile, Tile[] slopeTiles,
             PhysicsMaterial2D terrainMaterial)
         {
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
@@ -479,18 +502,16 @@ namespace Platformer.EditorTools
             // ---- Dark tiles: same colour merges, different colour never merges ----
             for (int y = 4; y <= 5; y++) PaintRow(tilemap, darkTile, 20, 23, y);
 
+            // ---- 45-degree ramp: two UpRight triangles plus the solid cell between them ----
+            PaintCell(tilemap, slopeTiles[0], 10, 0);
+            PaintCell(tilemap, terrainTile, 11, 0);
+            PaintCell(tilemap, slopeTiles[0], 11, 1);
+
             // Tiles were written after the collider was created, so force the collider to
             // process them now; otherwise the saved scene contains an empty collider.
             tilemap.RefreshAllTiles();
             tilemapCollider.ProcessTilemapChanges();
             composite.GenerateGeometry();
-
-            // ---- Single 45-degree slope, 2 cells high, leading onto the stairs ----
-            var slopeRoot = new GameObject("Slopes").transform;
-            slopeRoot.SetParent(level);
-            var slope = (GameObject)PrefabUtility.InstantiatePrefab(slope2x2, slopeRoot);
-            slope.name = "Slope45 (2x2)";
-            slope.transform.position = new Vector3(11f, 1f, 0f);
 
             var player = (GameObject)PrefabUtility.InstantiatePrefab(playerPrefab);
             player.name = "Player";
@@ -595,10 +616,6 @@ namespace Platformer.EditorTools
                 var pc = player.GetComponent<PlayerController2D>();
                 Debug.Log($"[Platformer] Player at {player.transform.position}, jumpHeight={(pc != null ? pc.jumpHeight : -1)}, layer={LayerMask.LayerToName(player.layer)}");
             }
-
-            var slope = GameObject.Find("Slope45 (2x2)");
-            if (slope == null) { Debug.LogError("[Platformer] Slope not found."); issues++; }
-            else Debug.Log($"[Platformer] Slope at {slope.transform.position}");
 
             var rendererData = AssetDatabase.LoadAssetAtPath<Renderer2DData>(RendererDataPath);
             bool hasOutline = false;

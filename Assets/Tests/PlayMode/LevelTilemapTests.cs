@@ -70,5 +70,42 @@ namespace Platformer.Tests
             Assert.AreEqual(0.75f, player.transform.position.y, 0.15f,
                 "Player should rest on top of the tilemap ground.");
         }
+
+        [UnityTest]
+        public IEnumerator Player_Climbs_Tilemap_Ramp()
+        {
+            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
+
+            Scene scene = SceneManager.GetSceneByName(LevelScene);
+            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
+
+            yield return new WaitForSeconds(0.5f);
+
+            GameObject player = null;
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                if (root.name == "Player") player = root;
+            }
+
+            Assert.IsNotNull(player, "Player not found in Level01.");
+            var controller = player.GetComponent<PlayerController2D>();
+
+            // Place the player just left of the 45-degree tile ramp (x = 10..12).
+            controller.Teleport(new Vector2(9f, 0.75f));
+            yield return new WaitForFixedUpdate();
+
+            controller.SetMoveInput(1f);
+            float peakY = player.transform.position.y;
+            for (int i = 0; i < 120; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                peakY = Mathf.Max(peakY, player.transform.position.y);
+            }
+
+            controller.SetMoveInput(0f);
+
+            Assert.Greater(peakY, 2f,
+                $"Player should walk up the tile ramp to the 2-cell plateau, peak y was {peakY:F2}.");
+        }
     }
 }

@@ -7,23 +7,27 @@
 ![整关俯瞰](Preview.png)
 ![游戏视角](Preview_Gameplay.png)
 
-## 已实测验证（PlayMode 自动化测试 7/7 通过）
+## 已实测验证（PlayMode 自动化测试 8/8 通过）
 
 | 测试 | 结果 |
 |---|---|
 | 跳跃高度 | **5.999 格**（目标 6 格，误差 +0.001） |
 | 相机跟随误差 | **0.000** 单位（1.5 秒内收敛） |
 | 45° 斜坡爬升 | 成功（峰值 2.76） |
-| Tilemap 关卡集成 | 通过（132 格瓦片，玩家站立在合并碰撞体上，y=0.75） |
+| Tilemap 关卡集成 | 通过（135 格瓦片，玩家站立在合并碰撞体上，y=0.75） |
+| 瓦片斜坡爬升 | 通过（玩家沿 1×1 斜坡瓦片走上 2 格高台） |
 | 水平移动、站立检测、坠落重生 | 通过 |
 
 ## 地图构建方式
 
 | 资产 | 说明 |
 |---|---|
-| `Assets/Tiles/TerrainTile.asset` | 普通地形瓦片（`#66758F`），1×1 格 |
+| `Assets/Tiles/TerrainTile.asset` | 普通地形瓦片（`#66758F`），1×1 |
 | `Assets/Tiles/DarkTerrainTile.asset` | 深灰瓦片（`#454C5C`），与普通瓦片不融合、深灰之间融合 |
-| `Assets/Prefabs/Slope2x2.prefab` | 45° 斜坡（三角形特殊形状，单独放置） |
+| `Assets/Tiles/SlopeUpRight / UpLeft / DownRight / DownLeft` | 1×1 的 45° 斜坡瓦片，4 个方向，普通色 |
+| `Assets/Tiles/Slope*Dark` | 同上 4 个方向的深灰版本 |
+
+共 **10 个 Tile 资产**：2 个方块 × 2 种颜色 + 4 个方向 × 2 种颜色。
 
 场景层级：
 
@@ -32,8 +36,6 @@ Level
 ├── Grid
 │   └── Terrain      Tilemap + TilemapRenderer + TilemapCollider2D
 │                    + CompositeCollider2D + Rigidbody2D(Static)
-├── Slopes
-│   └── Slope45 (2x2)
 ├── Player
 ├── Main Camera
 └── Global Light 2D
@@ -41,14 +43,15 @@ Level
 
 - 栅格：统一 **1×1 瓦片**，逐格绘制（不再有 2×2 / 2×1 / 1×2 的方块尺寸变体）
 - 碰撞：`TilemapCollider2D`（`Used By Composite`）+ `CompositeCollider2D`，整张地形合并成**一个多边形碰撞体**，不会卡在瓦片接缝上
+- 斜坡瓦片使用**精确三角形物理形状**（由导入脚本写入 Sprite 的 Custom Physics Shape），碰撞面与视觉完全重合
 - 物理材质：TilemapCollider2D 与 CompositeCollider2D 都使用 `TerrainPhysicsMaterial`
 - 所有瓦片共用一张 32×32 的纯白贴图，颜色由 Tile 资产决定
 
 ### 手动绘制地图
 
 1. 菜单 `Window > 2D > Tile Palette` → `Create New Palette`
-2. 把 `Assets/Tiles` 里的 `TerrainTile` 和 `DarkTerrainTile` 拖进调色板
-3. 选中场景中的 `Grid/Terrain` 对象，用画笔 / 矩形工具逐格绘制
+2. 把 `Assets/Tiles` 里的 10 个 Tile 全部拖进调色板
+3. 选中场景中的 `Grid/Terrain` 对象，用画笔 / 矩形工具逐格绘制；斜坡瓦片旋转 4 个方向即可拼任意坡道
 
 ## 合并描边（Screen Outline）
 
@@ -77,7 +80,7 @@ Level
 
 | 资产 | 使用者 | 默认值 |
 |---|---|---|
-| `Assets/Settings/TerrainPhysicsMaterial.physicsMaterial2D` | **所有障碍物**：TilemapCollider2D、CompositeCollider2D、Slope2x2 | friction **0.6** / bounciness **0** |
+| `Assets/Settings/TerrainPhysicsMaterial.physicsMaterial2D` | **所有障碍物**：TilemapCollider2D、CompositeCollider2D | friction **0.6** / bounciness **0** |
 | `Assets/Settings/PlayerPhysicsMaterial.physicsMaterial2D` | 玩家胶囊碰撞体 | friction **1.0** / bounciness **0** |
 
 - 所有障碍物**共用同一个材质资产**：在 Inspector 里改一次，全部地形立即生效
@@ -105,7 +108,7 @@ Level
 ## 关卡内容
 
 - 地面为 **2 格厚**的整块板，中间有 **4 格宽的坑**
-- 一块 **2×2 格、45° 斜坡**，接上 2 格高的台阶
+- 一段 **45° 斜坡**（2 个斜坡瓦片拼成），接上 2 格高的台阶
 - 台阶每级固定 **2 格高**（2 格 → 4 格）
 - 两块悬浮平台（分别在 4 格、8 格高度）
 - 细节演示：薄板 + 立柱（全部由 1×1 瓦片拼出）
@@ -141,10 +144,10 @@ Level
 
 ```
 Assets/
-  Art/Placeholders/     tile1x1.png / slope2x2.png / player_capsule.png
+  Art/Placeholders/     tile1x1.png / slope_up_right.png / slope_up_left.png / slope_down_right.png / slope_down_left.png / player_capsule.png
   Editor/               ProjectBuilder.cs（一键重建关卡与资产）
   Materials/            ScreenOutline.mat
-  Prefabs/              Player.prefab / Slope2x2.prefab
+  Prefabs/              Player.prefab
   Scenes/Level01.unity  主场景
   Scripts/
     PlayerController2D.cs
@@ -184,7 +187,7 @@ Unity 菜单 `Window > General > Test Runner` → PlayMode → Run All。
 Unity.exe -batchmode -projectPath <项目路径> -runTests -testPlatform PlayMode -testResults TestResults.xml -logFile Logs/playtests.log
 ```
 
-测试覆盖：站立检测、6 格跳高、水平移动、相机跟随、坠落重生、45° 斜坡爬坡、Tilemap 关卡站立。
+测试覆盖：站立检测、6 格跳高、水平移动、相机跟随、坠落重生、45° 斜坡爬坡、Tilemap 关卡站立、瓦片斜坡爬升。
 
 ## 后续可扩展
 
