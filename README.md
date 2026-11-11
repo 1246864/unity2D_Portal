@@ -2,36 +2,53 @@
 
 一个可直接运行、方便二次修改的 2D 平台跳跃最小模板。
 
-地形采用 **2 格为单位的模块化构件**（2×2 方块、2×1 与 1×2 长方体），**1 格**作为精细搭建的基础单位。地面、墙、台阶、平台**全部使用同一种颜色**，配合全屏描边，任意相邻地形都会自动合并成一条外轮廓。
+地图由 **Tilemap** 构建：一个 Grid、一个 Tilemap、一套合并碰撞体。地形按 **2 格模块**绘制（在 1 格瓦片网格上刷 2×2 区域），**1 格**仍是最细的搭建单位。地面、墙、台阶、平台**全部同一种颜色**，配合全屏描边，任意相邻地形都会自动合并成一条外轮廓。
 
 ![整关俯瞰](Preview.png)
 ![游戏视角](Preview_Gameplay.png)
 
-## 已实测验证（PlayMode 自动化测试 6/6 通过）
+## 已实测验证（PlayMode 自动化测试 7/7 通过）
 
 | 测试 | 结果 |
 |---|---|
 | 跳跃高度 | **5.999 格**（目标 6 格，误差 +0.001） |
 | 相机跟随误差 | **0.000** 单位（1.5 秒内收敛） |
-| 45° 斜坡爬升 | 成功（从 0.75 沿坡爬到峰值 2.76） |
+| 45° 斜坡爬升 | 成功（峰值 2.76） |
+| Tilemap 关卡集成 | 通过（132 格瓦片，玩家站立在合并碰撞体上，y=0.75） |
 | 水平移动、站立检测、坠落重生 | 通过 |
 
-## 地形构件
+## 地图构建方式
 
-| 精灵 | 尺寸 | 用途 |
-|---|---|---|
-| `block2x2.png` | 2×2 格（64×64 px） | 地面、台阶、平台等主体 |
-| `block2x1.png` | 2×1 格（64×32 px） | 薄板、悬挑等横向细节 |
-| `block1x2.png` | 1×2 格（32×64 px） | 立柱、窄墙等纵向细节 |
-| `slope2x2.png` | 2×2 格，45° 三角 | 斜坡 |
+| 资产 | 说明 |
+|---|---|
+| `Assets/Tiles/TerrainTile.asset` | 普通地形瓦片（`#66758F`），1×1 格 |
+| `Assets/Tiles/DarkTerrainTile.asset` | 深灰瓦片（`#454C5C`），与普通瓦片不融合、深灰之间融合 |
+| `Assets/Prefabs/Slope2x2.prefab` | 45° 斜坡（三角形特殊形状，单独放置） |
 
-全部是纯白精灵，由 `SpriteRenderer.color` 上色（普通地形色 `#66758F`），所以**地板和墙没有颜色/类型区分**。
+场景层级：
 
-另有**深灰色方块** `Block2x2Dark`（`#454C5C`），用于标记特殊区域：
+```
+Level
+├── Grid
+│   └── Terrain      Tilemap + TilemapRenderer + TilemapCollider2D
+│                    + CompositeCollider2D + Rigidbody2D(Static)
+├── Slopes
+│   └── Slope45 (2x2)
+├── Player
+├── Main Camera
+└── Global Light 2D
+```
 
-- 深灰方块之间**会**合并描边（同色）
-- 深灰与普通方块之间**不会**合并，交界处会各自描边形成分界线
-- 需要更多深灰尺寸时，在 `BuildBlockPrefab` 调用里传入 `DarkTerrainColor` 即可
+- 碰撞：`TilemapCollider2D`（`Used By Composite`）+ `CompositeCollider2D`，整张地形合并成**一个多边形碰撞体**，不会卡在瓦片接缝上
+- 物理材质：TilemapCollider2D 与 CompositeCollider2D 都使用 `TerrainPhysicsMaterial`
+- 所有瓦片共用一张 32×32 的纯白贴图，颜色由 Tile 资产决定
+
+### 手动绘制地图
+
+1. 菜单 `Window > 2D > Tile Palette` → `Create New Palette`
+2. 把 `Assets/Tiles` 里的 `TerrainTile` 和 `DarkTerrainTile` 拖进调色板
+3. 选中场景中的 `Grid/Terrain` 对象，用画笔 / 矩形工具绘制
+4. 想保持 2 格模块的观感，用矩形工具刷 2×2 区域即可（视觉上与一块 2×2 方块完全一致）
 
 ## 合并描边（Screen Outline）
 
@@ -51,7 +68,7 @@
 | 描边颜色 | `Assets/Materials/ScreenOutline.mat` → Outline Color |
 | 描边宽度（像素） | `ScreenOutline.mat` → Width（默认 **1px**），或 `ScreenOutlineFeature.asset` → Width Pixels |
 | 边缘灵敏度 | `_Threshold`（默认 0.05） |
-| 地形颜色 | 场景中各地形实例的 SpriteRenderer Color（构建脚本里是 `TerrainColor` / `DarkTerrainColor`） |
+| 地形颜色 | `Assets/Tiles/TerrainTile.asset` / `DarkTerrainTile.asset` → Color |
 | 插入时机 | `ScreenOutlineFeature.asset` → Injection Point |
 
 > 描边是屏幕空间效果，粗细以像素计，不随镜头缩放变化。
@@ -60,7 +77,7 @@
 
 | 资产 | 使用者 | 默认值 |
 |---|---|---|
-| `Assets/Settings/TerrainPhysicsMaterial.physicsMaterial2D` | **所有障碍物**：Block2x2 / Block2x2Dark / Block2x1 / Block1x2 / Slope2x2 的碰撞体 | friction **0.6** / bounciness **0** |
+| `Assets/Settings/TerrainPhysicsMaterial.physicsMaterial2D` | **所有障碍物**：TilemapCollider2D、CompositeCollider2D、Slope2x2 | friction **0.6** / bounciness **0** |
 | `Assets/Settings/PlayerPhysicsMaterial.physicsMaterial2D` | 玩家胶囊碰撞体 | friction **1.0** / bounciness **0** |
 
 - 所有障碍物**共用同一个材质资产**：在 Inspector 里改一次，全部地形立即生效
@@ -91,14 +108,14 @@
 - 一块 **2×2 格、45° 斜坡**，接上 2 格高的台阶
 - 台阶每级固定 **2 格高**（2 格 → 4 格）
 - 两块 2×2 悬浮平台（分别在 4 格、8 格高度）
-- 细节演示：2×1 薄板 + 1×2 立柱
-- 高台顶部有一组**深灰方块**（2 个 2×2 并排），演示同色合并、异色分离
+- 细节演示：2×1 薄板 + 1×2 立柱（直接由瓦片拼出）
+- 高台顶部有一组**深灰瓦片**（4×2 格），演示同色合并、异色分离
 - 主角是 **1.5 格高的胶囊体**，最大跳跃高度 **6 格**
 - 相机平滑跟随，带移动方向前瞻
 
 ## 数值设计
 
-- 1 格 = 1 世界单位，占位图 PPU = 32（32px = 1 格）
+- 1 格 = 1 世界单位，PPU = 32（32px = 1 格）
 - 重力 `Physics2D.gravity.y = -40`（见 `ProjectSettings/Physics2DSettings.asset` 或构建脚本）
 - 跳跃初速度由公式 `v = √(2·g·h)` 在起跳瞬间计算，并加半帧重力补偿
   → **改重力不会改变跳跃高度**，改 `jumpHeight` 才会
@@ -124,25 +141,26 @@
 
 ```
 Assets/
-  Art/Placeholders/     block2x2.png / block2x1.png / block1x2.png / slope2x2.png / player_capsule.png
-  Editor/               ProjectBuilder.cs（一键重建关卡与预制体）
+  Art/Placeholders/     tile1x1.png / slope2x2.png / player_capsule.png
+  Editor/               ProjectBuilder.cs（一键重建关卡与资产）
   Materials/            ScreenOutline.mat
-  Prefabs/              Player / Block2x2 / Block2x2Dark / Block2x1 / Block1x2 / Slope2x2
+  Prefabs/              Player.prefab / Slope2x2.prefab
   Scenes/Level01.unity  主场景
   Scripts/
     PlayerController2D.cs
     CameraFollow2D.cs
     Rendering/ScreenOutlineFeature.cs
   Shaders/              ScreenOutline.shader
-  Settings/             URP 管线资源 + ScreenOutlineFeature.asset
-  Tests/PlayMode/       角色物理与相机跟随的自动化测试
+  Settings/             URP 管线资源 + ScreenOutlineFeature.asset + 物理材质
+  Tiles/                TerrainTile.asset / DarkTerrainTile.asset
+  Tests/PlayMode/       角色物理、相机、Tilemap 关卡的自动化测试
 Tools/generate_placeholders.py   占位图生成脚本
 docs/DEVELOPMENT.md              开发文档
 ```
 
 ## 重建关卡
 
-改了关卡布局或占位图后，执行菜单：
+改了关卡布局或瓦片后，执行菜单：
 
 ```
 Platformer > Rebuild Level + Prefabs
@@ -154,6 +172,8 @@ Platformer > Rebuild Level + Prefabs
 Unity.exe -batchmode -projectPath <项目路径> -executeMethod Platformer.EditorTools.ProjectBuilder.BuildAll -quit
 ```
 
+> 重建会重新生成整个 `Level01` 场景；如果在场景里手绘过瓦片，请先另存场景或改用 Tile Palette 直接编辑。
+
 ## 运行自动化测试
 
 Unity 菜单 `Window > General > Test Runner` → PlayMode → Run All。
@@ -164,12 +184,12 @@ Unity 菜单 `Window > General > Test Runner` → PlayMode → Run All。
 Unity.exe -batchmode -projectPath <项目路径> -runTests -testPlatform PlayMode -testResults TestResults.xml -logFile Logs/playtests.log
 ```
 
-测试覆盖：站立检测、6 格跳高、水平移动、相机跟随、坠落重生、45° 斜坡爬坡。
+测试覆盖：站立检测、6 格跳高、水平移动、相机跟随、坠落重生、45° 斜坡爬坡、Tilemap 关卡站立。
 
 ## 后续可扩展
 
-- 替换 `Assets/Art/Placeholders` 里的图片并在 Prefab 上重新指定 Sprite
-- 用 Tilemap（项目已含 `com.unity.2d.tilemap`）替代逐块摆放
+- 用 Tile Palette 直接绘制关卡，或加 Rule Tile 自动拼接边缘
+- 给不同区域加不同颜色的 Tile 变体（同色合并、异色分离的规则自动生效）
 - 加 Animator 做跑步/跳跃动画
 - 加 `PhysicsMaterial2D` 调整摩擦，或做墙跳、冲刺、可破坏方块
 - 相机可加 `Cinemachine` 做更复杂的运镜

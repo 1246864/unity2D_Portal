@@ -1,12 +1,11 @@
 """Generate placeholder sprites for the platformer template.
 
-PPU is 32, so 32 px == 1 grid cell (1 world unit). Terrain comes in 2-cell
-modules: 2x2 (64x64), 2x1 (64x32) and 1x2 (32x64).
+PPU is 32, so 32 px == 1 grid cell (1 world unit). Terrain is painted on a
+1-cell Tilemap grid in 2-cell modules (2x2, 2x1, 1x2).
 
-Terrain sprites are flat white (tinted by SpriteRenderer.color). Outlines are
-produced by the full-screen ScreenOutline renderer feature, which merges any
-adjacent flat-coloured shapes into one silhouette, so nothing is baked into the
-terrain textures.
+Terrain tiles are flat white (tinted by the Tile asset colour). Outlines come
+from the full-screen ScreenOutline renderer feature, which merges any adjacent
+flat-coloured shapes into one silhouette, so nothing is baked into the textures.
 """
 import os
 from PIL import Image, ImageDraw
@@ -61,8 +60,6 @@ def make_capsule(w=24, h=48):
 
 
 if __name__ == "__main__":
-    save(make_flat(64, 64), "block2x2.png")
-    save(make_flat(64, 32), "block2x1.png")
-    save(make_flat(32, 64), "block1x2.png")
+    save(make_flat(32, 32), "tile1x1.png")
     save(make_slope(), "slope2x2.png")
     save(make_capsule(), "player_capsule.png")

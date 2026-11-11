@@ -115,6 +115,19 @@
 - `EnsurePhysicsMaterial` 改为「已存在则复用」：重复重建关卡不会覆盖在 Inspector 里手调的摩擦/弹性。
 - 验证脚本增加统计：场景中所有 Ground 层的碰撞体都必须挂载该材质，否则报错。
 
+### 阶段 8 — Tilemap 重构
+
+地形建造方式从「逐块实例化预制体」改为 **Tilemap**：
+
+- 新建 `TerrainTile` / `DarkTerrainTile` 两个 Tile 资产（1×1，纯白贴图 + 颜色）。
+- 场景结构变为 `Level/Grid/Terrain`：`Tilemap` + `TilemapRenderer` + `TilemapCollider2D`（Used By Composite）+ `CompositeCollider2D` + 静态 `Rigidbody2D`。
+- 整张地形合并为**一个多边形碰撞体**，避免瓦片接缝卡脚。
+- 关卡布局仍按 2 格模块编写，`PaintModule` 在 1 格网格上刷 2×2 / 2×1 / 1×2 区域；视觉与之前完全一致（同一预览图哈希）。
+- 45° 斜坡保留为预制体（三角形特殊形状，瓦片无法直接表达）。
+- 踩坑：脚本刷完瓦片后，`TilemapCollider2D` 没有立即生成形状，保存的场景里合并碰撞体是空的（`m_CompositePaths: []`），运行时玩家直接穿地。修复：绘制后依次调用
+  `tilemap.RefreshAllTiles()` → `tilemapCollider.ProcessTilemapChanges()` → `composite.GenerateGeometry()`。
+- 新增集成测试 `Tilemap_Level_Has_Grounded_Player`：加载 Level01，校验瓦片数（132）与玩家站立位置（y=0.75）。
+
 ---
 
 ## 4. 工程结构
@@ -122,15 +135,16 @@
 ```
 Assets/
   Art/Placeholders/          占位精灵（纯白，运行时上色）
-    block2x2.png   block2x1.png   block1x2.png
-    slope2x2.png   player_capsule.png
+    tile1x1.png   slope2x2.png   player_capsule.png
   Editor/
     Platformer.Editor.asmdef
     ProjectBuilder.cs        一键重建：贴图设置/预制体/场景/BuildSettings/描边特性
   Materials/
     ScreenOutline.mat        描边材质（颜色/宽度/阈值）
   Prefabs/
-    Player.prefab  Block2x2.prefab  Block2x2Dark.prefab  Block2x1.prefab  Block1x2.prefab  Slope2x2.prefab
+    Player.prefab  Slope2x2.prefab
+  Tiles/
+    TerrainTile.asset  DarkTerrainTile.asset
   Scenes/
     Level01.unity            主场景
   Scripts/
@@ -198,6 +212,13 @@ v₀ = √(2 · g · h) + ½ · g · Δt
 
 ---
 
+### 5.6 地图构建（Tilemap）
+
+- `Level/Grid/Terrain` 为 1 格网格的 Tilemap；关卡代码按 **2 格模块**调用 `PaintModule` 刷瓦片。
+- `TilemapCollider2D`（Used By Composite）+ `CompositeCollider2D`：整张地形合并为一个多边形碰撞体，避免瓦片接缝卡脚，也减少碰撞体数量。
+- 刷瓦片后必须依次调用 `RefreshAllTiles()` → `ProcessTilemapChanges()` → `GenerateGeometry()`，否则保存的场景里碰撞体为空（实测会穿地）。
+- 45° 斜坡是三角形，瓦片无法表达，保留为独立预制体并共用同一物理材质。
+
 ## 6. 测试与验证
 
 PlayMode 测试（`Assets/Tests/PlayMode`），命令行执行：
@@ -215,6 +236,7 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | `Camera_Follows_Player` | 通过，误差 **0.000** |
 | `Falls_Below_Limit_Respawn` | 通过 |
 | `Walks_Up_45_Degree_Slope` | 通过，峰值 y = **2.76** |
+| `Tilemap_Level_Has_Grounded_Player` | 通过，132 格瓦片；玩家 y=0.75 站在合并碰撞体上 |
 
 场景验证（`Platformer > Validate Level`）：
 
@@ -270,3 +292,4 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | 2026-11-11 | 描边细化至 1px；初始化 Git；补充开发文档 |
 | 2026-11-11 | 角色缩小到 1.5 格、移速 7→9；新增深灰方块类型（同色合并、异色分离） |
 | 2026-11-12 | 所有障碍物统一使用 TerrainPhysicsMaterial，可单独调摩擦/弹性 |
+| 2026-11-12 | 地图建造重构为 Tilemap（Grid + 合并碰撞体），新增关卡集成测试 |

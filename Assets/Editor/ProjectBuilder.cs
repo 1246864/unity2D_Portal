@@ -7,6 +7,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
+using UnityEngine.Tilemaps;
 
 namespace Platformer.EditorTools
 {
@@ -28,6 +29,9 @@ namespace Platformer.EditorTools
         const string OutlineMaterialPath = "Assets/Materials/ScreenOutline.mat";
         const string OutlineFeaturePath = "Assets/Settings/ScreenOutlineFeature.asset";
         const string RendererDataPath = "Assets/Settings/Renderer2D.asset";
+        const string TileDir = "Assets/Tiles";
+        const string TerrainTilePath = "Assets/Tiles/TerrainTile.asset";
+        const string DarkTilePath = "Assets/Tiles/DarkTerrainTile.asset";
 
         const int GroundLayer = 6;
         const int PlayerLayer = 7;
@@ -53,6 +57,7 @@ namespace Platformer.EditorTools
                 EnsureFolder(PrefabDir);
                 EnsureFolder(SceneDir);
                 EnsureFolder("Assets/Materials");
+                EnsureFolder(TileDir);
 
                 ConfigureLayers();
                 ConfigurePhysics();
@@ -67,14 +72,12 @@ namespace Platformer.EditorTools
                 Material outlineMaterial = EnsureOutlineMaterial();
 
                 GameObject playerPrefab = BuildPlayerPrefab(sprites, playerMaterial, litMaterial);
-                GameObject block2x2 = BuildBlockPrefab("Block2x2", sprites["block2x2"], new Vector2(2f, 2f), unlitMaterial, TerrainColor, terrainMaterial);
-                GameObject block2x2Dark = BuildBlockPrefab("Block2x2Dark", sprites["block2x2"], new Vector2(2f, 2f), unlitMaterial, DarkTerrainColor, terrainMaterial);
-                GameObject block2x1 = BuildBlockPrefab("Block2x1", sprites["block2x1"], new Vector2(2f, 1f), unlitMaterial, TerrainColor, terrainMaterial);
-                GameObject block1x2 = BuildBlockPrefab("Block1x2", sprites["block1x2"], new Vector2(1f, 2f), unlitMaterial, TerrainColor, terrainMaterial);
                 GameObject slope2x2 = BuildSlopePrefab(sprites["slope2x2"], unlitMaterial, terrainMaterial);
+                Tile terrainTile = EnsureTile(TerrainTilePath, "TerrainTile", sprites["tile1x1"], TerrainColor);
+                Tile darkTile = EnsureTile(DarkTilePath, "DarkTerrainTile", sprites["tile1x1"], DarkTerrainColor);
 
                 EnsureScreenOutlineFeature(outlineMaterial);
-                BuildLevelScene(playerPrefab, block2x2, block2x2Dark, block2x1, block1x2, slope2x2);
+                BuildLevelScene(playerPrefab, terrainTile, darkTile, slope2x2, terrainMaterial);
                 RegisterBuildScene();
                 DeleteSampleScene();
 
@@ -198,7 +201,7 @@ namespace Platformer.EditorTools
         static Dictionary<string, Sprite> LoadSprites()
         {
             var result = new Dictionary<string, Sprite>();
-            foreach (string name in new[] { "block2x2", "block2x1", "block1x2", "slope2x2", "player_capsule" })
+            foreach (string name in new[] { "tile1x1", "slope2x2", "player_capsule" })
             {
                 string path = ArtDir + "/" + name + ".png";
                 var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
@@ -368,22 +371,21 @@ namespace Platformer.EditorTools
             return SavePrefab(go, PrefabDir + "/Player.prefab");
         }
 
-        static GameObject BuildBlockPrefab(string name, Sprite sprite, Vector2 size, Material material, Color color, PhysicsMaterial2D physicsMaterial)
+        static Tile EnsureTile(string path, string tileName, Sprite sprite, Color color)
         {
-            var go = new GameObject(name);
-            go.layer = GroundLayer;
+            var tile = AssetDatabase.LoadAssetAtPath<Tile>(path);
+            if (tile == null)
+            {
+                tile = ScriptableObject.CreateInstance<Tile>();
+                AssetDatabase.CreateAsset(tile, path);
+            }
 
-            var sr = go.AddComponent<SpriteRenderer>();
-            sr.sprite = sprite;
-            sr.color = color;
-            sr.sortingOrder = 0;
-            if (material != null) sr.sharedMaterial = material;
-
-            var col = go.AddComponent<BoxCollider2D>();
-            col.size = size;
-            col.sharedMaterial = physicsMaterial;
-
-            return SavePrefab(go, PrefabDir + "/" + name + ".prefab");
+            tile.name = tileName;
+            tile.sprite = sprite;
+            tile.color = color;
+            tile.colliderType = Tile.ColliderType.Sprite; // use the sprite outline as the collision shape
+            EditorUtility.SetDirty(tile);
+            return tile;
         }
 
         static GameObject BuildSlopePrefab(Sprite sprite, Material material, PhysicsMaterial2D physicsMaterial)
@@ -422,52 +424,78 @@ namespace Platformer.EditorTools
         // ------------------------------------------------------------------
 
         static void BuildLevelScene(
-            GameObject playerPrefab, GameObject block2x2, GameObject block2x2Dark,
-            GameObject block2x1, GameObject block1x2, GameObject slope2x2)
+            GameObject playerPrefab, Tile terrainTile, Tile darkTile, GameObject slope2x2,
+            PhysicsMaterial2D terrainMaterial)
         {
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
             var level = new GameObject("Level").transform;
-            var groundRoot = new GameObject("Ground").transform;
-            var structureRoot = new GameObject("Structures").transform;
-            var platformRoot = new GameObject("Platforms").transform;
-            var slopeRoot = new GameObject("Slopes").transform;
-            groundRoot.parent = level;
-            structureRoot.parent = level;
-            platformRoot.parent = level;
-            slopeRoot.parent = level;
+
+            // ---- Tilemap terrain: one Grid, one Tilemap, one merged collider ----
+            var gridGo = new GameObject("Grid");
+            gridGo.transform.SetParent(level);
+            var grid = gridGo.AddComponent<Grid>();
+            grid.cellSize = new Vector3(1f, 1f, 0f);
+
+            var tilemapGo = new GameObject("Terrain");
+            tilemapGo.layer = GroundLayer;
+            tilemapGo.transform.SetParent(gridGo.transform);
+
+            var tilemap = tilemapGo.AddComponent<Tilemap>();
+            var tilemapRenderer = tilemapGo.AddComponent<TilemapRenderer>();
+            tilemapRenderer.sortingOrder = 0;
+
+            var body = tilemapGo.AddComponent<Rigidbody2D>();
+            body.bodyType = RigidbodyType2D.Static;
+
+            var composite = tilemapGo.AddComponent<CompositeCollider2D>();
+            composite.geometryType = CompositeCollider2D.GeometryType.Polygons;
+            composite.generationType = CompositeCollider2D.GenerationType.Synchronous;
+            composite.sharedMaterial = terrainMaterial;
+
+            var tilemapCollider = tilemapGo.AddComponent<TilemapCollider2D>();
+            tilemapCollider.usedByComposite = true;
+            tilemapCollider.sharedMaterial = terrainMaterial;
 
             // ---- Ground: two-cell thick slabs, 4-cell pit between x=4 and x=8 ----
             for (int x = -12; x <= 2; x += 2)
-                AddPiece(groundRoot, block2x2, x, -2, 2, 2);
+                PaintModule(tilemap, terrainTile, x, -2, 2, 2);
             for (int x = 8; x <= 22; x += 2)
-                AddPiece(groundRoot, block2x2, x, -2, 2, 2);
+                PaintModule(tilemap, terrainTile, x, -2, 2, 2);
 
-            // ---- Floating platforms, all on the 2-cell grid ----
-            AddPiece(platformRoot, block2x2, -8, 2, 2, 2);
-            AddPiece(platformRoot, block2x2, -6, 2, 2, 2);
-            AddPiece(platformRoot, block2x2, -4, 6, 2, 2);
-            AddPiece(platformRoot, block2x2, -2, 6, 2, 2);
+            // ---- Floating platforms, painted in 2-cell modules ----
+            PaintModule(tilemap, terrainTile, -8, 2, 2, 2);
+            PaintModule(tilemap, terrainTile, -6, 2, 2, 2);
+            PaintModule(tilemap, terrainTile, -4, 6, 2, 2);
+            PaintModule(tilemap, terrainTile, -2, 6, 2, 2);
 
             // Fine-detail pieces: a 2x1 ledge and a 1x2 pillar.
-            AddPiece(platformRoot, block2x1, 2, 3, 2, 1);
-            AddPiece(platformRoot, block1x2, -2, 0, 1, 2);
+            PaintModule(tilemap, terrainTile, 2, 3, 2, 1);
+            PaintModule(tilemap, terrainTile, -2, 0, 1, 2);
 
             // ---- Stairs: every step is exactly 2 cells high ----
-            AddPiece(structureRoot, block2x2, 12, 0, 2, 2);
-            AddPiece(structureRoot, block2x2, 14, 0, 2, 2);
+            PaintModule(tilemap, terrainTile, 12, 0, 2, 2);
+            PaintModule(tilemap, terrainTile, 14, 0, 2, 2);
 
             for (int x = 16; x <= 22; x += 2)
             {
-                AddPiece(structureRoot, block2x2, x, 0, 2, 2);
-                AddPiece(structureRoot, block2x2, x, 2, 2, 2);
+                PaintModule(tilemap, terrainTile, x, 0, 2, 2);
+                PaintModule(tilemap, terrainTile, x, 2, 2, 2);
             }
 
-            // ---- Dark blocks: each colour merges with itself, but the two colours never merge ----
-            AddPiece(structureRoot, block2x2Dark, 20, 4, 2, 2);
-            AddPiece(structureRoot, block2x2Dark, 22, 4, 2, 2);
+            // ---- Dark tiles: same-colour merges, different colour never merges ----
+            PaintModule(tilemap, darkTile, 20, 4, 2, 2);
+            PaintModule(tilemap, darkTile, 22, 4, 2, 2);
+
+            // Tiles were written after the collider was created, so force the collider to
+            // process them now; otherwise the saved scene contains an empty collider.
+            tilemap.RefreshAllTiles();
+            tilemapCollider.ProcessTilemapChanges();
+            composite.GenerateGeometry();
 
             // ---- Single 45-degree slope, 2 cells high, leading onto the stairs ----
+            var slopeRoot = new GameObject("Slopes").transform;
+            slopeRoot.SetParent(level);
             var slope = (GameObject)PrefabUtility.InstantiatePrefab(slope2x2, slopeRoot);
             slope.name = "Slope45 (2x2)";
             slope.transform.position = new Vector3(11f, 1f, 0f);
@@ -483,11 +511,15 @@ namespace Platformer.EditorTools
             EditorSceneManager.SaveScene(scene, ScenePath);
         }
 
-        static void AddPiece(Transform parent, GameObject prefab, int cellX, int cellY, int cellsW, int cellsH)
+        static void PaintModule(Tilemap tilemap, Tile tile, int cellX, int cellY, int cellsW, int cellsH)
         {
-            var go = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
-            go.name = $"{prefab.name} ({cellX},{cellY})";
-            go.transform.position = new Vector3(cellX + cellsW * 0.5f, cellY + cellsH * 0.5f, 0f);
+            for (int x = 0; x < cellsW; x++)
+            {
+                for (int y = 0; y < cellsH; y++)
+                {
+                    tilemap.SetTile(new Vector3Int(cellX + x, cellY + y, 0), tile);
+                }
+            }
         }
 
         static void BuildCamera(GameObject player)
@@ -582,10 +614,28 @@ namespace Platformer.EditorTools
             Debug.Log($"[Platformer] Screen outline feature: {(hasOutline ? "present" : "MISSING")}");
             if (!hasOutline) issues++;
 
+            var tilemapGo = GameObject.Find("Terrain");
+            var tilemap = tilemapGo != null ? tilemapGo.GetComponent<Tilemap>() : null;
+            int tileCount = 0;
+            if (tilemap != null)
+            {
+                BoundsInt bounds = tilemap.cellBounds;
+                foreach (Vector3Int cell in bounds.allPositionsWithin)
+                {
+                    if (tilemap.HasTile(cell)) tileCount++;
+                }
+            }
+            Debug.Log($"[Platformer] Tilemap cells painted: {tileCount}");
+            if (tilemap == null || tileCount == 0)
+            {
+                Debug.LogError("[Platformer] Tilemap 'Terrain' is missing or empty.");
+                issues++;
+            }
+
             int sprites = 0;
             foreach (var go in scene.GetRootGameObjects())
                 sprites += go.GetComponentsInChildren<SpriteRenderer>(true).Length;
-            Debug.Log($"[Platformer] Sprites in scene: {sprites}");
+            Debug.Log($"[Platformer] SpriteRenderers in scene (slope + player): {sprites}");
 
             var terrainMaterial = AssetDatabase.LoadAssetAtPath<PhysicsMaterial2D>(TerrainPhysicsMaterialPath);
             int obstacleColliders = 0;
