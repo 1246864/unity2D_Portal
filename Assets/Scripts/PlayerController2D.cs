@@ -16,21 +16,21 @@ namespace Platformer
     {
         [Header("Horizontal Movement")]
         [Tooltip("Top run speed, in units per second.")]
-        public float moveSpeed = 7f;
+        public float moveSpeed = 9f;
         [Tooltip("Acceleration while a direction is held on the ground.")]
-        public float groundAcceleration = 90f;
+        public float groundAcceleration = 115f;
         [Tooltip("Deceleration while no direction is held on the ground.")]
-        public float groundDeceleration = 120f;
+        public float groundDeceleration = 150f;
         [Tooltip("Acceleration while a direction is held in the air.")]
-        public float airAcceleration = 55f;
+        public float airAcceleration = 70f;
         [Tooltip("Deceleration while no direction is held in the air.")]
-        public float airDeceleration = 35f;
+        public float airDeceleration = 45f;
 
         [Header("Jump")]
         [Tooltip("Maximum jump height, in world units (= grid cells).")]
         public float jumpHeight = 6f;
         [Tooltip("Character height, in grid cells. Used for the ground probe and gizmos.")]
-        public float playerHeight = 1.7f;
+        public float playerHeight = 1.5f;
         [Tooltip("Grace period after leaving ground during which a jump still counts.")]
         public float coyoteTime = 0.1f;
         [Tooltip("How early a jump press is remembered before landing.")]
@@ -262,7 +262,7 @@ namespace Platformer
 
         void OnDrawGizmosSelected()
         {
-            float half = (playerHeight > 0f ? playerHeight : 1.7f) * 0.5f;
+            float half = (playerHeight > 0f ? playerHeight : 1.5f) * 0.5f;
             Vector3 feet = transform.position + Vector3.down * half;
             Vector3 apex = transform.position + Vector3.up * (jumpHeight - half);
 

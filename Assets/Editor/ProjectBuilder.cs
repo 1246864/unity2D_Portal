@@ -31,14 +31,15 @@ namespace Platformer.EditorTools
         const int GroundLayer = 6;
         const int PlayerLayer = 7;
 
-        const float PlayerWidth = 0.8f;
-        const float PlayerHeight = 1.7f;
+        const float PlayerWidth = 0.72f;
+        const float PlayerHeight = 1.5f;
         const float JumpHeight = 6f;
 
-        static readonly Vector2 Spawn = new Vector2(-9f, 0.85f);
+        static readonly Vector2 Spawn = new Vector2(-9f, 0.75f);
 
         // One colour for every terrain piece: floor, wall, step, platform.
         static readonly Color TerrainColor = new Color(0.40f, 0.46f, 0.56f);
+        static readonly Color DarkTerrainColor = new Color(0.27f, 0.30f, 0.36f);
         static readonly Color BackgroundColor = new Color(0.086f, 0.102f, 0.153f);
         static readonly Color OutlineColor = new Color(0.70f, 0.79f, 0.92f, 1f);
 
@@ -64,13 +65,14 @@ namespace Platformer.EditorTools
                 Material outlineMaterial = EnsureOutlineMaterial();
 
                 GameObject playerPrefab = BuildPlayerPrefab(sprites, playerMaterial, litMaterial);
-                GameObject block2x2 = BuildBlockPrefab("Block2x2", sprites["block2x2"], new Vector2(2f, 2f), unlitMaterial);
-                GameObject block2x1 = BuildBlockPrefab("Block2x1", sprites["block2x1"], new Vector2(2f, 1f), unlitMaterial);
-                GameObject block1x2 = BuildBlockPrefab("Block1x2", sprites["block1x2"], new Vector2(1f, 2f), unlitMaterial);
+                GameObject block2x2 = BuildBlockPrefab("Block2x2", sprites["block2x2"], new Vector2(2f, 2f), unlitMaterial, TerrainColor);
+                GameObject block2x2Dark = BuildBlockPrefab("Block2x2Dark", sprites["block2x2"], new Vector2(2f, 2f), unlitMaterial, DarkTerrainColor);
+                GameObject block2x1 = BuildBlockPrefab("Block2x1", sprites["block2x1"], new Vector2(2f, 1f), unlitMaterial, TerrainColor);
+                GameObject block1x2 = BuildBlockPrefab("Block1x2", sprites["block1x2"], new Vector2(1f, 2f), unlitMaterial, TerrainColor);
                 GameObject slope2x2 = BuildSlopePrefab(sprites["slope2x2"], unlitMaterial);
 
                 EnsureScreenOutlineFeature(outlineMaterial);
-                BuildLevelScene(playerPrefab, block2x2, block2x1, block1x2, slope2x2);
+                BuildLevelScene(playerPrefab, block2x2, block2x2Dark, block2x1, block1x2, slope2x2);
                 RegisterBuildScene();
                 DeleteSampleScene();
 
@@ -351,14 +353,14 @@ namespace Platformer.EditorTools
             return SavePrefab(go, PrefabDir + "/Player.prefab");
         }
 
-        static GameObject BuildBlockPrefab(string name, Sprite sprite, Vector2 size, Material material)
+        static GameObject BuildBlockPrefab(string name, Sprite sprite, Vector2 size, Material material, Color color)
         {
             var go = new GameObject(name);
             go.layer = GroundLayer;
 
             var sr = go.AddComponent<SpriteRenderer>();
             sr.sprite = sprite;
-            sr.color = TerrainColor;
+            sr.color = color;
             sr.sortingOrder = 0;
             if (material != null) sr.sharedMaterial = material;
 
@@ -403,7 +405,8 @@ namespace Platformer.EditorTools
         // ------------------------------------------------------------------
 
         static void BuildLevelScene(
-            GameObject playerPrefab, GameObject block2x2, GameObject block2x1, GameObject block1x2, GameObject slope2x2)
+            GameObject playerPrefab, GameObject block2x2, GameObject block2x2Dark,
+            GameObject block2x1, GameObject block1x2, GameObject slope2x2)
         {
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
@@ -443,11 +446,14 @@ namespace Platformer.EditorTools
                 AddPiece(structureRoot, block2x2, x, 2, 2, 2);
             }
 
+            // ---- Dark blocks: each colour merges with itself, but the two colours never merge ----
+            AddPiece(structureRoot, block2x2Dark, 20, 4, 2, 2);
+            AddPiece(structureRoot, block2x2Dark, 22, 4, 2, 2);
+
             // ---- Single 45-degree slope, 2 cells high, leading onto the stairs ----
             var slope = (GameObject)PrefabUtility.InstantiatePrefab(slope2x2, slopeRoot);
             slope.name = "Slope45 (2x2)";
             slope.transform.position = new Vector3(11f, 1f, 0f);
-            slope.GetComponent<SpriteRenderer>().color = TerrainColor;
 
             var player = (GameObject)PrefabUtility.InstantiatePrefab(playerPrefab);
             player.name = "Player";
@@ -465,7 +471,6 @@ namespace Platformer.EditorTools
             var go = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
             go.name = $"{prefab.name} ({cellX},{cellY})";
             go.transform.position = new Vector3(cellX + cellsW * 0.5f, cellY + cellsH * 0.5f, 0f);
-            go.GetComponent<SpriteRenderer>().color = TerrainColor;
         }
 
         static void BuildCamera(GameObject player)
@@ -489,10 +494,11 @@ namespace Platformer.EditorTools
 
             var follow = camGo.AddComponent<CameraFollow2D>();
             follow.target = player.transform;
-            follow.offset = new Vector2(0f, 1.2f);
+            follow.offset = new Vector2(0f, 1.0f);
             follow.smoothTime = 0.12f;
             follow.useLookAhead = true;
             follow.lookAheadDistance = 1.5f;
+            follow.lookAheadSpeedReference = 9f;
         }
 
         static void BuildGlobalLight()

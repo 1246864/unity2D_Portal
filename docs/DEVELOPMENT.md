@@ -100,6 +100,14 @@
 - 描边宽度 2px → **1px**，边缘过渡带宽 0.08 → 0.03，观感更干净。
 - 初始化 Git 仓库，补充开发文档。
 
+### 阶段 6 — 角色调整与第二地形类型
+
+- 角色高度 1.7 → **1.5 格**：胶囊贴图 24×48 px、碰撞体 0.72×1.5，出生点 y 调整为 0.75，相机偏移 1.2 → 1.0。
+- 移动速度 7 → **9**，地面/空中加减速同步提高（115/150、70/45），相机前瞻速度基准同步改为 9。
+- 新增**深灰地形** `Block2x2Dark`（`#454C5C`）：由于描边基于颜色差，深灰之间同色自动合并，深灰与普通地形之间必然画线，**无需额外逻辑**。
+- 关卡高台顶部放置 2 个深灰 2×2 方块用于演示。
+- 测试全部通过（跳高仍为 5.999，斜坡峰值 2.76）。
+
 ---
 
 ## 4. 工程结构
@@ -115,7 +123,7 @@ Assets/
   Materials/
     ScreenOutline.mat        描边材质（颜色/宽度/阈值）
   Prefabs/
-    Player.prefab  Block2x2.prefab  Block2x1.prefab  Block1x2.prefab  Slope2x2.prefab
+    Player.prefab  Block2x2.prefab  Block2x2Dark.prefab  Block2x1.prefab  Block1x2.prefab  Slope2x2.prefab
   Scenes/
     Level01.unity            主场景
   Scripts/
@@ -145,7 +153,8 @@ docs/
 
 - 1 格 = 1 世界单位，PPU = 32。
 - 地形模块以 2 格为标准尺寸；1 格仍是构建与对齐的基础单位。
-- 所有地形使用同一颜色，视觉上靠轮廓区分体块。
+- 所有地形默认使用同一颜色，视觉上靠轮廓区分体块。
+- 深灰变体 `Block2x2Dark` 作为第二种颜色：同色合并、异色分离由描边算法自动完成。
 
 ### 5.2 跳跃
 
@@ -169,7 +178,7 @@ v₀ = √(2 · g · h) + ½ · g · Δt
 
 ### 5.4 相机
 
-- `SmoothDamp` 跟随目标 + 固定偏移（0, 1.2）。
+- `SmoothDamp` 跟随目标 + 固定偏移（0, 1.0）。
 - 根据刚体水平速度计算前瞻偏移（最大 1.5 格），并单独平滑。
 - 正交尺寸 5.625（16:9 下约 20×11.25 格可视范围）。
 
@@ -198,7 +207,7 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | `Horizontal_Movement_Works` | 通过（1 秒内 > 4 格） |
 | `Camera_Follows_Player` | 通过，误差 **0.000** |
 | `Falls_Below_Limit_Respawn` | 通过 |
-| `Walks_Up_45_Degree_Slope` | 通过，峰值 y = **2.77** |
+| `Walks_Up_45_Degree_Slope` | 通过，峰值 y = **2.76** |
 
 场景验证（`Platformer > Validate Level`）：
 
@@ -252,3 +261,4 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | 2026-11-11 | 合并描边 v1（逐块邻接判断），发现混合尺寸断线问题 |
 | 2026-11-11 | 地形改为 2 格模块 + 统一配色；描边升级为全屏边缘检测 |
 | 2026-11-11 | 描边细化至 1px；初始化 Git；补充开发文档 |
+| 2026-11-11 | 角色缩小到 1.5 格、移速 7→9；新增深灰方块类型（同色合并、异色分离） |

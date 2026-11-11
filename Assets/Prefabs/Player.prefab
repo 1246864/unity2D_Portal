@@ -81,7 +81,7 @@ SpriteRenderer:
   m_FlipX: 0
   m_FlipY: 0
   m_DrawMode: 0
-  m_Size: {x: 0.8125, y: 1.71875}
+  m_Size: {x: 0.75, y: 1.5}
   m_AdaptiveModeThreshold: 0.5
   m_SpriteTileMode: 0
   m_WasSpriteAssigned: 1
@@ -147,7 +147,7 @@ CapsuleCollider2D:
   m_UsedByEffector: 0
   m_UsedByComposite: 0
   m_Offset: {x: 0, y: 0}
-  m_Size: {x: 0.8, y: 1.7}
+  m_Size: {x: 0.72, y: 1.5}
   m_Direction: 0
 --- !u!114 &4558686518708173478
 MonoBehaviour:
@@ -161,13 +161,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f03793dcfa8c6374bbaa8cbc77ece8a5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 7
-  groundAcceleration: 90
-  groundDeceleration: 120
-  airAcceleration: 55
-  airDeceleration: 35
+  moveSpeed: 9
+  groundAcceleration: 115
+  groundDeceleration: 150
+  airAcceleration: 70
+  airDeceleration: 45
   jumpHeight: 6
-  playerHeight: 1.7
+  playerHeight: 1.5
   coyoteTime: 0.1
   jumpBufferTime: 0.12
   fallGravityMultiplier: 1.6

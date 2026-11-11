@@ -13,7 +13,7 @@
 |---|---|
 | 跳跃高度 | **5.999 格**（目标 6 格，误差 +0.001） |
 | 相机跟随误差 | **0.000** 单位（1.5 秒内收敛） |
-| 45° 斜坡爬升 | 成功（从 y=0.85 沿坡爬到峰值 y=2.77，即坡顶） |
+| 45° 斜坡爬升 | 成功（从 0.75 沿坡爬到峰值 2.76） |
 | 水平移动、站立检测、坠落重生 | 通过 |
 
 ## 地形构件
@@ -25,15 +25,22 @@
 | `block1x2.png` | 1×2 格（32×64 px） | 立柱、窄墙等纵向细节 |
 | `slope2x2.png` | 2×2 格，45° 三角 | 斜坡 |
 
-全部是纯白精灵，由 `SpriteRenderer.color` 统一上色（默认统一地形色 `#66758F`），所以**地板和墙没有颜色/类型区分**。
+全部是纯白精灵，由 `SpriteRenderer.color` 上色（普通地形色 `#66758F`），所以**地板和墙没有颜色/类型区分**。
+
+另有**深灰色方块** `Block2x2Dark`（`#454C5C`），用于标记特殊区域：
+
+- 深灰方块之间**会**合并描边（同色）
+- 深灰与普通方块之间**不会**合并，交界处会各自描边形成分界线
+- 需要更多深灰尺寸时，在 `BuildBlockPrefab` 调用里传入 `DarkTerrainColor` 即可
 
 ## 合并描边（Screen Outline）
 
-描边不再逐块绘制，而是由 **URP 2D Renderer Feature** 在全屏最后阶段统一处理：
+描边不逐块绘制，而是由 **URP 2D Renderer Feature** 在全屏最后阶段统一处理：
 
 - `Assets/Scripts/Rendering/ScreenOutlineFeature.cs` + `Assets/Shaders/ScreenOutline.shader`
 - 检测画面中的**颜色突变**，在其上叠加描边色
 - 同色、紧挨着的地形内部没有颜色突变 → **不会有内部线条**，整片地形只显示一条外轮廓
+- 不同颜色（普通 / 深灰）交界处一定存在颜色突变 → **不会融合**，会画出分界线
 - 任何形状、任何尺寸都自动合并（包括斜坡与台阶的斜边衔接）
 - 角色也会被同一套描边勾勒
 
@@ -43,8 +50,8 @@
 |---|---|
 | 描边颜色 | `Assets/Materials/ScreenOutline.mat` → Outline Color |
 | 描边宽度（像素） | `ScreenOutline.mat` → Width（默认 **1px**），或 `ScreenOutlineFeature.asset` → Width Pixels |
-| 边缘灵敏度 | `_Threshold`（默认 0.06） |
-| 地形颜色 | 场景中各地形实例的 SpriteRenderer Color（构建脚本里是 `TerrainColor`） |
+| 边缘灵敏度 | `_Threshold`（默认 0.05） |
+| 地形颜色 | 场景中各地形实例的 SpriteRenderer Color（构建脚本里是 `TerrainColor` / `DarkTerrainColor`） |
 | 插入时机 | `ScreenOutlineFeature.asset` → Injection Point |
 
 > 描边是屏幕空间效果，粗细以像素计，不随镜头缩放变化。
@@ -74,7 +81,8 @@
 - 台阶每级固定 **2 格高**（2 格 → 4 格）
 - 两块 2×2 悬浮平台（分别在 4 格、8 格高度）
 - 细节演示：2×1 薄板 + 1×2 立柱
-- 主角是 **1.7 格高的胶囊体**，最大跳跃高度 **6 格**
+- 高台顶部有一组**深灰方块**（2 个 2×2 并排），演示同色合并、异色分离
+- 主角是 **1.5 格高的胶囊体**，最大跳跃高度 **6 格**
 - 相机平滑跟随，带移动方向前瞻
 
 ## 数值设计
@@ -89,10 +97,10 @@
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | `jumpHeight` | 6 | 最大跳跃高度（格） |
-| `playerHeight` | 1.7 | 角色高度（格），用于地面检测与 Gizmo |
-| `moveSpeed` | 7 | 最大水平速度 |
-| `groundAcceleration` / `groundDeceleration` | 90 / 120 | 地面加减速 |
-| `airAcceleration` / `airDeceleration` | 55 / 35 | 空中加减速 |
+| `playerHeight` | 1.5 | 角色高度（格），用于地面检测与 Gizmo |
+| `moveSpeed` | 9 | 最大水平速度 |
+| `groundAcceleration` / `groundDeceleration` | 115 / 150 | 地面加减速 |
+| `airAcceleration` / `airDeceleration` | 70 / 45 | 空中加减速 |
 | `coyoteTime` | 0.1 | 离开平台后的宽容起跳时间 |
 | `jumpBufferTime` | 0.12 | 落地前预输入跳跃 |
 | `fallGravityMultiplier` | 1.6 | 下落额外重力，手感更干脆 |
@@ -108,7 +116,7 @@ Assets/
   Art/Placeholders/     block2x2.png / block2x1.png / block1x2.png / slope2x2.png / player_capsule.png
   Editor/               ProjectBuilder.cs（一键重建关卡与预制体）
   Materials/            ScreenOutline.mat
-  Prefabs/              Player / Block2x2 / Block2x1 / Block1x2 / Slope2x2
+  Prefabs/              Player / Block2x2 / Block2x2Dark / Block2x1 / Block1x2 / Slope2x2
   Scenes/Level01.unity  主场景
   Scripts/
     PlayerController2D.cs
@@ -118,6 +126,7 @@ Assets/
   Settings/             URP 管线资源 + ScreenOutlineFeature.asset
   Tests/PlayMode/       角色物理与相机跟随的自动化测试
 Tools/generate_placeholders.py   占位图生成脚本
+docs/DEVELOPMENT.md              开发文档
 ```
 
 ## 重建关卡

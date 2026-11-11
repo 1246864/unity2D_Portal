@@ -42,8 +42,8 @@ def make_slope(size=64):
     return downscale(img, size, size)
 
 
-def make_capsule(w=26, h=55):
-    """Player placeholder: capsule 0.81 x 1.72 units, 1.7 cells tall."""
+def make_capsule(w=24, h=48):
+    """Player placeholder: capsule 0.75 x 1.5 units, 1.5 cells tall."""
     img = Image.new("RGBA", (w * SS, h * SS), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     r = (w * SS) // 2
