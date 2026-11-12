@@ -133,7 +133,7 @@ GameObject:
   - component: {fileID: 166013460}
   - component: {fileID: 166013461}
   m_Layer: 0
-  m_Name: Snapshot Capture
+  m_Name: Portal Capture
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -184,7 +184,7 @@ GameObject:
   - component: {fileID: 280525200}
   - component: {fileID: 280525199}
   m_Layer: 8
-  m_Name: Snapshot Output
+  m_Name: Portal View
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -268,7 +268,7 @@ GameObject:
   - component: {fileID: 309200603}
   - component: {fileID: 309200602}
   m_Layer: 0
-  m_Name: Snapshot Camera
+  m_Name: Portal Camera
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -351,7 +351,7 @@ GameObject:
   - component: {fileID: 309548428}
   - component: {fileID: 309548427}
   m_Layer: 0
-  m_Name: Snapshot Camera
+  m_Name: Portal Camera
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -653,7 +653,7 @@ GameObject:
   - component: {fileID: 439996179}
   - component: {fileID: 439996178}
   m_Layer: 8
-  m_Name: Snapshot Output
+  m_Name: Portal View
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -736,7 +736,7 @@ GameObject:
   m_Component:
   - component: {fileID: 623625477}
   m_Layer: 0
-  m_Name: Capture Display Pair
+  m_Name: Portal Pair
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -770,7 +770,7 @@ GameObject:
   - component: {fileID: 651697961}
   - component: {fileID: 651697962}
   m_Layer: 0
-  m_Name: Capture Display Group A
+  m_Name: Portal A
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -2606,7 +2606,7 @@ GameObject:
   - component: {fileID: 1235139494}
   - component: {fileID: 1235139495}
   m_Layer: 0
-  m_Name: Snapshot Capture
+  m_Name: Portal Capture
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -2734,7 +2734,7 @@ GameObject:
   - component: {fileID: 1762373926}
   - component: {fileID: 1762373927}
   m_Layer: 0
-  m_Name: Capture Display Group B
+  m_Name: Portal B
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
