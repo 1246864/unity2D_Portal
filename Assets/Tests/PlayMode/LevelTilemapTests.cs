@@ -125,8 +125,8 @@ namespace Platformer.Tests
             CaptureDisplayGroup groupB = null;
             foreach (var group in groups)
             {
-                if (group.name.EndsWith("A")) groupA = group;
-                else if (group.name.EndsWith("B")) groupB = group;
+                if (group.side == CaptureGroupSide.A) groupA = group;
+                else groupB = group;
             }
 
             Assert.IsNotNull(groupA, "Capture Display Group A not found.");
@@ -169,8 +169,8 @@ namespace Platformer.Tests
                 "Snapshot height must equal the captured world height.");
             Assert.AreEqual(capturedWidth, snapshot.output.sprite.bounds.size.x, 0.05f,
                 "Snapshot width must equal the captured world width.");
-            Assert.AreEqual(Vector3.one, snapshot.output.transform.lossyScale,
-                "Snapshot output must not be scaled.");
+            Assert.AreEqual(groupA.displayScale, snapshot.output.transform.lossyScale.x, 0.001f,
+                "Snapshot output should use the group display scale.");
 
             // 5. The canvas keeps a constant texel density.
             Assert.AreEqual(snapshot.pixelsPerUnit,

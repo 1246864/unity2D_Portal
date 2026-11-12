@@ -574,18 +574,19 @@ namespace Platformer.EditorTools
 
         static void BuildCaptureGroups(Camera mainCamera)
         {
-            var groupA = CreateCaptureGroup("Capture Display Group A", new Vector3(-6f, 3f, 0f), mainCamera);
-            var groupB = CreateCaptureGroup("Capture Display Group B", new Vector3(12f, 3f, 0f), mainCamera);
+            // Both groups live under one empty node and pair up by their side.
+            var pair = new GameObject("Capture Display Pair");
+            pair.transform.position = new Vector3(3f, 3f, 0f);
 
-            // Cross display: A's camera paints B's output and B's camera paints A's output.
-            groupA.otherGroup = groupB;
-            groupB.otherGroup = groupA;
+            CreateCaptureGroup("Capture Display Group A", pair.transform, new Vector3(-9f, 0f, 0f), CaptureGroupSide.A, mainCamera);
+            CreateCaptureGroup("Capture Display Group B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera);
         }
 
-        static CaptureDisplayGroup CreateCaptureGroup(string name, Vector3 position, Camera mainCamera)
+        static CaptureDisplayGroup CreateCaptureGroup(string name, Transform parent, Vector3 localPosition, CaptureGroupSide side, Camera mainCamera)
         {
             var root = new GameObject(name);
-            root.transform.position = position;
+            root.transform.SetParent(parent, false);
+            root.transform.localPosition = localPosition;
 
             // Every element of the group sits at the group origin (local position zero).
             var cameraGo = new GameObject("Snapshot Camera");
@@ -595,10 +596,8 @@ namespace Platformer.EditorTools
             var capture = cameraGo.AddComponent<Camera>();
             capture.orthographic = true;
             capture.orthographicSize = mainCamera.orthographicSize * 1.2f;
-            // Transparent clear so the output sprite lets the world show through; that is
-            // what makes the cross-display recursion visible instead of a black frame.
             capture.clearFlags = CameraClearFlags.SolidColor;
-            capture.backgroundColor = new Color(0f, 0f, 0f, 0f);
+            capture.backgroundColor = BackgroundColor;
             capture.nearClipPlane = 0.3f;
             capture.farClipPlane = 100f;
             capture.enabled = false; // rendered on demand by RegionSnapshotCamera
@@ -621,6 +620,7 @@ namespace Platformer.EditorTools
             controller.output = outputSprite;
 
             var group = root.AddComponent<CaptureDisplayGroup>();
+            group.side = side;
             group.capture = controller;
             group.output = outputSprite;
             return group;
@@ -751,13 +751,20 @@ namespace Platformer.EditorTools
 
             // The snapshot only renders during play; force one capture for the preview.
             var groups = UnityEngine.Object.FindObjectsOfType<CaptureDisplayGroup>();
-            foreach (var group in groups) group.WireUp();
+            foreach (var group in groups)
+            {
+                group.ResolvePartner();
+                group.WireUp();
+                group.ApplyDisplayScale();
+            }
 
             // A few passes so the cross-display feedback settles before rendering.
             for (int pass = 0; pass < 3; pass++)
             {
                 foreach (var group in groups) if (group.capture != null) group.capture.CaptureNow();
             }
+
+            foreach (var group in groups) group.RefreshDebugOutline();
 
             // Overview framed to fit every terrain and sprite renderer in the scene.
             Bounds bounds = new Bounds();

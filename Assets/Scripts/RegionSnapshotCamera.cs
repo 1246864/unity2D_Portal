@@ -117,7 +117,7 @@ namespace Platformer
                 _renderTexture.Create();
                 if (captureCamera != null) captureCamera.targetTexture = _renderTexture;
 
-                _texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+                _texture = new Texture2D(width, height, TextureFormat.RGB24, false);
                 _texture.name = "Region Snapshot";
 
                 float pixelsPerWorldUnit = height / Mathf.Max(0.001f, worldHeight);
@@ -140,35 +140,8 @@ namespace Platformer
             RenderTexture previous = RenderTexture.active;
             RenderTexture.active = _renderTexture;
             _texture.ReadPixels(new Rect(0, 0, _texture.width, _texture.height), 0, 0);
-            ClearBorder();
             _texture.Apply();
             RenderTexture.active = previous;
-        }
-
-        void ClearBorder()
-        {
-            // A thin background-coloured border keeps the screen-space outline from
-            // tracing the snapshot sprite as if it were terrain.
-            Color background = captureCamera.backgroundColor;
-            const int border = 2;
-
-            for (int x = 0; x < _texture.width; x++)
-            {
-                for (int y = 0; y < border; y++)
-                {
-                    _texture.SetPixel(x, y, background);
-                    _texture.SetPixel(x, _texture.height - 1 - y, background);
-                }
-            }
-
-            for (int y = 0; y < _texture.height; y++)
-            {
-                for (int x = 0; x < border; x++)
-                {
-                    _texture.SetPixel(x, y, background);
-                    _texture.SetPixel(_texture.width - 1 - x, y, background);
-                }
-            }
         }
 
         void ReleaseTargets()
