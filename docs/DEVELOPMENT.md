@@ -166,13 +166,15 @@
 ### 阶段 14 — 相机快照
 
 - 需求：用相机捕获「主相机视野 1.2 倍」的区域，输出成一张新的精灵（图像形式，不是对象复制）。
-- 方案：`RegionSnapshotCamera` 用一台**独立的正交相机** `Snapshot Camera`（`orthoSize = 主相机 × 1.2`，位置由自己决定、不跟随玩家相机，`enabled = false` 按需渲染）渲染到 960×540 的 `RenderTexture`，`ReadPixels` 到 `Texture2D`，再用它生成 `Sprite` 赋给 `Snapshot Output` 的 `SpriteRenderer`。
+- 方案：`RegionSnapshotCamera` 用一台**独立的正交相机** `Snapshot Camera`（`orthoSize = 主相机 × 1.2`，位置由自己决定、不跟随玩家相机，`enabled = false` 按需渲染）渲染到 `RenderTexture`，`ReadPixels` 到 `Texture2D`，再用它生成 `Sprite` 赋给 `Snapshot Output` 的 `SpriteRenderer`。
 - PPU 按「捕获世界高度」换算（`textureHeight / 捕获世界高度`），输出精灵**不做任何缩放**：缩放为 1 时与拍摄区域严格同尺寸（1:1）。
-- 新增 `Snapshot` 层（8），捕获相机的 cullingMask 排除该层，避免拍到自己的输出形成回授。
+- 画布随视野变化：贴图尺寸按「捕获世界高度 × `pixelsPerUnit`」计算，主相机视野变大时画布等比放大、像素密度不变；视野变化时重建 RT/Sprite。
 - 快照是「另一台相机」的画面：只有尺寸跟随主相机（1.2 倍），位置完全独立，玩家移动不会带动它。
+- 递归：捕获相机不排除任何层，输出精灵落在视野内时会被一起拍进画面，形成「镜中镜」。
+- 玩家 SpriteRenderer 排序 100，始终绘制在快照输出（20）之上。
 - 快照贴图四周留 2px 背景色边，避免全屏描边把快照精灵当成地形描出一圈边框。
 - 无头模式（`-nographics`）下没有图形设备，`Camera.Render()` 会永久阻塞，因此启动时检测 `SystemInfo.graphicsDeviceType` 并自动禁用。
-- 预览渲染时临时 `CaptureNow()` 出图、渲染后 `ClearOutput()`；新增测试 `Snapshot_Camera_Captures_Main_View`（校验 1.2 倍尺寸、1:1 世界尺寸、输出无缩放，9/9 通过，无头模式该测试跳过）。
+- 预览渲染时临时 `CaptureNow()` 出图、渲染后 `ClearOutput()`；测试 `Snapshot_Camera_Captures_Own_View` 校验：捕获相机不跟随、1.2 倍尺寸、1:1 世界尺寸、画布随范围缩放、可拍到自身输出。
 
 ---
 

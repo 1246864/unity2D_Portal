@@ -4,27 +4,33 @@ using UnityEngine.Rendering;
 namespace Platformer
 {
     /// <summary>
-    /// Captures the region the main camera sees (enlarged by <see cref="viewScale"/>,
-    /// default 1.2) with a dedicated orthographic camera and shows the result as an
-    /// image sprite.
+    /// Shows the image of a dedicated camera as a sprite.
     ///
-    /// The capture camera renders into a RenderTexture on demand; the pixels are read
-    /// into a Texture2D that backs the output sprite, so the snapshot is a real image
-    /// and not a copy of the scene objects.
+    /// The captured area is <see cref="viewScale"/> times the main camera view. When the
+    /// main view grows, the captured area grows with it and the render texture (the
+    /// output canvas) grows proportionally, so the sprite always stays 1:1 with the
+    /// captured world: at scale 1 it is exactly as big as the area it shows.
+    ///
+    /// The capture camera is not restricted to other layers, so if its output sprite is
+    /// inside its view the snapshot contains itself, producing a mirror-in-mirror effect.
     /// </summary>
     public class RegionSnapshotCamera : MonoBehaviour
     {
         [Header("Source")]
-        [Tooltip("Main camera whose view defines the captured region.")]
+        [Tooltip("Main camera: only its view size is referenced, not its position.")]
         public Camera sourceCamera;
 
-        [Tooltip("Captured region size relative to the main camera view.")]
+        [Tooltip("Captured area size relative to the main camera view.")]
         public float viewScale = 1.2f;
 
         [Header("Capture Camera")]
         public Camera captureCamera;
-        public int textureWidth = 960;
-        public int textureHeight = 540;
+
+        [Tooltip("Texels per world unit of the captured image.")]
+        public float pixelsPerUnit = 40f;
+
+        [Tooltip("Upper limit for the generated texture size.")]
+        public int maxTextureSize = 2048;
 
         [Tooltip("Seconds between captures. 0 = every frame.")]
         public float captureInterval = 0.05f;
@@ -37,8 +43,10 @@ namespace Platformer
         Sprite _sprite;
         float _spriteWorldHeight;
         float _timer;
-
         bool _renderingAvailable;
+
+        /// <summary>World height the snapshot covers.</summary>
+        float CapturedWorldHeight => sourceCamera.orthographicSize * 2f * viewScale;
 
         void Start()
         {
@@ -57,9 +65,7 @@ namespace Platformer
 
         void LateUpdate()
         {
-            if (sourceCamera == null || captureCamera == null || output == null) return;
-
-            SyncCaptureSize();
+            if (!EnsureResources()) return;
 
             _timer -= Time.deltaTime;
             if (_timer <= 0f)
@@ -80,7 +86,6 @@ namespace Platformer
         {
             if (!_renderingAvailable && SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null) return;
             if (!EnsureResources()) return;
-            SyncCaptureSize();
             Capture();
         }
 
@@ -88,42 +93,36 @@ namespace Platformer
         {
             if (sourceCamera == null || captureCamera == null || output == null) return false;
 
-            if (_renderTexture == null)
+            // The capture camera keeps its own view; only the size follows the main one.
+            captureCamera.orthographicSize = sourceCamera.orthographicSize * viewScale;
+
+            float worldHeight = CapturedWorldHeight;
+            float aspect = sourceCamera.aspect > 0f ? sourceCamera.aspect : 16f / 9f;
+            int height = Mathf.Clamp(Mathf.RoundToInt(worldHeight * pixelsPerUnit), 16, maxTextureSize);
+            int width = Mathf.Clamp(Mathf.RoundToInt(worldHeight * aspect * pixelsPerUnit), 16, maxTextureSize);
+
+            // Rebuild the canvas when the view changes so the texel density and the
+            // 1:1 world size are preserved.
+            if (_texture == null || _texture.width != width || _texture.height != height ||
+                !Mathf.Approximately(_spriteWorldHeight, worldHeight))
             {
-                _renderTexture = new RenderTexture(textureWidth, textureHeight, 24, RenderTextureFormat.ARGB32);
+                ReleaseTargets();
+
+                _renderTexture = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
                 _renderTexture.Create();
-            }
 
-            if (_texture == null)
-            {
-                _texture = new Texture2D(textureWidth, textureHeight, TextureFormat.RGB24, false);
+                _texture = new Texture2D(width, height, TextureFormat.RGB24, false);
                 _texture.name = "Region Snapshot";
-            }
 
-            // 1:1 guarantee: one texture pixel maps to the same world distance as in the
-            // captured region, so at scale 1 the snapshot is exactly as big as the
-            // objects that were photographed.
-            float capturedWorldHeight = sourceCamera.orthographicSize * 2f * viewScale;
-            if (_sprite == null || !Mathf.Approximately(_spriteWorldHeight, capturedWorldHeight))
-            {
-                if (_sprite != null) Destroy(_sprite);
-
-                float pixelsPerUnit = textureHeight / Mathf.Max(0.001f, capturedWorldHeight);
-                _sprite = Sprite.Create(_texture, new Rect(0, 0, textureWidth, textureHeight),
-                    new Vector2(0.5f, 0.5f), pixelsPerUnit);
+                float pixelsPerWorldUnit = height / Mathf.Max(0.001f, worldHeight);
+                _sprite = Sprite.Create(_texture, new Rect(0, 0, width, height),
+                    new Vector2(0.5f, 0.5f), pixelsPerWorldUnit);
                 _sprite.name = "Region Snapshot Sprite";
                 output.sprite = _sprite;
-                _spriteWorldHeight = capturedWorldHeight;
+                _spriteWorldHeight = worldHeight;
             }
 
             return true;
-        }
-
-        void SyncCaptureSize()
-        {
-            // The snapshot comes from its own camera with its own view: only the size
-            // follows the main camera (1.2x), the capture camera never moves with it.
-            captureCamera.orthographicSize = sourceCamera.orthographicSize * viewScale;
         }
 
         void Capture()
@@ -133,7 +132,7 @@ namespace Platformer
 
             RenderTexture previous = RenderTexture.active;
             RenderTexture.active = _renderTexture;
-            _texture.ReadPixels(new Rect(0, 0, textureWidth, textureHeight), 0, 0);
+            _texture.ReadPixels(new Rect(0, 0, _texture.width, _texture.height), 0, 0);
             ClearBorder();
             _texture.Apply();
             RenderTexture.active = previous;
@@ -148,35 +147,50 @@ namespace Platformer
             Color background = sourceCamera.backgroundColor;
             const int border = 2;
 
-            for (int x = 0; x < textureWidth; x++)
+            for (int x = 0; x < _texture.width; x++)
             {
                 for (int y = 0; y < border; y++)
                 {
                     _texture.SetPixel(x, y, background);
-                    _texture.SetPixel(x, textureHeight - 1 - y, background);
+                    _texture.SetPixel(x, _texture.height - 1 - y, background);
                 }
             }
 
-            for (int y = 0; y < textureHeight; y++)
+            for (int y = 0; y < _texture.height; y++)
             {
                 for (int x = 0; x < border; x++)
                 {
                     _texture.SetPixel(x, y, background);
-                    _texture.SetPixel(textureWidth - 1 - x, y, background);
+                    _texture.SetPixel(_texture.width - 1 - x, y, background);
                 }
             }
         }
 
-        void OnDestroy()
+        void ReleaseTargets()
         {
             if (_renderTexture != null)
             {
                 _renderTexture.Release();
                 Destroy(_renderTexture);
+                _renderTexture = null;
             }
 
-            if (_sprite != null) Destroy(_sprite);
-            if (_texture != null) Destroy(_texture);
+            if (_sprite != null)
+            {
+                Destroy(_sprite);
+                _sprite = null;
+            }
+
+            if (_texture != null)
+            {
+                Destroy(_texture);
+                _texture = null;
+            }
+        }
+
+        void OnDestroy()
+        {
+            ReleaseTargets();
         }
     }
 }

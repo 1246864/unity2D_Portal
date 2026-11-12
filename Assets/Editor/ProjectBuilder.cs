@@ -378,7 +378,7 @@ namespace Platformer.EditorTools
             var sr = go.AddComponent<SpriteRenderer>();
             sr.sprite = sprites["player_capsule"];
             sr.color = Color.white; // sprite is pre-coloured
-            sr.sortingOrder = 10;
+            sr.sortingOrder = 100; // always drawn above the snapshot output (order 20)
             if (spriteMaterial != null) sr.sharedMaterial = spriteMaterial;
 
             var rb = go.AddComponent<Rigidbody2D>();
@@ -586,13 +586,14 @@ namespace Platformer.EditorTools
             capture.backgroundColor = BackgroundColor;
             capture.nearClipPlane = 0.3f;
             capture.farClipPlane = 100f;
-            capture.cullingMask = ~(1 << SnapshotLayer);
             capture.enabled = false; // rendered on demand by RegionSnapshotCamera
+            // Culling mask is left at "everything": if the output sprite is inside this
+            // camera's view it is captured as well, producing a mirror-in-mirror effect.
 
             // The captured image is displayed here as a sprite.
             var outputGo = new GameObject("Snapshot Output");
             outputGo.layer = SnapshotLayer;
-            outputGo.transform.position = new Vector3(6f, 14f, 0f);
+            outputGo.transform.position = new Vector3(6f, 16f, 0f);
 
             var outputSprite = outputGo.AddComponent<SpriteRenderer>();
             outputSprite.sortingOrder = 20;
@@ -602,6 +603,7 @@ namespace Platformer.EditorTools
             controller.captureCamera = capture;
             controller.output = outputSprite;
         }
+
         static void BuildGlobalLight()
         {
             var lightGo = new GameObject("Global Light 2D");

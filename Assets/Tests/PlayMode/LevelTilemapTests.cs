@@ -149,6 +149,17 @@ namespace Platformer.Tests
             Assert.AreEqual(Vector3.one, snapshot.output.transform.lossyScale,
                 "Snapshot output must not be scaled.");
 
+            // The canvas (texture) scales with the captured area at a constant density.
+            int expectedTextureHeight = Mathf.RoundToInt(capturedHeight * snapshot.pixelsPerUnit);
+            Assert.AreEqual(expectedTextureHeight, snapshot.output.sprite.texture.height, 1,
+                "Snapshot canvas should scale with the captured area.");
+
+            // Recursion: the capture camera must be able to see its own output so a
+            // mirror-in-mirror effect is possible.
+            int outputLayerBit = 1 << snapshot.output.gameObject.layer;
+            Assert.AreNotEqual(0, snapshot.captureCamera.cullingMask & outputLayerBit,
+                "Capture camera must be able to capture its own output.");
+
             // The snapshot image must contain the scene, not only the background colour.
             Texture2D texture = snapshot.output.sprite.texture;
             Color background = snapshot.sourceCamera.backgroundColor;

@@ -107,12 +107,13 @@ Snapshot Camera（正交，orthoSize = 主相机 × 1.2）
 
 | 项目 | 说明 |
 |---|---|
-| 捕获范围 | 主相机视野的 **1.2 倍**（`RegionSnapshotCamera.viewScale`） |
+| 捕获范围 | 主相机视野的 **1.2 倍**（`RegionSnapshotCamera.viewScale`）；主相机视野变大时捕获范围同步变大 |
 | 捕获相机 | `Snapshot Camera`，**独立视角**：画面是这台相机自己拍的，位置自己决定、不跟随主相机；只有尺寸跟随主相机；按需渲染（`enabled = false`） |
 | 刷新间隔 | `captureInterval` 默认 **0.05 秒**（0 = 每帧） |
-| 输出 | `Snapshot Output`（`Snapshot` 层 8），**严格 1:1**：精灵缩放为 1 时与拍摄区域完全同尺寸 |
-| 防穿帮 | 捕获相机的 cullingMask 排除 `Snapshot` 层，不会拍到自己的输出 |
+| 输出 | `Snapshot Output`（`Snapshot` 层 8），**严格 1:1**：精灵缩放为 1 时与拍摄区域完全同尺寸；画布（贴图）随捕获范围等比放大，像素密度不变 |
+| 递归 | 捕获相机不排除任何层：输出精灵若落在相机视野内，会被一起拍进画面（镜中镜效果） |
 | 无头模式 | 没有图形设备时自动禁用，避免 `Camera.Render()` 在 `-nographics` 下卡死 |
+| 玩家层级 | 玩家 SpriteRenderer 排序为 **100**，始终绘制在快照输出（20）之上 |
 
 > 输出的是**真实图像**（Texture2D），不是对象复制；上面的字母/像素会被一并拍下。
 > 预览渲染时会临时 `CaptureNow()` 出图，渲染完清空输出精灵。
