@@ -32,9 +32,10 @@ namespace Platformer
         public RegionSnapshotCamera capture;
         public SpriteRenderer output;
 
-        [Tooltip("Pixels the two halves overlap at the centre line; hides the seam the " +
-                 "cross-display recursion would otherwise amplify into a line.")]
-        [Range(0f, 16f)] public float centerOverlapPixels = 2f;
+        [Tooltip("Pixels each half stops short of the centre line. The small gap means the " +
+                 "two halves no longer share a pixel column, which the cross-display recursion " +
+                 "would otherwise amplify into a bright line.")]
+        [Range(0f, 16f)] public float centerGapPixels = 1f;
 
         Sprite _halfSprite;
 
@@ -98,12 +99,12 @@ namespace Platformer
             // amplified by the cross-display recursion into a visible seam line.
             bool rightHalf = side == CaptureGroupSide.A;
             float halfPixels = full.rect.width * 0.5f;
-            float overlapPixels = Mathf.Clamp(centerOverlapPixels, 0f, halfPixels * 0.5f);
+            float gapPixels = Mathf.Clamp(centerGapPixels, 0f, halfPixels * 0.5f);
 
             var halfRect = new Rect(
-                rightHalf ? full.rect.x + halfPixels - overlapPixels : full.rect.x,
+                rightHalf ? full.rect.x + halfPixels + gapPixels : full.rect.x,
                 full.rect.y,
-                halfPixels + overlapPixels,
+                halfPixels - gapPixels,
                 full.rect.height);
 
             if (_halfSprite != null) Destroy(_halfSprite);
@@ -113,8 +114,8 @@ namespace Platformer
             output.sprite = _halfSprite;
 
             // Centre the kept region where it sits in the full image.
-            float overlapWorld = overlapPixels / pixelsPerUnit;
-            float offset = (fullWidth * 0.25f - overlapWorld * 0.5f) * (rightHalf ? 1f : -1f);
+            float gapWorld = gapPixels / pixelsPerUnit;
+            float offset = (fullWidth * 0.25f + gapWorld * 0.5f) * (rightHalf ? 1f : -1f);
             output.transform.localPosition = new Vector3(offset, 0f, 0f);
         }
     }
