@@ -109,7 +109,7 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
-        public IEnumerator Snapshot_Camera_Captures_Main_View()
+        public IEnumerator Snapshot_Camera_Captures_Own_View()
         {
             yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
 
@@ -127,7 +127,16 @@ namespace Platformer.Tests
 
             Assert.IsNotNull(snapshot.output.sprite, "Snapshot output sprite should be created.");
 
-            // Captured region = 1.2x the main camera view.
+            // The snapshot is the capture camera's own image: moving the player camera
+            // must not move the capture camera.
+            Vector3 capturePosition = snapshot.captureCamera.transform.position;
+            snapshot.sourceCamera.transform.position += new Vector3(4f, 0f, 0f);
+            yield return null;
+            yield return null;
+            Assert.AreEqual(capturePosition, snapshot.captureCamera.transform.position,
+                "Capture camera must keep its own position, not follow the player camera.");
+
+            // Only the captured size follows the main camera: 1.2x its view.
             float expectedSize = snapshot.sourceCamera.orthographicSize * 1.2f;
             Assert.AreEqual(expectedSize, snapshot.captureCamera.orthographicSize, 0.01f,
                 "Capture camera should cover 1.2x the main view.");

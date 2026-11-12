@@ -108,7 +108,7 @@ Snapshot Camera（正交，orthoSize = 主相机 × 1.2）
 | 项目 | 说明 |
 |---|---|
 | 捕获范围 | 主相机视野的 **1.2 倍**（`RegionSnapshotCamera.viewScale`） |
-| 捕获相机 | `Snapshot Camera`，位置跟随主相机，按需渲染（`enabled = false`） |
+| 捕获相机 | `Snapshot Camera`，**独立视角**：画面是这台相机自己拍的，位置自己决定、不跟随主相机；只有尺寸跟随主相机；按需渲染（`enabled = false`） |
 | 刷新间隔 | `captureInterval` 默认 **0.05 秒**（0 = 每帧） |
 | 输出 | `Snapshot Output`（`Snapshot` 层 8），**严格 1:1**：精灵缩放为 1 时与拍摄区域完全同尺寸 |
 | 防穿帮 | 捕获相机的 cullingMask 排除 `Snapshot` 层，不会拍到自己的输出 |

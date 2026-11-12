@@ -576,7 +576,8 @@ namespace Platformer.EditorTools
         {
             // Orthographic camera that renders 1.2x the main view into a RenderTexture.
             var captureGo = new GameObject("Snapshot Camera");
-            captureGo.transform.position = mainCamera.transform.position;
+            // Own view: the snapshot is this camera's image, not the player camera's.
+            captureGo.transform.position = new Vector3(6f, 2f, -10f);
 
             var capture = captureGo.AddComponent<Camera>();
             capture.orthographic = true;

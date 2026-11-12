@@ -59,7 +59,7 @@ namespace Platformer
         {
             if (sourceCamera == null || captureCamera == null || output == null) return;
 
-            FollowSource();
+            SyncCaptureSize();
 
             _timer -= Time.deltaTime;
             if (_timer <= 0f)
@@ -80,7 +80,7 @@ namespace Platformer
         {
             if (!_renderingAvailable && SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null) return;
             if (!EnsureResources()) return;
-            FollowSource();
+            SyncCaptureSize();
             Capture();
         }
 
@@ -119,10 +119,10 @@ namespace Platformer
             return true;
         }
 
-        void FollowSource()
+        void SyncCaptureSize()
         {
-            Vector3 position = sourceCamera.transform.position;
-            captureCamera.transform.position = new Vector3(position.x, position.y, position.z);
+            // The snapshot comes from its own camera with its own view: only the size
+            // follows the main camera (1.2x), the capture camera never moves with it.
             captureCamera.orthographicSize = sourceCamera.orthographicSize * viewScale;
         }
 
