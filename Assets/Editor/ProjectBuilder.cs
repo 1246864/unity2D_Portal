@@ -604,11 +604,11 @@ namespace Platformer.EditorTools
             float coverHeight = Mathf.Max(0.01f, (viewHeight - PortalOpeningHeight) * 0.5f);
             float offset = PortalOpeningHeight * 0.5f + coverHeight * 0.5f;
 
-            CreateCover("View Cover Top", view, sprite, sortingOrder, offset, viewWidth, coverHeight);
-            CreateCover("View Cover Bottom", view, sprite, sortingOrder, -offset, viewWidth, coverHeight);
+            CreateViewMask("View Mask Top", view, sprite, sortingOrder, offset, viewWidth, coverHeight);
+            CreateViewMask("View Mask Bottom", view, sprite, sortingOrder, -offset, viewWidth, coverHeight);
         }
 
-        static void CreateCover(string name, Transform parent, Sprite sprite, int sortingOrder,
+        static void CreateViewMask(string name, Transform parent, Sprite sprite, int sortingOrder,
             float y, float width, float height)
         {
             var go = new GameObject(name);
@@ -616,10 +616,13 @@ namespace Platformer.EditorTools
             go.transform.localPosition = new Vector3(0f, y, 0f);
             go.transform.localScale = new Vector3(width, height, 1f);
 
-            var renderer = go.AddComponent<SpriteRenderer>();
-            renderer.sprite = sprite;
-            renderer.color = BackgroundColor;
-            renderer.sortingOrder = sortingOrder;
+            // A SpriteMask writes to the stencil buffer only, so it clips the portal view
+            // without drawing over any other object.
+            var mask = go.AddComponent<SpriteMask>();
+            mask.sprite = sprite;
+            mask.alphaCutoff = 0.01f;
+            mask.frontSortingOrder = sortingOrder + 20;
+            mask.backSortingOrder = 0;
         }
         static CaptureDisplayGroup CreateCaptureGroup(string name, Transform parent, Vector3 localPosition, CaptureGroupSide side, Camera mainCamera)
         {
@@ -649,6 +652,8 @@ namespace Platformer.EditorTools
 
             var outputSprite = outputGo.AddComponent<SpriteRenderer>();
             outputSprite.sortingOrder = 20;
+            // Only this sprite is clipped by the view masks; every other renderer is untouched.
+            outputSprite.maskInteraction = SpriteMaskInteraction.VisibleOutsideMask;
 
             // Two covers under the view: they hide the view everywhere except the
             // opening band, so the portal shows through a horizontal slot.
