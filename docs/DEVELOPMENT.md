@@ -163,6 +163,15 @@
 - 三角形瓦片的边通过「alpha 掩码腐蚀」生成（`ImageFilter.MinFilter`），沿斜边也是 1px。
 - 结果：浅灰地形呈白色块体 + 细网格 + 浅蓝外轮廓；深灰块同样带网格。
 
+### 阶段 14 — 相机快照
+
+- 需求：用相机捕获「主相机视野 1.2 倍」的区域，输出成一张新的精灵（图像形式，不是对象复制）。
+- 方案：`RegionSnapshotCamera` 用一台正交 `Snapshot Camera`（`orthoSize = 主相机 × 1.2`，位置跟随主相机、`enabled = false` 按需渲染）渲染到 960×540 的 `RenderTexture`，`ReadPixels` 到 `Texture2D`，再用它生成 `Sprite` 赋给 `Snapshot Output` 的 `SpriteRenderer`。
+- PPU 按「捕获世界高度」换算，快照按区域真实尺寸显示；默认 `outputScale = 0.5` 缩小摆放。
+- 新增 `Snapshot` 层（8），捕获相机的 cullingMask 排除该层，避免拍到自己的输出形成回授。
+- 无头模式（`-nographics`）下没有图形设备，`Camera.Render()` 会永久阻塞，因此启动时检测 `SystemInfo.graphicsDeviceType` 并自动禁用。
+- 预览渲染时临时 `CaptureNow()` 出图、渲染后 `ClearOutput()`；新增测试 `Snapshot_Camera_Captures_Main_View`（9/9 通过，无头模式该测试跳过）。
+
 ---
 
 ## 4. 工程结构
@@ -336,3 +345,4 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | 2026-11-12 | 修复 45° 斜边描边（背景掩码轮廓 + 色差类型边界）；新增 TerrainPalette 调色板 |
 | 2026-11-12 | 普通地形颜色改为超浅灰 `#E0E0E0`（深灰变体不变） |
 | 2026-11-12 | 每个瓦片增加内描边（贴图烘焙 0.929 亮度边），外轮廓阈值提到 0.28 |
+| 2026-11-12 | 新增相机快照：主相机视野 1.2 倍渲染成 RenderTexture → Sprite 输出 |

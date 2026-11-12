@@ -36,6 +36,7 @@ namespace Platformer.EditorTools
 
         const int GroundLayer = 6;
         const int PlayerLayer = 7;
+        const int SnapshotLayer = 8;
 
         const float PlayerWidth = 0.72f;
         const float PlayerHeight = 1.5f;
@@ -122,6 +123,7 @@ namespace Platformer.EditorTools
 
             SetLayerName(layers, GroundLayer, "Ground");
             SetLayerName(layers, PlayerLayer, "Player");
+            SetLayerName(layers, SnapshotLayer, "Snapshot");
 
             so.ApplyModifiedPropertiesWithoutUndo();
             AssetDatabase.SaveAssets();
@@ -517,7 +519,8 @@ namespace Platformer.EditorTools
             player.name = "Player";
             player.transform.position = new Vector3(Spawn.x, Spawn.y, 0f);
 
-            BuildCamera(player);
+            Camera mainCamera = BuildCamera(player);
+            BuildSnapshot(mainCamera);
             BuildGlobalLight();
 
             EditorSceneManager.MarkSceneDirty(scene);
@@ -539,7 +542,7 @@ namespace Platformer.EditorTools
             for (int y = fromY; y <= toY; y++) PaintCell(tilemap, tile, cellX, y);
         }
 
-        static void BuildCamera(GameObject player)
+        static Camera BuildCamera(GameObject player)
         {
             var camGo = new GameObject("Main Camera");
             camGo.tag = "MainCamera";
@@ -565,8 +568,40 @@ namespace Platformer.EditorTools
             follow.useLookAhead = true;
             follow.lookAheadDistance = 1.5f;
             follow.lookAheadSpeedReference = 9f;
+
+            return cam;
         }
 
+        static void BuildSnapshot(Camera mainCamera)
+        {
+            // Orthographic camera that renders 1.2x the main view into a RenderTexture.
+            var captureGo = new GameObject("Snapshot Camera");
+            captureGo.transform.position = mainCamera.transform.position;
+
+            var capture = captureGo.AddComponent<Camera>();
+            capture.orthographic = true;
+            capture.orthographicSize = mainCamera.orthographicSize * 1.2f;
+            capture.clearFlags = CameraClearFlags.SolidColor;
+            capture.backgroundColor = BackgroundColor;
+            capture.nearClipPlane = 0.3f;
+            capture.farClipPlane = 100f;
+            capture.cullingMask = ~(1 << SnapshotLayer);
+            capture.enabled = false; // rendered on demand by RegionSnapshotCamera
+
+            // The captured image is displayed here as a sprite.
+            var outputGo = new GameObject("Snapshot Output");
+            outputGo.layer = SnapshotLayer;
+            outputGo.transform.position = new Vector3(6f, 14f, 0f);
+
+            var outputSprite = outputGo.AddComponent<SpriteRenderer>();
+            outputSprite.sortingOrder = 20;
+
+            var controller = new GameObject("Snapshot Capture").AddComponent<RegionSnapshotCamera>();
+            controller.sourceCamera = mainCamera;
+            controller.captureCamera = capture;
+            controller.output = outputSprite;
+            controller.outputTarget = outputGo.transform;
+        }
         static void BuildGlobalLight()
         {
             var lightGo = new GameObject("Global Light 2D");
@@ -690,9 +725,28 @@ namespace Platformer.EditorTools
             float gameplaySize = cam.orthographicSize;
             RenderShot(cam, Path.Combine(projectRoot, "Preview_Gameplay.png"), gameplayPos, gameplaySize);
 
-            // Wide overview of the whole level.
+            // The snapshot only renders during play; force one capture for the preview.
+            var snapshot = UnityEngine.Object.FindObjectOfType<RegionSnapshotCamera>();
+            if (snapshot != null) snapshot.CaptureNow();
+
+            // Overview framed to fit every terrain and sprite renderer in the scene.
+            Bounds bounds = new Bounds();
+            bool hasBounds = false;
+            foreach (var renderer in UnityEngine.Object.FindObjectsOfType<Renderer>())
+            {
+                if (!(renderer is SpriteRenderer) && !(renderer is TilemapRenderer)) continue;
+                if (!hasBounds) { bounds = renderer.bounds; hasBounds = true; }
+                else bounds.Encapsulate(renderer.bounds);
+            }
+
+            if (!hasBounds) bounds = new Bounds(new Vector3(6f, 3.5f, 0f), new Vector3(24f, 14f, 0f));
+
+            const float aspect = 1280f / 720f;
+            float overviewSize = Mathf.Max(bounds.extents.y, bounds.extents.x / aspect) * 1.05f;
             RenderShot(cam, Path.Combine(projectRoot, "Preview.png"),
-                new Vector3(6f, 3.5f, -10f), 10.5f);
+                new Vector3(bounds.center.x, bounds.center.y, -10f), overviewSize);
+
+            if (snapshot != null) snapshot.ClearOutput();
 
             cam.transform.position = gameplayPos;
             cam.orthographicSize = gameplaySize;

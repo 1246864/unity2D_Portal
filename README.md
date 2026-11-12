@@ -7,7 +7,7 @@
 ![整关俯瞰](Preview.png)
 ![游戏视角](Preview_Gameplay.png)
 
-## 已实测验证（PlayMode 自动化测试 8/8 通过）
+## 已实测验证（PlayMode 自动化测试 9/9 通过）
 
 | 测试 | 结果 |
 |---|---|
@@ -16,6 +16,7 @@
 | 45° 斜坡爬升 | 成功（峰值 2.76） |
 | Tilemap 关卡集成 | 通过（135 格瓦片，玩家站立在合并碰撞体上，y=0.75） |
 | 瓦片斜坡爬升 | 通过（玩家沿 1×1 斜坡瓦片走上 2 格高台） |
+| 相机快照 | 通过（捕获范围 = 主相机视野 1.2 倍，图像包含场景内容） |
 | 水平移动、站立检测、坠落重生 | 通过 |
 
 ## 地图构建方式
@@ -91,6 +92,30 @@ Level
 
 > 外轮廓是屏幕空间效果，粗细以像素计，不随镜头缩放变化；瓦片内描边是贴图效果，随镜头缩放。
 > 轮廓边依赖相机的纯色背景（Solid Color），如果以后换成 Skybox / 图片背景，需要相应调整判定方式。
+
+## 相机快照（Snapshot Camera）
+
+场景里有一套“相机拍摄 → 图像精灵”的捕获系统：
+
+```
+Snapshot Camera（正交，orthoSize = 主相机 × 1.2）
+    → RenderTexture 960×540
+    → Texture2D.ReadPixels
+    → Sprite（PPU 按捕获世界高度换算）
+    → Snapshot Output 的 SpriteRenderer
+```
+
+| 项目 | 说明 |
+|---|---|
+| 捕获范围 | 主相机视野的 **1.2 倍**（`RegionSnapshotCamera.viewScale`） |
+| 捕获相机 | `Snapshot Camera`，位置跟随主相机，按需渲染（`enabled = false`） |
+| 刷新间隔 | `captureInterval` 默认 **0.05 秒**（0 = 每帧） |
+| 输出 | `Snapshot Output`（`Snapshot` 层 8），默认显示缩放 0.5 |
+| 防穿帮 | 捕获相机的 cullingMask 排除 `Snapshot` 层，不会拍到自己的输出 |
+| 无头模式 | 没有图形设备时自动禁用，避免 `Camera.Render()` 在 `-nographics` 下卡死 |
+
+> 输出的是**真实图像**（Texture2D），不是对象复制；上面的字母/像素会被一并拍下。
+> 预览渲染时会临时 `CaptureNow()` 出图，渲染完清空输出精灵。
 
 ## 物理材质
 

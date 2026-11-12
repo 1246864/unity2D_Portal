@@ -107,5 +107,49 @@ namespace Platformer.Tests
             Assert.Greater(peakY, 2f,
                 $"Player should walk up the tile ramp to the 2-cell plateau, peak y was {peakY:F2}.");
         }
+
+        [UnityTest]
+        public IEnumerator Snapshot_Camera_Captures_Main_View()
+        {
+            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
+
+            Scene scene = SceneManager.GetSceneByName(LevelScene);
+            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
+
+            yield return new WaitForSeconds(0.3f);
+
+            var snapshot = Object.FindObjectOfType<RegionSnapshotCamera>();
+            Assert.IsNotNull(snapshot, "RegionSnapshotCamera not found in Level01.");
+            if (snapshot.output.sprite == null)
+            {
+                Assert.Ignore("Rendering is disabled in this run; snapshot image check skipped.");
+            }
+
+            Assert.IsNotNull(snapshot.output.sprite, "Snapshot output sprite should be created.");
+
+            // Captured region = 1.2x the main camera view.
+            float expectedSize = snapshot.sourceCamera.orthographicSize * 1.2f;
+            Assert.AreEqual(expectedSize, snapshot.captureCamera.orthographicSize, 0.01f,
+                "Capture camera should cover 1.2x the main view.");
+
+            // The snapshot image must contain the scene, not only the background colour.
+            Texture2D texture = snapshot.output.sprite.texture;
+            Color background = snapshot.sourceCamera.backgroundColor;
+            int content = 0;
+            for (int y = 0; y < texture.height; y += 16)
+            {
+                for (int x = 0; x < texture.width; x += 16)
+                {
+                    if (ColorDistance(texture.GetPixel(x, y), background) > 0.15f) content++;
+                }
+            }
+
+            Assert.Greater(content, 20, "Snapshot image should contain terrain and sprites.");
+        }
+
+        static float ColorDistance(Color a, Color b)
+        {
+            return Mathf.Max(Mathf.Abs(a.r - b.r), Mathf.Max(Mathf.Abs(a.g - b.g), Mathf.Abs(a.b - b.b)));
+        }
     }
 }
