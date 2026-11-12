@@ -575,11 +575,11 @@ namespace Platformer.EditorTools
         static void BuildCaptureGroups(Camera mainCamera)
         {
             // Both groups live under one empty node and pair up by their side.
-            var pair = new GameObject("Capture Display Pair");
+            var pair = new GameObject("Portal Pair");
             pair.transform.position = new Vector3(3f, 3f, 0f);
 
-            CreateCaptureGroup("Capture Display Group A", pair.transform, new Vector3(-9f, 0f, 0f), CaptureGroupSide.A, mainCamera);
-            CreateCaptureGroup("Capture Display Group B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera);
+            CreateCaptureGroup("Portal A", pair.transform, new Vector3(-9f, 0f, 0f), CaptureGroupSide.A, mainCamera);
+            CreateCaptureGroup("Portal B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera);
         }
 
         static CaptureDisplayGroup CreateCaptureGroup(string name, Transform parent, Vector3 localPosition, CaptureGroupSide side, Camera mainCamera)
@@ -589,7 +589,7 @@ namespace Platformer.EditorTools
             root.transform.localPosition = localPosition;
 
             // Every element of the group sits at the group origin (local position zero).
-            var cameraGo = new GameObject("Snapshot Camera");
+            var cameraGo = new GameObject("Portal Camera");
             cameraGo.transform.SetParent(root.transform, false);
             // Pull the camera back on Z; at z = 0 it sits in the map plane and sees nothing.
             cameraGo.transform.localPosition = new Vector3(0f, 0f, -10f);
@@ -603,7 +603,7 @@ namespace Platformer.EditorTools
             capture.farClipPlane = 100f;
             capture.enabled = false; // rendered on demand by RegionSnapshotCamera
 
-            var outputGo = new GameObject("Snapshot Output");
+            var outputGo = new GameObject("Portal View");
             outputGo.layer = SnapshotLayer;
             outputGo.transform.SetParent(root.transform, false);
             outputGo.transform.localPosition = Vector3.zero;
@@ -611,7 +611,7 @@ namespace Platformer.EditorTools
             var outputSprite = outputGo.AddComponent<SpriteRenderer>();
             outputSprite.sortingOrder = 20;
 
-            var captureGo = new GameObject("Snapshot Capture");
+            var captureGo = new GameObject("Portal Capture");
             captureGo.transform.SetParent(root.transform, false);
             captureGo.transform.localPosition = Vector3.zero;
 

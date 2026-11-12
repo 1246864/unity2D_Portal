@@ -177,9 +177,9 @@
 - 无头模式（`-nographics`）下没有图形设备，`Camera.Render()` 会永久阻塞，因此启动时检测 `SystemInfo.graphicsDeviceType` 并自动禁用。
 - 预览渲染时临时 `CaptureNow()` 出图、渲染后 `ClearOutput()`；测试 `Snapshot_Camera_Captures_Own_View` 校验：捕获相机不跟随、1.2 倍尺寸、1:1 世界尺寸、画布随范围缩放、可拍到自身输出。
 
-### 阶段 15 — 捕获显示组（交叉输出）
+### 阶段 15 — 捕获显示组（交叉输出，现命名 Portal A/B）
 
-- 把快照系统打包进空节点：`Capture Display Group A/B` 下挂 `Snapshot Camera`、`Snapshot Output`、`Snapshot Capture`，三者 localPosition 全部为 0。
+- 把快照系统打包进空节点：`Portal Pair` 下的 `Portal A/B` 各挂 `Portal Camera`、`Portal View`、`Portal Capture`，三者 localPosition 全部为 0。
 - 新增 `CaptureDisplayGroup`：持有本组的 `capture`（RegionSnapshotCamera）与 `output`（SpriteRenderer），并引用另一个组；`WireUp()` 交叉连接：A 的相机画到 B 的输出，B 的相机画到 A 的输出。
 - 场景生成两组（A 在 `(-6, 3)`、B 在 `(12, 3)`），互为 `otherGroup`。
 - 捕获背景改为**透明**：相机以 `(0,0,0,0)` 清屏，`ScreenOutline.shader` 改为输出 `centerSample.a` 保留源 alpha，否则描边 pass 会把透明背景刷成不透明黑，相机会被自己的画面盖死、交叉输出变成黑色死循环。

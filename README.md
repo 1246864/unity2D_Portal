@@ -93,12 +93,12 @@ Level
 > 外轮廓是屏幕空间效果，粗细以像素计，不随镜头缩放变化；瓦片内描边是贴图效果，随镜头缩放。
 > 轮廓边依赖相机的纯色背景（Solid Color），如果以后换成 Skybox / 图片背景，需要相应调整判定方式。
 
-## 相机快照（Capture Display Group）
+## 传送门端（Portal A / Portal B）
 
-场景里有两个「捕获显示组」，每组把一套相机快照系统打包在一个空节点下：
+场景里有两个传送门端（`Portal A` / `Portal B`），同属一个 `Portal Pair` 父节点，每端打包一套相机快照系统：
 
 ```
-Capture Display Group A          Capture Display Group B
+Portal A                          Portal B
 ├─ Snapshot Camera               ├─ Snapshot Camera
 ├─ Snapshot Output               ├─ Snapshot Output
 └─ Snapshot Capture              └─ Snapshot Capture
