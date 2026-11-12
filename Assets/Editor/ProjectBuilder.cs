@@ -43,6 +43,7 @@ namespace Platformer.EditorTools
         const string MaskSpritePath = "Assets/Art/Placeholders/mask_white.png";
         const string PortalALayerName = "Portal A";
         const string PortalBLayerName = "Portal B";
+        const string PlayerSortingLayer = "Player";
 
         const float PlayerWidth = 0.72f;
         const float PlayerHeight = 1.5f;
@@ -133,6 +134,7 @@ namespace Platformer.EditorTools
 
             ConfigureSortingLayer(so, "Portal A");
             ConfigureSortingLayer(so, "Portal B");
+            ConfigureSortingLayer(so, PlayerSortingLayer);
 
             so.ApplyModifiedPropertiesWithoutUndo();
             AssetDatabase.SaveAssets();
@@ -403,7 +405,8 @@ namespace Platformer.EditorTools
             var sr = go.AddComponent<SpriteRenderer>();
             sr.sprite = sprites["player_capsule"];
             sr.color = Color.white; // sprite is pre-coloured
-            sr.sortingOrder = 100; // always drawn above the snapshot output (order 20)
+            sr.sortingLayerName = PlayerSortingLayer; // renders above both portal views
+            sr.sortingOrder = 100;
             if (spriteMaterial != null) sr.sharedMaterial = spriteMaterial;
 
             var rb = go.AddComponent<Rigidbody2D>();
@@ -607,8 +610,8 @@ namespace Platformer.EditorTools
             var pairControl = pair.AddComponent<PortalPair>();
             pairControl.player = player.transform;
 
-            CreateCaptureGroup("Portal A", pair.transform, new Vector3(-9f, 0f, 0f), CaptureGroupSide.A, mainCamera);
-            CreateCaptureGroup("Portal B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera);
+            CreateCaptureGroup("Portal A", pair.transform, new Vector3(18.89f, 4f, 0f), CaptureGroupSide.A, mainCamera);
+            CreateCaptureGroup("Portal B", pair.transform, new Vector3(-10.38f, 1.94f, 0f), CaptureGroupSide.B, mainCamera);
         }
 
         static void BuildPortalMaskRig(Transform group, string sortingLayer, int sortingOrder,
@@ -627,22 +630,25 @@ namespace Platformer.EditorTools
             var root = new GameObject("Portal Mask");
             root.transform.SetParent(group, false);
 
-            maskTop = CreateMaskUnit("View Mask Top", root.transform, sprite, sortingLayer, sortingOrder, 50f, 50f);
-            maskBottom = CreateMaskUnit("View Mask Bottom", root.transform, sprite, sortingLayer, sortingOrder, 50f, -50f);
+            float flip = group.GetComponent<CaptureDisplayGroup>() != null &&
+                         group.GetComponent<CaptureDisplayGroup>().side == CaptureGroupSide.A ? -1f : 1f;
+            maskTop = CreateMaskUnit("View Mask Top", root.transform, sprite, sortingLayer, sortingOrder, 0f, 50f, flip);
+            maskBottom = CreateMaskUnit("View Mask Bottom", root.transform, sprite, sortingLayer, sortingOrder, 0f, -50f, flip);
         }
 
         static Transform CreateMaskUnit(string name, Transform parent, Sprite sprite, string sortingLayer,
-            int sortingOrder, float x, float y)
+            int sortingOrder, float x, float y, float flipY)
         {
             var unit = new GameObject(name);
             unit.transform.SetParent(parent, false);
+            unit.transform.localScale = new Vector3(1f, flipY, 1f);
 
             // The big SpriteMask child is what actually clips the view; the unit only
             // carries the offset and rotation driven by CaptureDisplayGroup.
             var maskGo = new GameObject("Mask");
             maskGo.transform.SetParent(unit.transform, false);
             maskGo.transform.localPosition = new Vector3(x, y, 0f);
-            maskGo.transform.localScale = new Vector3(100f, 100f, 1f);
+            maskGo.transform.localScale = new Vector3(200f, 100f, 1f);
 
             var mask = maskGo.AddComponent<SpriteMask>();
             mask.sprite = sprite;
