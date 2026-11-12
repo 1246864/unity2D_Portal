@@ -41,6 +41,8 @@ namespace Platformer.EditorTools
         const float ViewScale = 1.2f;
         const float PortalOpeningHeight = 3f;
         const string MaskSpritePath = "Assets/Art/Placeholders/mask_white.png";
+        const string PortalALayerName = "Portal A";
+        const string PortalBLayerName = "Portal B";
 
         const float PlayerWidth = 0.72f;
         const float PlayerHeight = 1.5f;
@@ -129,8 +131,27 @@ namespace Platformer.EditorTools
             SetLayerName(layers, PlayerLayer, "Player");
             SetLayerName(layers, SnapshotLayer, "Snapshot");
 
+            ConfigureSortingLayer(so, "Portal A");
+            ConfigureSortingLayer(so, "Portal B");
+
             so.ApplyModifiedPropertiesWithoutUndo();
             AssetDatabase.SaveAssets();
+        }
+
+        static void ConfigureSortingLayer(SerializedObject tagManager, string name)
+        {
+            SerializedProperty sortingLayers = tagManager.FindProperty("m_SortingLayers");
+            for (int i = 0; i < sortingLayers.arraySize; i++)
+            {
+                SerializedProperty element = sortingLayers.GetArrayElementAtIndex(i);
+                if (element.FindPropertyRelative("name").stringValue == name) return;
+            }
+
+            sortingLayers.InsertArrayElementAtIndex(sortingLayers.arraySize);
+            SerializedProperty added = sortingLayers.GetArrayElementAtIndex(sortingLayers.arraySize - 1);
+            added.FindPropertyRelative("name").stringValue = name;
+            added.FindPropertyRelative("uniqueID").intValue = name.GetHashCode();
+            added.FindPropertyRelative("locked").intValue = 0;
         }
 
         static void SetLayerName(SerializedProperty layers, int index, string name)
@@ -590,7 +611,8 @@ namespace Platformer.EditorTools
             CreateCaptureGroup("Portal B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera);
         }
 
-        static void BuildPortalMaskRig(Transform group, int sortingOrder, out Transform maskTop, out Transform maskBottom)
+        static void BuildPortalMaskRig(Transform group, string sortingLayer, int sortingOrder,
+            out Transform maskTop, out Transform maskBottom)
         {
             maskTop = null;
             maskBottom = null;
@@ -605,12 +627,12 @@ namespace Platformer.EditorTools
             var root = new GameObject("Portal Mask");
             root.transform.SetParent(group, false);
 
-            maskTop = CreateMaskUnit("View Mask Top", root.transform, sprite, sortingOrder, 50f, 50f);
-            maskBottom = CreateMaskUnit("View Mask Bottom", root.transform, sprite, sortingOrder, 50f, -50f);
+            maskTop = CreateMaskUnit("View Mask Top", root.transform, sprite, sortingLayer, sortingOrder, 50f, 50f);
+            maskBottom = CreateMaskUnit("View Mask Bottom", root.transform, sprite, sortingLayer, sortingOrder, 50f, -50f);
         }
 
-        static Transform CreateMaskUnit(string name, Transform parent, Sprite sprite, int sortingOrder,
-            float x, float y)
+        static Transform CreateMaskUnit(string name, Transform parent, Sprite sprite, string sortingLayer,
+            int sortingOrder, float x, float y)
         {
             var unit = new GameObject(name);
             unit.transform.SetParent(parent, false);
@@ -627,6 +649,9 @@ namespace Platformer.EditorTools
             mask.alphaCutoff = 0.01f;
             mask.frontSortingOrder = sortingOrder + 20;
             mask.backSortingOrder = 0;
+            int layerId = SortingLayer.NameToID(sortingLayer);
+            mask.frontSortingLayerID = layerId;
+            mask.backSortingLayerID = layerId;
 
             return unit.transform;
         }
@@ -658,12 +683,14 @@ namespace Platformer.EditorTools
 
             var outputSprite = outputGo.AddComponent<SpriteRenderer>();
             outputSprite.sortingOrder = 20;
-            // Only this sprite is clipped by the view masks; every other renderer is untouched.
+            // Each portal uses its own sorting layer so its masks can only clip its own view.
+            string sortingLayer = side == CaptureGroupSide.A ? PortalALayerName : PortalBLayerName;
+            outputSprite.sortingLayerName = sortingLayer;
             outputSprite.maskInteraction = SpriteMaskInteraction.VisibleOutsideMask;
 
             // Two covers under the view: they hide the view everywhere except the
             // opening band, so the portal shows through a horizontal slot.
-            BuildPortalMaskRig(root.transform, outputSprite.sortingOrder + 1,
+            BuildPortalMaskRig(root.transform, sortingLayer, outputSprite.sortingOrder + 1,
                 out Transform maskTop, out Transform maskBottom);
 
             var captureGo = new GameObject("Portal Capture");
