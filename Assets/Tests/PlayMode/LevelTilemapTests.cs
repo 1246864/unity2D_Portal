@@ -169,8 +169,8 @@ namespace Platformer.Tests
                 "Snapshot height must equal the captured world height.");
             Assert.AreEqual(capturedWidth, snapshot.output.sprite.bounds.size.x, 0.05f,
                 "Snapshot width must equal the captured world width.");
-            Assert.AreEqual(groupA.displayScale, snapshot.output.transform.lossyScale.x, 0.001f,
-                "Snapshot output should use the group display scale.");
+            Assert.AreEqual(Vector3.one, snapshot.output.transform.lossyScale,
+                "Snapshot output must not be scaled.");
 
             // 5. The canvas keeps a constant texel density.
             Assert.AreEqual(snapshot.pixelsPerUnit,

@@ -756,7 +756,6 @@ namespace Platformer.EditorTools
             {
                 group.ResolvePartner();
                 group.WireUp();
-                group.ApplyDisplayScale();
             }
 
             // A few passes so the cross-display feedback settles before rendering.
@@ -765,7 +764,6 @@ namespace Platformer.EditorTools
                 foreach (var group in groups) if (group.capture != null) group.capture.CaptureNow();
             }
 
-            foreach (var group in groups) group.RefreshDebugOutline();
 
             // Overview framed to fit every terrain and sprite renderer in the scene.
             Bounds bounds = new Bounds();
