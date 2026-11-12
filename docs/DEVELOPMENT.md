@@ -181,7 +181,9 @@
 - 把快照系统打包进空节点：`Capture Display Group A/B` 下挂 `Snapshot Camera`、`Snapshot Output`、`Snapshot Capture`，三者 localPosition 全部为 0。
 - 新增 `CaptureDisplayGroup`：持有本组的 `capture`（RegionSnapshotCamera）与 `output`（SpriteRenderer），并引用另一个组；`WireUp()` 交叉连接：A 的相机画到 B 的输出，B 的相机画到 A 的输出。
 - 场景生成两组（A 在 `(-6, 3)`、B 在 `(12, 3)`），互为 `otherGroup`。
+- 捕获背景改为**透明**：相机以 `(0,0,0,0)` 清屏，`ScreenOutline.shader` 改为输出 `centerSample.a` 保留源 alpha，否则描边 pass 会把透明背景刷成不透明黑，相机会被自己的画面盖死、交叉输出变成黑色死循环。
 - 预览渲染前对两组调用 `WireUp()` 并连续捕获 3 轮，让交叉反馈稳定后再出图，渲染完清空输出。
+- 已知限制：`-batchmode` 的 PlayMode 测试不渲染相机（读回的 RT 恒为初始内容），所以像素内容由预览渲染验证，PlayMode 测试只校验结构、尺寸、连线与层级。
 - 测试更新：校验两组存在、交叉连线正确（`A.capture.output == B.output`、`B.capture.output == A.output`），其余快照断言沿用 A 组。
 
 ---

@@ -595,8 +595,10 @@ namespace Platformer.EditorTools
             var capture = cameraGo.AddComponent<Camera>();
             capture.orthographic = true;
             capture.orthographicSize = mainCamera.orthographicSize * 1.2f;
+            // Transparent clear so the output sprite lets the world show through; that is
+            // what makes the cross-display recursion visible instead of a black frame.
             capture.clearFlags = CameraClearFlags.SolidColor;
-            capture.backgroundColor = BackgroundColor;
+            capture.backgroundColor = new Color(0f, 0f, 0f, 0f);
             capture.nearClipPlane = 0.3f;
             capture.farClipPlane = 100f;
             capture.enabled = false; // rendered on demand by RegionSnapshotCamera

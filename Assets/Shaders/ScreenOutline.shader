@@ -38,7 +38,8 @@ Shader "Hidden/Platformer/ScreenOutline"
                 float2 uv = input.texcoord;
                 float2 texel = _SourceTexelSize.xy * _OutlineWidth;
 
-                half3 center = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv).rgb;
+                half4 centerSample = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv);
+                half3 center = centerSample.rgb;
                 half3 left   = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv - float2(texel.x, 0.0)).rgb;
                 half3 right  = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv + float2(texel.x, 0.0)).rgb;
                 half3 down   = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv - float2(0.0, texel.y)).rgb;
@@ -92,7 +93,9 @@ Shader "Hidden/Platformer/ScreenOutline"
                 half mask = saturate(silhouette + colorEdge);
                 half3 result = lerp(center, _OutlineColor.rgb, mask * _OutlineColor.a);
 
-                return half4(result, 1.0);
+                // Keep the source alpha so cameras with a transparent background (the
+                // capture groups) produce see-through snapshots.
+                return half4(result, centerSample.a);
             }
             ENDHLSL
         }

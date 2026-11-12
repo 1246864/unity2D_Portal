@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace Platformer
 {
@@ -60,6 +61,10 @@ namespace Platformer
             }
 
             if (!EnsureResources()) return;
+            captureCamera.targetTexture = _renderTexture;
+            // URP renders enabled cameras automatically; a manual Camera.Render() on a
+            // disabled camera is ignored, which is why this one stays enabled.
+            captureCamera.enabled = true;
             Capture();
         }
 
@@ -110,8 +115,9 @@ namespace Platformer
 
                 _renderTexture = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
                 _renderTexture.Create();
+                if (captureCamera != null) captureCamera.targetTexture = _renderTexture;
 
-                _texture = new Texture2D(width, height, TextureFormat.RGB24, false);
+                _texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
                 _texture.name = "Region Snapshot";
 
                 float pixelsPerWorldUnit = height / Mathf.Max(0.001f, worldHeight);
@@ -127,7 +133,8 @@ namespace Platformer
 
         void Capture()
         {
-            captureCamera.targetTexture = _renderTexture;
+            // Render on demand: this works in edit mode and in batch play-mode tests,
+            // where the automatic camera loop does not present frames.
             captureCamera.Render();
 
             RenderTexture previous = RenderTexture.active;
@@ -136,15 +143,13 @@ namespace Platformer
             ClearBorder();
             _texture.Apply();
             RenderTexture.active = previous;
-
-            captureCamera.targetTexture = null;
         }
 
         void ClearBorder()
         {
             // A thin background-coloured border keeps the screen-space outline from
             // tracing the snapshot sprite as if it were terrain.
-            Color background = sourceCamera.backgroundColor;
+            Color background = captureCamera.backgroundColor;
             const int border = 2;
 
             for (int x = 0; x < _texture.width; x++)
@@ -190,6 +195,12 @@ namespace Platformer
 
         void OnDestroy()
         {
+            if (captureCamera != null)
+            {
+                captureCamera.targetTexture = null;
+                captureCamera.enabled = false;
+            }
+
             ReleaseTargets();
         }
     }
