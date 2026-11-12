@@ -8,10 +8,10 @@ namespace Platformer
     /// </summary>
     public class PortalPair : MonoBehaviour
     {
-        [Tooltip("Player the portal view masking works with.")]
+        [Tooltip("玩家对象，遮罩朝向和传送都以它为参照")]
         public Transform player;
 
-        [Tooltip("Eye height above the player's centre, in world units.")]
+        [Tooltip("眼睛相对玩家中心点的高度（世界单位）")]
         public float playerEyeOffset = 0.4f;
 
         /// <summary>World position of the player's eyes.</summary>

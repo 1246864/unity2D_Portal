@@ -17,26 +17,28 @@ namespace Platformer
     /// </summary>
     public class RegionSnapshotCamera : MonoBehaviour
     {
-        [Header("Source")]
-        [Tooltip("Main camera: only its view size is referenced, not its position.")]
+        [Header("来源")]
+        [Tooltip("主相机：只参考它的视野大小，不参考位置")]
         public Camera sourceCamera;
 
-        [Tooltip("Captured area size relative to the main camera view.")]
+        [Tooltip("捕获范围相对主相机视野的倍数")]
         public float viewScale = 1.2f;
 
-        [Header("Capture Camera")]
+        [Header("捕获相机")]
+        [Tooltip("真正执行渲染的相机（正交）")]
         public Camera captureCamera;
 
-        [Tooltip("Texels per world unit of the captured image.")]
+        [Tooltip("生成图像的像素密度（每世界单位的像素数）")]
         public float pixelsPerUnit = 40f;
 
-        [Tooltip("Upper limit for the generated texture size.")]
+        [Tooltip("生成贴图的尺寸上限")]
         public int maxTextureSize = 2048;
 
-        [Tooltip("Seconds between captures. 0 = every frame.")]
+        [Tooltip("两次捕获之间的间隔（秒），0 表示每帧")]
         public float captureInterval = 0.05f;
 
-        [Header("Output")]
+        [Header("输出")]
+        [Tooltip("显示捕获画面的精灵渲染器")]
         public SpriteRenderer output;
 
         RenderTexture _renderTexture;

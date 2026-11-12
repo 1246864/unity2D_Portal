@@ -5,15 +5,15 @@ namespace Platformer
     /// <summary>Which half of the capture pair this group is.</summary>
     public enum CaptureGroupSide
     {
-        A,
-        B
+        [InspectorName("A 门")] A,
+        [InspectorName("B 门")] B
     }
 
     /// <summary>Direction the portal faces: left or right.</summary>
     public enum PortalFacing
     {
-        Left,
-        Right
+        [InspectorName("朝左")] Left,
+        [InspectorName("朝右")] Right
     }
 
     /// <summary>
@@ -29,34 +29,35 @@ namespace Platformer
     /// </summary>
     public class CaptureDisplayGroup : MonoBehaviour
     {
-        [Tooltip("A or B. The group automatically pairs with the group of the other side.")]
+        [Tooltip("本组是 A 还是 B；会自动和另一侧配对")]
         public CaptureGroupSide side = CaptureGroupSide.A;
 
-        [Tooltip("Resolved automatically from the sibling groups.")]
+        [Tooltip("自动解析出的另一扇门，无需手填")]
         public CaptureDisplayGroup partner;
 
-        [Header("Internal")]
+        [Header("内部引用")]
+        [Tooltip("本组的捕获控制器")]
         public RegionSnapshotCamera capture;
+        [Tooltip("本组的画面精灵（会被对方那组画上画面）")]
         public SpriteRenderer output;
 
-        [Tooltip("Pixels each half stops short of the centre line. The small gap means the " +
-                 "two halves no longer share a pixel column, which the cross-display recursion " +
-                 "would otherwise amplify into a bright line.")]
+        [Tooltip("左右两半在中线各让出的像素数。留一点缝可以避免递归把共用像素列放大成一条亮线")]
         [Range(0f, 16f)] public float centerGapPixels = 1f;
 
-        [Header("Portal")]
-        [Tooltip("Which way this portal faces. Left/right faces behave differently when " +
-                 "teleporting the player.")]
+        [Header("传送门")]
+        [Tooltip("门的朝向：朝左或朝右。传送玩家时两种朝向的行为不同")]
         public PortalFacing facing = PortalFacing.Right;
 
-        [Tooltip("Top mask Y offset, in world units.")]
+        [Tooltip("上遮罩的 Y 偏移（世界单位）")]
         public float maskTopOffset = 1.5f;
 
-        [Tooltip("Bottom mask Y offset, in world units.")]
+        [Tooltip("下遮罩的 Y 偏移（世界单位）")]
         public float maskBottomOffset = -1.5f;
 
-        [Header("Mask rig")]
+        [Header("遮罩")]
+        [Tooltip("上遮罩节点（自动查找 View Mask Top）")]
         public Transform maskTop;
+        [Tooltip("下遮罩节点（自动查找 View Mask Bottom）")]
         public Transform maskBottom;
 
         /// <summary>Portal opening height, derived from the two mask offsets.</summary>

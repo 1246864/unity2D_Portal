@@ -14,42 +14,42 @@ namespace Platformer
     [RequireComponent(typeof(CapsuleCollider2D))]
     public class PlayerController2D : MonoBehaviour
     {
-        [Header("Horizontal Movement")]
-        [Tooltip("Top run speed, in units per second.")]
+        [Header("水平移动")]
+        [Tooltip("最高跑速（单位/秒）")]
         public float moveSpeed = 9f;
-        [Tooltip("Acceleration while a direction is held on the ground.")]
+        [Tooltip("地面上按住方向时的加速度")]
         public float groundAcceleration = 115f;
-        [Tooltip("Deceleration while no direction is held on the ground.")]
+        [Tooltip("地面上松开方向时的减速度")]
         public float groundDeceleration = 150f;
-        [Tooltip("Acceleration while a direction is held in the air.")]
+        [Tooltip("空中按住方向时的加速度")]
         public float airAcceleration = 70f;
-        [Tooltip("Deceleration while no direction is held in the air.")]
+        [Tooltip("空中松开方向时的减速度")]
         public float airDeceleration = 45f;
 
-        [Header("Jump")]
-        [Tooltip("Maximum jump height, in world units (= grid cells).")]
+        [Header("跳跃")]
+        [Tooltip("最大跳跃高度（世界单位，等于格）")]
         public float jumpHeight = 6f;
-        [Tooltip("Character height, in grid cells. Used for the ground probe and gizmos.")]
+        [Tooltip("角色高度（格），用于地面探测和 Gizmo")]
         public float playerHeight = 1.5f;
-        [Tooltip("Grace period after leaving ground during which a jump still counts.")]
+        [Tooltip("离开地面后仍可起跳的宽容时间")]
         public float coyoteTime = 0.1f;
-        [Tooltip("How early a jump press is remembered before landing.")]
+        [Tooltip("落地前提前按跳的缓冲时间")]
         public float jumpBufferTime = 0.12f;
-        [Tooltip("Extra gravity while falling, for a snappier arc.")]
+        [Tooltip("下落时额外的重力倍率，让弧线更利落")]
         [Range(1f, 3f)] public float fallGravityMultiplier = 1.6f;
-        [Tooltip("Terminal falling speed, in units per second.")]
+        [Tooltip("最大下落速度（单位/秒）")]
         public float maxFallSpeed = 30f;
-        [Tooltip("Vertical velocity kept when the jump button is released early.")]
+        [Tooltip("提前松开跳跃键时保留的垂直速度比例")]
         [Range(0f, 1f)] public float jumpCutMultiplier = 0.45f;
 
-        [Header("Ground Check")]
-        [Tooltip("Layers that count as walkable ground.")]
+        [Header("地面检测")]
+        [Tooltip("算作可站立地面的层")]
         public LayerMask groundMask = 1 << 6;
-        [Tooltip("How far below the feet the ground probe reaches.")]
+        [Tooltip("地面探测向下延伸的距离")]
         public float groundCheckDistance = 0.15f;
 
-        [Header("Respawn")]
-        [Tooltip("Falling below this Y coordinate respawns the player.")]
+        [Header("重生")]
+        [Tooltip("低于该 Y 坐标时重生")]
         public float fallLimitY = -12f;
 
         Rigidbody2D _rb;

@@ -13,9 +13,13 @@ namespace Platformer.Rendering
     /// </summary>
     public class ScreenOutlineFeature : ScriptableRendererFeature
     {
+        [Tooltip("描边使用的材质")]
         public Material outlineMaterial;
+        [Tooltip("该效果插入到渲染流程的哪个阶段")]
         public RenderPassEvent injectionPoint = RenderPassEvent.AfterRenderingTransparents;
+        [Tooltip("描边宽度（像素）")]
         [Range(0.25f, 8f)] public float widthPixels = 1f;
+        [Tooltip("颜色边界的灵敏度，越大越不敏感（需高于瓦片内描边的色差）")]
         [Range(0.001f, 0.5f)] public float edgeThreshold = 0.28f;
 
         OutlinePass _pass;

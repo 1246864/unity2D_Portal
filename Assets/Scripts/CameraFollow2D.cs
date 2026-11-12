@@ -9,23 +9,23 @@ namespace Platformer
     [RequireComponent(typeof(Camera))]
     public class CameraFollow2D : MonoBehaviour
     {
-        [Tooltip("Transform the camera follows (usually the player).")]
+        [Tooltip("相机跟随的目标（一般是玩家）")]
         public Transform target;
 
-        [Tooltip("Constant offset from the target, in world units.")]
+        [Tooltip("相对目标的固定偏移（世界单位）")]
         public Vector2 offset = new Vector2(0f, 1.2f);
 
-        [Tooltip("Approximate time for the camera to catch up with the target.")]
+        [Tooltip("相机追上目标的平滑时间")]
         public float smoothTime = 0.12f;
 
-        [Header("Look Ahead")]
-        [Tooltip("Shift the camera in the direction the player is moving.")]
+        [Header("前瞻")]
+        [Tooltip("是否按移动方向把相机往前推")]
         public bool useLookAhead = true;
-        [Tooltip("Maximum horizontal shift while running at full speed.")]
+        [Tooltip("全速奔跑时的最大水平前瞻距离")]
         public float lookAheadDistance = 1.5f;
-        [Tooltip("Horizontal speed that corresponds to the full look-ahead offset.")]
+        [Tooltip("达到最大前瞻所需的水平速度")]
         public float lookAheadSpeedReference = 7f;
-        [Tooltip("Smoothing time for the look-ahead offset.")]
+        [Tooltip("前瞻偏移的平滑时间")]
         public float lookAheadSmoothTime = 0.4f;
 
         Camera _camera;
