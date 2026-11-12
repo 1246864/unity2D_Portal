@@ -118,6 +118,8 @@ namespace Platformer
         {
             if (maskTop == null || maskBottom == null) return;
 
+            if (_pair == null) _pair = GetComponentInParent<PortalPair>();
+
             maskTop.localPosition = new Vector3(0f, maskTopOffset, 0f);
             maskBottom.localPosition = new Vector3(0f, maskBottomOffset, 0f);
 
@@ -131,7 +133,8 @@ namespace Platformer
         static void FacePoint(Transform mask, Vector3 point)
         {
             Vector3 direction = point - mask.position;
-            float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg - 90f;
+            // Aim at the eye, then turn another 90 degrees.
+            float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
             mask.rotation = Quaternion.Euler(0f, 0f, angle);
         }
 

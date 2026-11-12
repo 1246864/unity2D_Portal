@@ -848,7 +848,12 @@ namespace Platformer.EditorTools
                 foreach (var group in groups) if (group.capture != null) group.capture.CaptureNow();
             }
 
-            foreach (var group in groups) group.ApplyHalfCrop();
+            foreach (var group in groups)
+            {
+                group.ResolveMaskRig();
+                group.ApplyHalfCrop();
+                group.UpdateMasks();
+            }
 
 
             // Overview framed to fit every terrain and sprite renderer in the scene.
