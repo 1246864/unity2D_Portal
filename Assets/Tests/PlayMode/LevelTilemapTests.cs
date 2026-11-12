@@ -167,7 +167,8 @@ namespace Platformer.Tests
             float capturedWidth = capturedHeight * (texture.width / (float)texture.height);
             Assert.AreEqual(capturedHeight, snapshot.output.sprite.bounds.size.y, 0.001f,
                 "Snapshot height must equal the captured world height.");
-            Assert.AreEqual(capturedWidth * 0.5f, snapshot.output.sprite.bounds.size.x, 0.05f,
+            // Half the width plus the small overlap the two halves use to hide the seam.
+            Assert.AreEqual(capturedWidth * 0.5f, snapshot.output.sprite.bounds.size.x, 0.2f,
                 "Snapshot shows half of the captured width.");
 
             // A keeps the right half, B keeps the left half.

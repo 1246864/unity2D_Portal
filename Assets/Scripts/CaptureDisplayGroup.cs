@@ -32,6 +32,10 @@ namespace Platformer
         public RegionSnapshotCamera capture;
         public SpriteRenderer output;
 
+        [Tooltip("Pixels the two halves overlap at the centre line; hides the seam the " +
+                 "cross-display recursion would otherwise amplify into a line.")]
+        [Range(0f, 16f)] public float centerOverlapPixels = 2f;
+
         Sprite _halfSprite;
 
         void Awake()
@@ -76,8 +80,8 @@ namespace Platformer
         }
 
         /// <summary>
-        /// Keeps only the right half of the captured image: the sprite is rebuilt from the
-        /// right half of the texture and moved to where that half sits.
+        /// Keeps only one half of the captured image: the sprite is rebuilt from that half
+        /// of the texture and moved to where it sits in the full image.
         /// </summary>
         public void ApplyHalfCrop()
         {
@@ -87,24 +91,30 @@ namespace Platformer
             if (full == null || full == _halfSprite) return;
 
             float fullWidth = full.bounds.size.x;
+            float pixelsPerUnit = full.pixelsPerUnit;
 
-            // A keeps the right half, B keeps the left half.
+            // A keeps the right half, B keeps the left half. Both reach a little past the
+            // centre line so the two halves overlap: a single shared pixel column would be
+            // amplified by the cross-display recursion into a visible seam line.
             bool rightHalf = side == CaptureGroupSide.A;
-            float halfWidthPixels = full.rect.width * 0.5f;
+            float halfPixels = full.rect.width * 0.5f;
+            float overlapPixels = Mathf.Clamp(centerOverlapPixels, 0f, halfPixels * 0.5f);
 
             var halfRect = new Rect(
-                rightHalf ? full.rect.x + halfWidthPixels : full.rect.x,
+                rightHalf ? full.rect.x + halfPixels - overlapPixels : full.rect.x,
                 full.rect.y,
-                halfWidthPixels,
+                halfPixels + overlapPixels,
                 full.rect.height);
 
             if (_halfSprite != null) Destroy(_halfSprite);
-            _halfSprite = Sprite.Create(full.texture, halfRect, new Vector2(0.5f, 0.5f), full.pixelsPerUnit);
+            _halfSprite = Sprite.Create(full.texture, halfRect, new Vector2(0.5f, 0.5f), pixelsPerUnit);
             _halfSprite.name = "Snapshot Half";
 
             output.sprite = _halfSprite;
-            // Centre the kept half where it sits in the full image.
-            float offset = rightHalf ? fullWidth * 0.25f : -fullWidth * 0.25f;
+
+            // Centre the kept region where it sits in the full image.
+            float overlapWorld = overlapPixels / pixelsPerUnit;
+            float offset = (fullWidth * 0.25f - overlapWorld * 0.5f) * (rightHalf ? 1f : -1f);
             output.transform.localPosition = new Vector3(offset, 0f, 0f);
         }
     }
