@@ -38,6 +38,10 @@ namespace Platformer.EditorTools
         const int PlayerLayer = 7;
         const int SnapshotLayer = 8;
 
+        const float ViewScale = 1.2f;
+        const float PortalOpeningHeight = 3f;
+        const string MaskSpritePath = "Assets/Art/Placeholders/mask_white.png";
+
         const float PlayerWidth = 0.72f;
         const float PlayerHeight = 1.5f;
         const float JumpHeight = 6f;
@@ -586,6 +590,37 @@ namespace Platformer.EditorTools
             CreateCaptureGroup("Portal B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera);
         }
 
+        static void BuildViewCovers(Transform view, int sortingOrder, Camera mainCamera)
+        {
+            var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(MaskSpritePath);
+            if (sprite == null)
+            {
+                Debug.LogWarning("[Platformer] Mask sprite missing at " + MaskSpritePath);
+                return;
+            }
+
+            float viewHeight = mainCamera.orthographicSize * 2f * ViewScale;
+            float viewWidth = viewHeight * (16f / 9f);
+            float coverHeight = Mathf.Max(0.01f, (viewHeight - PortalOpeningHeight) * 0.5f);
+            float offset = PortalOpeningHeight * 0.5f + coverHeight * 0.5f;
+
+            CreateCover("View Cover Top", view, sprite, sortingOrder, offset, viewWidth, coverHeight);
+            CreateCover("View Cover Bottom", view, sprite, sortingOrder, -offset, viewWidth, coverHeight);
+        }
+
+        static void CreateCover(string name, Transform parent, Sprite sprite, int sortingOrder,
+            float y, float width, float height)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = new Vector3(0f, y, 0f);
+            go.transform.localScale = new Vector3(width, height, 1f);
+
+            var renderer = go.AddComponent<SpriteRenderer>();
+            renderer.sprite = sprite;
+            renderer.color = BackgroundColor;
+            renderer.sortingOrder = sortingOrder;
+        }
         static CaptureDisplayGroup CreateCaptureGroup(string name, Transform parent, Vector3 localPosition, CaptureGroupSide side, Camera mainCamera)
         {
             var root = new GameObject(name);
@@ -614,6 +649,10 @@ namespace Platformer.EditorTools
 
             var outputSprite = outputGo.AddComponent<SpriteRenderer>();
             outputSprite.sortingOrder = 20;
+
+            // Two covers under the view: they hide the view everywhere except the
+            // opening band, so the portal shows through a horizontal slot.
+            BuildViewCovers(outputGo.transform, outputSprite.sortingOrder + 1, mainCamera);
 
             var captureGo = new GameObject("Portal Capture");
             captureGo.transform.SetParent(root.transform, false);
