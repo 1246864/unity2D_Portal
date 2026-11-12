@@ -591,7 +591,8 @@ namespace Platformer.EditorTools
             // Every element of the group sits at the group origin (local position zero).
             var cameraGo = new GameObject("Snapshot Camera");
             cameraGo.transform.SetParent(root.transform, false);
-            cameraGo.transform.localPosition = Vector3.zero;
+            // Pull the camera back on Z; at z = 0 it sits in the map plane and sees nothing.
+            cameraGo.transform.localPosition = new Vector3(0f, 0f, -10f);
 
             var capture = cameraGo.AddComponent<Camera>();
             capture.orthographic = true;
