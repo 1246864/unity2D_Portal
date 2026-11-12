@@ -125,42 +125,7 @@ namespace Platformer.Tests
                 Assert.Ignore("Rendering is disabled in this run; snapshot image check skipped.");
             }
 
-            Assert.IsNotNull(snapshot.output.sprite, "Snapshot output sprite should be created.");
-
-            // The snapshot is the capture camera's own image: moving the player camera
-            // must not move the capture camera.
-            Vector3 capturePosition = snapshot.captureCamera.transform.position;
-            snapshot.sourceCamera.transform.position += new Vector3(4f, 0f, 0f);
-            yield return null;
-            yield return null;
-            Assert.AreEqual(capturePosition, snapshot.captureCamera.transform.position,
-                "Capture camera must keep its own position, not follow the player camera.");
-
-            // Only the captured size follows the main camera: 1.2x its view.
-            float expectedSize = snapshot.sourceCamera.orthographicSize * 1.2f;
-            Assert.AreEqual(expectedSize, snapshot.captureCamera.orthographicSize, 0.01f,
-                "Capture camera should cover 1.2x the main view.");
-
-            // 1:1 guarantee: at scale 1 the snapshot sprite must be exactly as large as
-            // the captured region, with no scaling applied to the output transform.
-            float capturedHeight = snapshot.sourceCamera.orthographicSize * 2f * 1.2f;
-            Assert.AreEqual(capturedHeight, snapshot.output.sprite.bounds.size.y, 0.001f,
-                "Snapshot sprite should match the captured world height at scale 1.");
-            Assert.AreEqual(Vector3.one, snapshot.output.transform.lossyScale,
-                "Snapshot output must not be scaled.");
-
-            // The canvas (texture) scales with the captured area at a constant density.
-            int expectedTextureHeight = Mathf.RoundToInt(capturedHeight * snapshot.pixelsPerUnit);
-            Assert.AreEqual(expectedTextureHeight, snapshot.output.sprite.texture.height, 1,
-                "Snapshot canvas should scale with the captured area.");
-
-            // Recursion: the capture camera must be able to see its own output so a
-            // mirror-in-mirror effect is possible.
-            int outputLayerBit = 1 << snapshot.output.gameObject.layer;
-            Assert.AreNotEqual(0, snapshot.captureCamera.cullingMask & outputLayerBit,
-                "Capture camera must be able to capture its own output.");
-
-            // The snapshot image must contain the scene, not only the background colour.
+            // 1. The image is not empty: it contains terrain and sprites.
             Texture2D texture = snapshot.output.sprite.texture;
             Color background = snapshot.sourceCamera.backgroundColor;
             int content = 0;
@@ -173,6 +138,73 @@ namespace Platformer.Tests
             }
 
             Assert.Greater(content, 20, "Snapshot image should contain terrain and sprites.");
+
+            // 2. The snapshot is the capture camera's own image: moving the player camera
+            // must not move the capture camera.
+            Vector3 capturePosition = snapshot.captureCamera.transform.position;
+            snapshot.sourceCamera.transform.position += new Vector3(4f, 0f, 0f);
+            yield return null;
+            yield return null;
+            Assert.AreEqual(capturePosition, snapshot.captureCamera.transform.position,
+                "Capture camera must keep its own position, not follow the player camera.");
+
+            // 3. Its size is 1.2x the main view.
+            Assert.AreEqual(snapshot.sourceCamera.orthographicSize * 1.2f,
+                snapshot.captureCamera.orthographicSize, 0.01f,
+                "Capture camera should cover 1.2x the main view.");
+
+            // 4. 1:1 in both axes, measured against what the capture camera really covers.
+            float capturedHeight = snapshot.captureCamera.orthographicSize * 2f;
+            float capturedWidth = capturedHeight * (texture.width / (float)texture.height);
+            Assert.AreEqual(capturedHeight, snapshot.output.sprite.bounds.size.y, 0.001f,
+                "Snapshot height must equal the captured world height.");
+            Assert.AreEqual(capturedWidth, snapshot.output.sprite.bounds.size.x, 0.05f,
+                "Snapshot width must equal the captured world width.");
+            Assert.AreEqual(Vector3.one, snapshot.output.transform.lossyScale,
+                "Snapshot output must not be scaled.");
+
+            // 5. The canvas keeps a constant texel density.
+            Assert.AreEqual(snapshot.pixelsPerUnit,
+                texture.height / snapshot.output.sprite.bounds.size.y, 0.5f,
+                "Canvas should keep the configured texel density.");
+
+            // 6. Growing the main view grows the captured area and the canvas with it.
+            float originalOrtho = snapshot.sourceCamera.orthographicSize;
+            int textureHeightBefore = texture.height;
+            snapshot.sourceCamera.orthographicSize = originalOrtho * 2f;
+            yield return null;
+            yield return null;
+            Assert.AreEqual(originalOrtho * 2f * 1.2f, snapshot.captureCamera.orthographicSize, 0.01f,
+                "Capture camera must grow with the main view.");
+            Assert.Greater(snapshot.output.sprite.texture.height, textureHeightBefore,
+                "Canvas must grow with the captured area.");
+            snapshot.sourceCamera.orthographicSize = originalOrtho;
+            yield return null;
+            yield return null;
+
+            // 7. The player is drawn above the snapshot output.
+            var playerRenderer = Object.FindObjectOfType<PlayerController2D>().GetComponent<SpriteRenderer>();
+            Assert.Greater(playerRenderer.sortingOrder, snapshot.output.sortingOrder,
+                "Player must be drawn above the snapshot output.");
+
+            // 8. The capture camera can see its own output (mirror-in-mirror recursion).
+            int outputLayerBit = 1 << snapshot.output.gameObject.layer;
+            Assert.AreNotEqual(0, snapshot.captureCamera.cullingMask & outputLayerBit,
+                "Capture camera must be able to capture its own output.");
+
+            // 9. The image really comes from that camera: moving it changes the picture.
+            snapshot.CaptureNow();
+            Color[] before = snapshot.output.sprite.texture.GetPixels();
+            snapshot.captureCamera.transform.position += new Vector3(6f, 0f, 0f);
+            snapshot.CaptureNow();
+            Color[] after = snapshot.output.sprite.texture.GetPixels();
+            int changed = 0;
+            for (int i = 0; i < before.Length; i += 64)
+            {
+                if (ColorDistance(before[i], after[i]) > 0.02f) changed++;
+            }
+
+            Assert.Greater(changed, 20, "Moving the capture camera should change the snapshot image.");
         }
 
         static float ColorDistance(Color a, Color b)
