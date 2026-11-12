@@ -421,6 +421,27 @@ namespace Platformer.EditorTools
         static readonly string[] SlopeNames = { "UpRight", "UpLeft", "DownRight", "DownLeft" };
         static readonly string[] SlopeSpriteNames = { "slope_up_right", "slope_up_left", "slope_down_right", "slope_down_left" };
 
+        static Tile EnsureNoColliderTile(Tile source)
+        {
+            if (!AssetDatabase.IsValidFolder("Assets/Tiles/NoCollider"))
+            {
+                AssetDatabase.CreateFolder("Assets/Tiles", "NoCollider");
+            }
+
+            string path = $"Assets/Tiles/NoCollider/{source.name}.asset";
+            var tile = AssetDatabase.LoadAssetAtPath<Tile>(path);
+            if (tile == null)
+            {
+                tile = ScriptableObject.CreateInstance<Tile>();
+                AssetDatabase.CreateAsset(tile, path);
+            }
+
+            tile.sprite = source.sprite;
+            tile.color = source.color;
+            tile.colliderType = Tile.ColliderType.None;
+            EditorUtility.SetDirty(tile);
+            return tile;
+        }
         static Tile[] EnsureSlopeTiles(Dictionary<string, Sprite> sprites)
         {
             var tiles = new Tile[SlopeNames.Length * 2];
@@ -520,7 +541,10 @@ namespace Platformer.EditorTools
             player.transform.position = new Vector3(Spawn.x, Spawn.y, 0f);
 
             Camera mainCamera = BuildCamera(player);
-            BuildCaptureGroups(mainCamera, tilemap);
+            var portalVariants = new List<Tile> { EnsureNoColliderTile(terrainTile), EnsureNoColliderTile(darkTile) };
+            foreach (var slope in slopeTiles) portalVariants.Add(EnsureNoColliderTile(slope));
+
+            BuildCaptureGroups(mainCamera, tilemap, portalVariants.ToArray());
             BuildGlobalLight();
 
             EditorSceneManager.MarkSceneDirty(scene);
@@ -572,14 +596,14 @@ namespace Platformer.EditorTools
             return cam;
         }
 
-        static void BuildCaptureGroups(Camera mainCamera, Tilemap terrain)
+        static void BuildCaptureGroups(Camera mainCamera, Tilemap terrain, Tile[] portalVariants)
         {
             // Both groups live under one empty node and pair up by their side.
             var pair = new GameObject("Capture Display Pair");
             pair.transform.position = new Vector3(3f, 3f, 0f);
 
-            var groupA = CreateCaptureGroup("Capture Display Group A", pair.transform, new Vector3(-9f, 0f, 0f), CaptureGroupSide.A, mainCamera, terrain);
-            var groupB = CreateCaptureGroup("Capture Display Group B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera, terrain);
+            var groupA = CreateCaptureGroup("Capture Display Group A", pair.transform, new Vector3(-9f, 0f, 0f), CaptureGroupSide.A, mainCamera, terrain, portalVariants);
+            var groupB = CreateCaptureGroup("Capture Display Group B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera, terrain, portalVariants);
 
             // Portal collision: A supplies its left half to B, B supplies its right half to A.
             var bridgeA = groupA.GetComponentInChildren<PortalColliderBridge>(true);
@@ -588,7 +612,7 @@ namespace Platformer.EditorTools
             if (bridgeB != null) bridgeB.target = groupA.transform;
         }
 
-        static CaptureDisplayGroup CreateCaptureGroup(string name, Transform parent, Vector3 localPosition, CaptureGroupSide side, Camera mainCamera, Tilemap terrain)
+        static CaptureDisplayGroup CreateCaptureGroup(string name, Transform parent, Vector3 localPosition, CaptureGroupSide side, Camera mainCamera, Tilemap terrain, Tile[] portalVariants)
         {
             var root = new GameObject(name);
             root.transform.SetParent(parent, false);
@@ -641,6 +665,15 @@ namespace Platformer.EditorTools
             // A shows the right half, so it supplies its left side (and vice versa).
             bridge.sampleLeftSide = side == CaptureGroupSide.A;
             bridge.colliderLayer = GroundLayer;
+
+            var cutoutGo = new GameObject("Portal Cutout");
+            cutoutGo.transform.SetParent(root.transform, false);
+            var cutout = cutoutGo.AddComponent<PortalCutout>();
+            cutout.terrain = terrain;
+            cutout.group = group;
+            cutout.noColliderTiles = portalVariants;
+            cutout.areaSize = bridge.areaSize;
+            cutout.cutLeftHalf = side == CaptureGroupSide.B;
 
             return group;
         }
