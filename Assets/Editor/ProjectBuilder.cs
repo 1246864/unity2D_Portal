@@ -764,6 +764,8 @@ namespace Platformer.EditorTools
                 foreach (var group in groups) if (group.capture != null) group.capture.CaptureNow();
             }
 
+            foreach (var group in groups) group.ApplyHalfCrop();
+
 
             // Overview framed to fit every terrain and sprite renderer in the scene.
             Bounds bounds = new Bounds();

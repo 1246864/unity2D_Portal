@@ -167,8 +167,8 @@ namespace Platformer.Tests
             float capturedWidth = capturedHeight * (texture.width / (float)texture.height);
             Assert.AreEqual(capturedHeight, snapshot.output.sprite.bounds.size.y, 0.001f,
                 "Snapshot height must equal the captured world height.");
-            Assert.AreEqual(capturedWidth, snapshot.output.sprite.bounds.size.x, 0.05f,
-                "Snapshot width must equal the captured world width.");
+            Assert.AreEqual(capturedWidth * 0.5f, snapshot.output.sprite.bounds.size.x, 0.05f,
+                "Snapshot shows the right half of the captured width.");
             Assert.AreEqual(Vector3.one, snapshot.output.transform.lossyScale,
                 "Snapshot output must not be scaled.");
 
