@@ -600,7 +600,6 @@ namespace Platformer.EditorTools
             controller.sourceCamera = mainCamera;
             controller.captureCamera = capture;
             controller.output = outputSprite;
-            controller.outputTarget = outputGo.transform;
         }
         static void BuildGlobalLight()
         {

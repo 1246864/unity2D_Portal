@@ -31,13 +31,11 @@ namespace Platformer
 
         [Header("Output")]
         public SpriteRenderer output;
-        public Transform outputTarget;
-        [Tooltip("Display scale of the snapshot sprite.")]
-        public float outputScale = 0.5f;
 
         RenderTexture _renderTexture;
         Texture2D _texture;
         Sprite _sprite;
+        float _spriteWorldHeight;
         float _timer;
 
         bool _renderingAvailable;
@@ -102,21 +100,20 @@ namespace Platformer
                 _texture.name = "Region Snapshot";
             }
 
-            if (_sprite == null)
+            // 1:1 guarantee: one texture pixel maps to the same world distance as in the
+            // captured region, so at scale 1 the snapshot is exactly as big as the
+            // objects that were photographed.
+            float capturedWorldHeight = sourceCamera.orthographicSize * 2f * viewScale;
+            if (_sprite == null || !Mathf.Approximately(_spriteWorldHeight, capturedWorldHeight))
             {
-                // One pixel per world unit = textureHeight / captured world height,
-                // so the snapshot is shown at the region's true size.
-                float capturedWorldHeight = sourceCamera.orthographicSize * 2f * viewScale;
+                if (_sprite != null) Destroy(_sprite);
+
                 float pixelsPerUnit = textureHeight / Mathf.Max(0.001f, capturedWorldHeight);
                 _sprite = Sprite.Create(_texture, new Rect(0, 0, textureWidth, textureHeight),
                     new Vector2(0.5f, 0.5f), pixelsPerUnit);
                 _sprite.name = "Region Snapshot Sprite";
                 output.sprite = _sprite;
-            }
-
-            if (outputTarget != null && !Mathf.Approximately(outputTarget.localScale.x, outputScale))
-            {
-                outputTarget.localScale = Vector3.one * outputScale;
+                _spriteWorldHeight = capturedWorldHeight;
             }
 
             return true;
@@ -137,10 +134,37 @@ namespace Platformer
             RenderTexture previous = RenderTexture.active;
             RenderTexture.active = _renderTexture;
             _texture.ReadPixels(new Rect(0, 0, textureWidth, textureHeight), 0, 0);
+            ClearBorder();
             _texture.Apply();
             RenderTexture.active = previous;
 
             captureCamera.targetTexture = null;
+        }
+
+        void ClearBorder()
+        {
+            // A thin background-coloured border keeps the screen-space outline from
+            // tracing the snapshot sprite as if it were terrain.
+            Color background = sourceCamera.backgroundColor;
+            const int border = 2;
+
+            for (int x = 0; x < textureWidth; x++)
+            {
+                for (int y = 0; y < border; y++)
+                {
+                    _texture.SetPixel(x, y, background);
+                    _texture.SetPixel(x, textureHeight - 1 - y, background);
+                }
+            }
+
+            for (int y = 0; y < textureHeight; y++)
+            {
+                for (int x = 0; x < border; x++)
+                {
+                    _texture.SetPixel(x, y, background);
+                    _texture.SetPixel(textureWidth - 1 - x, y, background);
+                }
+            }
         }
 
         void OnDestroy()

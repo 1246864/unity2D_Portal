@@ -132,6 +132,14 @@ namespace Platformer.Tests
             Assert.AreEqual(expectedSize, snapshot.captureCamera.orthographicSize, 0.01f,
                 "Capture camera should cover 1.2x the main view.");
 
+            // 1:1 guarantee: at scale 1 the snapshot sprite must be exactly as large as
+            // the captured region, with no scaling applied to the output transform.
+            float capturedHeight = snapshot.sourceCamera.orthographicSize * 2f * 1.2f;
+            Assert.AreEqual(capturedHeight, snapshot.output.sprite.bounds.size.y, 0.001f,
+                "Snapshot sprite should match the captured world height at scale 1.");
+            Assert.AreEqual(Vector3.one, snapshot.output.transform.lossyScale,
+                "Snapshot output must not be scaled.");
+
             // The snapshot image must contain the scene, not only the background colour.
             Texture2D texture = snapshot.output.sprite.texture;
             Color background = snapshot.sourceCamera.backgroundColor;
