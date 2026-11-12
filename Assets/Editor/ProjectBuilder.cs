@@ -638,6 +638,8 @@ namespace Platformer.EditorTools
             bridge.terrain = terrain;
             bridge.source = group;
             bridge.areaSize = new Vector2(capturedHeight * (16f / 9f), capturedHeight);
+            // A shows the right half, so it supplies its left side (and vice versa).
+            bridge.sampleLeftSide = side == CaptureGroupSide.A;
             bridge.colliderLayer = GroundLayer;
 
             return group;

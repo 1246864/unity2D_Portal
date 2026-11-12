@@ -7,28 +7,36 @@ namespace Platformer
     /// <summary>
     /// Portal collision bridge.
     ///
-    /// Every frame it samples the terrain collision boxes of one half of this group's
-    /// area and copies them into the other group, so the terrain visible inside the other
-    /// portal can be walked on.
+    /// The whole centre line of a group is the portal entrance. Every frame this bridge
+    /// samples the terrain collision shapes within <see cref="sampleCells"/> cells on one
+    /// side of that line and copies them 1:1 (no grid snapping) into the other group,
+    /// offset relative to the two centres.
     /// </summary>
     public class PortalColliderBridge : MonoBehaviour
     {
-        [Tooltip("Terrain the collision boxes are sampled from.")]
+        [Tooltip("Terrain the collision shapes are sampled from.")]
         public Tilemap terrain;
 
-        [Tooltip("Group whose area is sampled.")]
+        [Tooltip("Group whose entrance line is sampled.")]
         public CaptureDisplayGroup source;
 
-        [Tooltip("Group that receives the copied collision boxes.")]
+        [Tooltip("Group that receives the copied collision shapes.")]
         public Transform target;
 
         [Tooltip("Size of the sampled area in world units.")]
         public Vector2 areaSize = new Vector2(24f, 13.5f);
 
+        [Tooltip("How many cells beyond the entrance line are sampled.")]
+        public int sampleCells = 4;
+
+        [Tooltip("True: sample the left side of the entrance line. False: the right side.")]
+        public bool sampleLeftSide = true;
+
         [Tooltip("Layer for the copied colliders (the player's ground layer).")]
         public int colliderLayer = 6;
 
-        readonly List<BoxCollider2D> _pool = new List<BoxCollider2D>();
+        readonly List<PolygonCollider2D> _pool = new List<PolygonCollider2D>();
+        readonly List<Vector2> _points = new List<Vector2>();
         int _used;
 
         void LateUpdate()
@@ -38,27 +46,42 @@ namespace Platformer
             _used = 0;
 
             Vector3 centre = source.transform.position;
-            float halfWidth = areaSize.x * 0.5f;
             float halfHeight = areaSize.y * 0.5f;
 
-            int minX = Mathf.FloorToInt(centre.x - halfWidth);
-            int maxX = Mathf.CeilToInt(centre.x + halfWidth);
+            int lineX = Mathf.FloorToInt(centre.x);
+            int firstX = sampleLeftSide ? lineX - sampleCells : lineX;
+            int lastX = sampleLeftSide ? lineX - 1 : lineX + sampleCells - 1;
             int minY = Mathf.FloorToInt(centre.y - halfHeight);
             int maxY = Mathf.CeilToInt(centre.y + halfHeight);
 
-            for (int x = minX; x <= maxX; x++)
+            for (int x = firstX; x <= lastX; x++)
             {
                 for (int y = minY; y <= maxY; y++)
                 {
                     var cell = new Vector3Int(x, y, 0);
-                    if (!terrain.HasTile(cell)) continue;
+                    var tile = terrain.GetTile(cell) as Tile;
+                    if (tile == null || tile.sprite == null) continue;
+
+                    // Real shape of the tile, in sprite pixels relative to the pivot.
+                    _points.Clear();
+                    if (tile.sprite.GetPhysicsShape(0, _points) == 0 || _points.Count < 3) continue;
+
+                    float pixelsPerUnit = tile.sprite.pixelsPerUnit;
+                    var shape = new Vector2[_points.Count];
+                    for (int i = 0; i < _points.Count; i++)
+                    {
+                        shape[i] = _points[i] / pixelsPerUnit;
+                    }
 
                     Vector3 cellCentre = terrain.CellToWorld(cell) + new Vector3(0.5f, 0.5f, 0f);
                     Vector3 offset = cellCentre - centre;
 
-                    BoxCollider2D box = GetCollider();
-                    box.transform.position = target.position + offset;
-                    box.transform.rotation = Quaternion.identity;
+                    PolygonCollider2D polygon = GetCollider();
+                    polygon.transform.position = target.position + offset;
+                    polygon.transform.rotation = Quaternion.identity;
+                    polygon.transform.localScale = Vector3.one;
+                    polygon.pathCount = 1;
+                    polygon.SetPath(0, shape);
                 }
             }
 
@@ -68,11 +91,11 @@ namespace Platformer
             }
         }
 
-        BoxCollider2D GetCollider()
+        PolygonCollider2D GetCollider()
         {
             if (_used < _pool.Count)
             {
-                BoxCollider2D existing = _pool[_used++];
+                PolygonCollider2D existing = _pool[_used++];
                 if (!existing.gameObject.activeSelf) existing.gameObject.SetActive(true);
                 return existing;
             }
@@ -81,12 +104,10 @@ namespace Platformer
             go.transform.SetParent(transform, true);
             go.layer = colliderLayer;
 
-            var box = go.AddComponent<BoxCollider2D>();
-            box.size = Vector2.one;
-
-            _pool.Add(box);
+            var polygon = go.AddComponent<PolygonCollider2D>();
+            _pool.Add(polygon);
             _used++;
-            return box;
+            return polygon;
         }
     }
 }
