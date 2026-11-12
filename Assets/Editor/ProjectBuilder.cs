@@ -520,7 +520,7 @@ namespace Platformer.EditorTools
             player.transform.position = new Vector3(Spawn.x, Spawn.y, 0f);
 
             Camera mainCamera = BuildCamera(player);
-            BuildCaptureGroups(mainCamera);
+            BuildCaptureGroups(mainCamera, tilemap);
             BuildGlobalLight();
 
             EditorSceneManager.MarkSceneDirty(scene);
@@ -572,17 +572,23 @@ namespace Platformer.EditorTools
             return cam;
         }
 
-        static void BuildCaptureGroups(Camera mainCamera)
+        static void BuildCaptureGroups(Camera mainCamera, Tilemap terrain)
         {
             // Both groups live under one empty node and pair up by their side.
             var pair = new GameObject("Capture Display Pair");
             pair.transform.position = new Vector3(3f, 3f, 0f);
 
-            CreateCaptureGroup("Capture Display Group A", pair.transform, new Vector3(-9f, 0f, 0f), CaptureGroupSide.A, mainCamera);
-            CreateCaptureGroup("Capture Display Group B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera);
+            var groupA = CreateCaptureGroup("Capture Display Group A", pair.transform, new Vector3(-9f, 0f, 0f), CaptureGroupSide.A, mainCamera, terrain);
+            var groupB = CreateCaptureGroup("Capture Display Group B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera, terrain);
+
+            // Portal collision: A supplies its left half to B, B supplies its right half to A.
+            var bridgeA = groupA.GetComponentInChildren<PortalColliderBridge>(true);
+            var bridgeB = groupB.GetComponentInChildren<PortalColliderBridge>(true);
+            if (bridgeA != null) bridgeA.target = groupB.transform;
+            if (bridgeB != null) bridgeB.target = groupA.transform;
         }
 
-        static CaptureDisplayGroup CreateCaptureGroup(string name, Transform parent, Vector3 localPosition, CaptureGroupSide side, Camera mainCamera)
+        static CaptureDisplayGroup CreateCaptureGroup(string name, Transform parent, Vector3 localPosition, CaptureGroupSide side, Camera mainCamera, Tilemap terrain)
         {
             var root = new GameObject(name);
             root.transform.SetParent(parent, false);
@@ -624,6 +630,17 @@ namespace Platformer.EditorTools
             group.side = side;
             group.capture = controller;
             group.output = outputSprite;
+
+            float capturedHeight = mainCamera.orthographicSize * 2f * controller.viewScale;
+            var bridgeGo = new GameObject("Portal Collision");
+            bridgeGo.transform.SetParent(root.transform, false);
+            var bridge = bridgeGo.AddComponent<PortalColliderBridge>();
+            bridge.terrain = terrain;
+            bridge.source = group;
+            bridge.areaSize = new Vector2(capturedHeight * (16f / 9f), capturedHeight);
+            bridge.sampleLeftHalf = side == CaptureGroupSide.A;
+            bridge.colliderLayer = GroundLayer;
+
             return group;
         }
 
