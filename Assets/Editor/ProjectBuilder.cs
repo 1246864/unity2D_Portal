@@ -520,7 +520,7 @@ namespace Platformer.EditorTools
             player.transform.position = new Vector3(Spawn.x, Spawn.y, 0f);
 
             Camera mainCamera = BuildCamera(player);
-            BuildCaptureGroups(mainCamera);
+            BuildCaptureGroups(mainCamera, player);
             BuildGlobalLight();
 
             EditorSceneManager.MarkSceneDirty(scene);
@@ -572,11 +572,15 @@ namespace Platformer.EditorTools
             return cam;
         }
 
-        static void BuildCaptureGroups(Camera mainCamera)
+        static void BuildCaptureGroups(Camera mainCamera, GameObject player)
         {
             // Both groups live under one empty node and pair up by their side.
             var pair = new GameObject("Portal Pair");
             pair.transform.position = new Vector3(3f, 3f, 0f);
+
+            // Pair controller: keeps a reference to the player for view masking.
+            var pairControl = pair.AddComponent<PortalPair>();
+            pairControl.player = player.transform;
 
             CreateCaptureGroup("Portal A", pair.transform, new Vector3(-9f, 0f, 0f), CaptureGroupSide.A, mainCamera);
             CreateCaptureGroup("Portal B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera);

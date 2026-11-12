@@ -735,6 +735,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 623625477}
+  - component: {fileID: 812345678}
   m_Layer: 0
   m_Name: Portal Pair
   m_TagString: Untagged
@@ -2783,3 +2784,16 @@ SceneRoots:
   - {fileID: 438815690}
   - {fileID: 623625477}
   - {fileID: 821446646}
+--- !u!114 &812345678
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 623625476}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 73046f3a02154fa68a8c62c5c853c96b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  player: {fileID: 338800312}

@@ -37,6 +37,10 @@ namespace Platformer
                  "would otherwise amplify into a bright line.")]
         [Range(0f, 16f)] public float centerGapPixels = 1f;
 
+        [Header("Portal")]
+        [Tooltip("Height of this portal opening, in world units.")]
+        public float portalHeight = 3f;
+
         Sprite _halfSprite;
 
         void Awake()
