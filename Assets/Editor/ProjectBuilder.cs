@@ -520,7 +520,7 @@ namespace Platformer.EditorTools
             player.transform.position = new Vector3(Spawn.x, Spawn.y, 0f);
 
             Camera mainCamera = BuildCamera(player);
-            BuildSnapshot(mainCamera);
+            BuildCaptureGroups(mainCamera);
             BuildGlobalLight();
 
             EditorSceneManager.MarkSceneDirty(scene);
@@ -572,14 +572,27 @@ namespace Platformer.EditorTools
             return cam;
         }
 
-        static void BuildSnapshot(Camera mainCamera)
+        static void BuildCaptureGroups(Camera mainCamera)
         {
-            // Orthographic camera that renders 1.2x the main view into a RenderTexture.
-            var captureGo = new GameObject("Snapshot Camera");
-            // Own view: the snapshot is this camera's image, not the player camera's.
-            captureGo.transform.position = new Vector3(6f, 2f, -10f);
+            var groupA = CreateCaptureGroup("Capture Display Group A", new Vector3(-6f, 3f, 0f), mainCamera);
+            var groupB = CreateCaptureGroup("Capture Display Group B", new Vector3(12f, 3f, 0f), mainCamera);
 
-            var capture = captureGo.AddComponent<Camera>();
+            // Cross display: A's camera paints B's output and B's camera paints A's output.
+            groupA.otherGroup = groupB;
+            groupB.otherGroup = groupA;
+        }
+
+        static CaptureDisplayGroup CreateCaptureGroup(string name, Vector3 position, Camera mainCamera)
+        {
+            var root = new GameObject(name);
+            root.transform.position = position;
+
+            // Every element of the group sits at the group origin (local position zero).
+            var cameraGo = new GameObject("Snapshot Camera");
+            cameraGo.transform.SetParent(root.transform, false);
+            cameraGo.transform.localPosition = Vector3.zero;
+
+            var capture = cameraGo.AddComponent<Camera>();
             capture.orthographic = true;
             capture.orthographicSize = mainCamera.orthographicSize * 1.2f;
             capture.clearFlags = CameraClearFlags.SolidColor;
@@ -587,21 +600,28 @@ namespace Platformer.EditorTools
             capture.nearClipPlane = 0.3f;
             capture.farClipPlane = 100f;
             capture.enabled = false; // rendered on demand by RegionSnapshotCamera
-            // Culling mask is left at "everything": if the output sprite is inside this
-            // camera's view it is captured as well, producing a mirror-in-mirror effect.
 
-            // The captured image is displayed here as a sprite.
             var outputGo = new GameObject("Snapshot Output");
             outputGo.layer = SnapshotLayer;
-            outputGo.transform.position = new Vector3(6f, 16f, 0f);
+            outputGo.transform.SetParent(root.transform, false);
+            outputGo.transform.localPosition = Vector3.zero;
 
             var outputSprite = outputGo.AddComponent<SpriteRenderer>();
             outputSprite.sortingOrder = 20;
 
-            var controller = new GameObject("Snapshot Capture").AddComponent<RegionSnapshotCamera>();
+            var captureGo = new GameObject("Snapshot Capture");
+            captureGo.transform.SetParent(root.transform, false);
+            captureGo.transform.localPosition = Vector3.zero;
+
+            var controller = captureGo.AddComponent<RegionSnapshotCamera>();
             controller.sourceCamera = mainCamera;
             controller.captureCamera = capture;
             controller.output = outputSprite;
+
+            var group = root.AddComponent<CaptureDisplayGroup>();
+            group.capture = controller;
+            group.output = outputSprite;
+            return group;
         }
 
         static void BuildGlobalLight()
@@ -728,8 +748,14 @@ namespace Platformer.EditorTools
             RenderShot(cam, Path.Combine(projectRoot, "Preview_Gameplay.png"), gameplayPos, gameplaySize);
 
             // The snapshot only renders during play; force one capture for the preview.
-            var snapshot = UnityEngine.Object.FindObjectOfType<RegionSnapshotCamera>();
-            if (snapshot != null) snapshot.CaptureNow();
+            var groups = UnityEngine.Object.FindObjectsOfType<CaptureDisplayGroup>();
+            foreach (var group in groups) group.WireUp();
+
+            // A few passes so the cross-display feedback settles before rendering.
+            for (int pass = 0; pass < 3; pass++)
+            {
+                foreach (var group in groups) if (group.capture != null) group.capture.CaptureNow();
+            }
 
             // Overview framed to fit every terrain and sprite renderer in the scene.
             Bounds bounds = new Bounds();
@@ -748,7 +774,7 @@ namespace Platformer.EditorTools
             RenderShot(cam, Path.Combine(projectRoot, "Preview.png"),
                 new Vector3(bounds.center.x, bounds.center.y, -10f), overviewSize);
 
-            if (snapshot != null) snapshot.ClearOutput();
+            foreach (var group in groups) if (group.capture != null) group.capture.ClearOutput();
 
             cam.transform.position = gameplayPos;
             cam.orthographicSize = gameplaySize;

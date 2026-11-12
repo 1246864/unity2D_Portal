@@ -118,8 +118,25 @@ namespace Platformer.Tests
 
             yield return new WaitForSeconds(0.3f);
 
-            var snapshot = Object.FindObjectOfType<RegionSnapshotCamera>();
-            Assert.IsNotNull(snapshot, "RegionSnapshotCamera not found in Level01.");
+            var groups = Object.FindObjectsOfType<CaptureDisplayGroup>();
+            Assert.AreEqual(2, groups.Length, "There should be two capture display groups.");
+
+            CaptureDisplayGroup groupA = null;
+            CaptureDisplayGroup groupB = null;
+            foreach (var group in groups)
+            {
+                if (group.name.EndsWith("A")) groupA = group;
+                else if (group.name.EndsWith("B")) groupB = group;
+            }
+
+            Assert.IsNotNull(groupA, "Capture Display Group A not found.");
+            Assert.IsNotNull(groupB, "Capture Display Group B not found.");
+
+            // Cross display: A's camera paints B's output and B's camera paints A's output.
+            Assert.AreEqual(groupB.output, groupA.capture.output, "A's camera must paint B's output.");
+            Assert.AreEqual(groupA.output, groupB.capture.output, "B's camera must paint A's output.");
+
+            var snapshot = groupA.capture;
             if (snapshot.output.sprite == null)
             {
                 Assert.Ignore("Rendering is disabled in this run; snapshot image check skipped.");

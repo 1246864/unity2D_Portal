@@ -93,30 +93,34 @@ Level
 > 外轮廓是屏幕空间效果，粗细以像素计，不随镜头缩放变化；瓦片内描边是贴图效果，随镜头缩放。
 > 轮廓边依赖相机的纯色背景（Solid Color），如果以后换成 Skybox / 图片背景，需要相应调整判定方式。
 
-## 相机快照（Snapshot Camera）
+## 相机快照（Capture Display Group）
 
-场景里有一套“相机拍摄 → 图像精灵”的捕获系统：
+场景里有两个「捕获显示组」，每组把一套相机快照系统打包在一个空节点下：
 
 ```
-Snapshot Camera（正交，orthoSize = 主相机 × 1.2）
-    → RenderTexture 960×540
-    → Texture2D.ReadPixels
-    → Sprite（PPU 按捕获世界高度换算）
-    → Snapshot Output 的 SpriteRenderer
+Capture Display Group A          Capture Display Group B
+├─ Snapshot Camera               ├─ Snapshot Camera
+├─ Snapshot Output               ├─ Snapshot Output
+└─ Snapshot Capture              └─ Snapshot Capture
 ```
+
+- 组内所有元素的 **localPosition 都是 0**
+- 两个组的 `otherGroup` **互相引用**（`CaptureDisplayGroup`）
+- **交叉输出**：A 的相机画面画到 B 的 `Snapshot Output`，B 的相机画面画到 A 的 `Snapshot Output`
+- 组内流程：相机 → RenderTexture → Texture2D.ReadPixels → Sprite
 
 | 项目 | 说明 |
 |---|---|
-| 捕获范围 | 主相机视野的 **1.2 倍**（`RegionSnapshotCamera.viewScale`）；主相机视野变大时捕获范围同步变大 |
-| 捕获相机 | `Snapshot Camera`，**独立视角**：画面是这台相机自己拍的，位置自己决定、不跟随主相机；只有尺寸跟随主相机；按需渲染（`enabled = false`） |
+| 捕获范围 | 主相机视野的 **1.2 倍**（`viewScale`）；主相机视野变大时捕获范围同步变大 |
+| 捕获相机 | 每组自带一台正交相机，**独立视角**（位置自己决定、不跟随主相机），只有尺寸跟随主相机 |
 | 刷新间隔 | `captureInterval` 默认 **0.05 秒**（0 = 每帧） |
-| 输出 | `Snapshot Output`（`Snapshot` 层 8），**严格 1:1**：精灵缩放为 1 时与拍摄区域完全同尺寸；画布（贴图）随捕获范围等比放大，像素密度不变 |
-| 递归 | 捕获相机不排除任何层：输出精灵若落在相机视野内，会被一起拍进画面（镜中镜效果） |
+| 输出 | 严格 **1:1**：精灵缩放为 1 时与拍摄区域完全同尺寸；画布（贴图）随捕获范围等比放大，像素密度不变 |
+| 递归 | 相机不排除任何层：输出精灵在视野内就会被拍进画面，两组互拍形成镜中镜 |
 | 无头模式 | 没有图形设备时自动禁用，避免 `Camera.Render()` 在 `-nographics` 下卡死 |
 | 玩家层级 | 玩家 SpriteRenderer 排序为 **100**，始终绘制在快照输出（20）之上 |
 
-> 输出的是**真实图像**（Texture2D），不是对象复制；上面的字母/像素会被一并拍下。
-> 预览渲染时会临时 `CaptureNow()` 出图，渲染完清空输出精灵。
+> 输出的是**真实图像**（Texture2D），不是对象复制。
+> 预览渲染时会先 `WireUp()` 再连续捕获几次，让交叉反馈稳定后出图。
 
 ## 物理材质
 
