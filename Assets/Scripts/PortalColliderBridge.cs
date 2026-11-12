@@ -25,9 +25,6 @@ namespace Platformer
         [Tooltip("Size of the sampled area in world units.")]
         public Vector2 areaSize = new Vector2(24f, 13.5f);
 
-        [Tooltip("True: sample the left half of the area. False: sample the right half.")]
-        public bool sampleLeftHalf = true;
-
         [Tooltip("Layer for the copied colliders (the player's ground layer).")]
         public int colliderLayer = 6;
 
@@ -58,9 +55,6 @@ namespace Platformer
 
                     Vector3 cellCentre = terrain.CellToWorld(cell) + new Vector3(0.5f, 0.5f, 0f);
                     Vector3 offset = cellCentre - centre;
-
-                    // Only the half this bridge is responsible for.
-                    if (sampleLeftHalf ? offset.x >= 0f : offset.x < 0f) continue;
 
                     BoxCollider2D box = GetCollider();
                     box.transform.position = target.position + offset;
