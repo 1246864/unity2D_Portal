@@ -704,6 +704,7 @@ namespace Platformer.EditorTools
 
             var group = root.AddComponent<CaptureDisplayGroup>();
             group.side = side;
+            group.facing = side == CaptureGroupSide.A ? PortalFacing.Right : PortalFacing.Left;
             group.capture = controller;
             group.output = outputSprite;
             group.maskTop = maskTop;

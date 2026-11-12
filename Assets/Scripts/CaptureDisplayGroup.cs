@@ -9,6 +9,13 @@ namespace Platformer
         B
     }
 
+    /// <summary>Direction the portal faces: left or right.</summary>
+    public enum PortalFacing
+    {
+        Left,
+        Right
+    }
+
     /// <summary>
     /// One capture display group: a snapshot camera, an output sprite and the capture
     /// controller packed under a single empty object.
@@ -38,6 +45,10 @@ namespace Platformer
         [Range(0f, 16f)] public float centerGapPixels = 1f;
 
         [Header("Portal")]
+        [Tooltip("Which way this portal faces. Left/right faces behave differently when " +
+                 "teleporting the player.")]
+        public PortalFacing facing = PortalFacing.Right;
+
         [Tooltip("Top mask Y offset, in world units.")]
         public float maskTopOffset = 1.5f;
 
@@ -50,6 +61,12 @@ namespace Platformer
 
         /// <summary>Portal opening height, derived from the two mask offsets.</summary>
         public float PortalHeight => Mathf.Abs(maskTopOffset - maskBottomOffset);
+
+        /// <summary>True when this portal opens toward the left.</summary>
+        public bool FacesLeft => facing == PortalFacing.Left;
+
+        /// <summary>-1 when facing left, +1 when facing right.</summary>
+        public float FacingSign => FacesLeft ? -1f : 1f;
 
         Sprite _halfSprite;
         PortalPair _pair;
