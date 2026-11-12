@@ -47,3 +47,6 @@ TagManager:
   - name: Portal B
     uniqueID: 513430870
     locked: 0
+  - name: Player
+    uniqueID: 3198412009
+    locked: 0
