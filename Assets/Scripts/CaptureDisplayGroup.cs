@@ -17,8 +17,8 @@ namespace Platformer
     /// side on its own and cross-connects them: this group's camera paints the other
     /// group's output and the other group's camera paints this group's output.
     ///
-    /// The output is split at its centre line: only the right half of the captured image
-    /// is shown, the left half is cut away.
+    /// Two view masks clip the output to the portal opening and always turn toward the
+    /// player's eyes.
     /// </summary>
     public class CaptureDisplayGroup : MonoBehaviour
     {
@@ -38,20 +38,35 @@ namespace Platformer
         [Range(0f, 16f)] public float centerGapPixels = 1f;
 
         [Header("Portal")]
-        [Tooltip("Height of this portal opening, in world units.")]
-        public float portalHeight = 3f;
+        [Tooltip("Top mask Y offset, in world units.")]
+        public float maskTopOffset = 1.5f;
+
+        [Tooltip("Bottom mask Y offset, in world units.")]
+        public float maskBottomOffset = -1.5f;
+
+        [Header("Mask rig")]
+        public Transform maskTop;
+        public Transform maskBottom;
+
+        /// <summary>Portal opening height, derived from the two mask offsets.</summary>
+        public float PortalHeight => Mathf.Abs(maskTopOffset - maskBottomOffset);
 
         Sprite _halfSprite;
+        PortalPair _pair;
 
         void Awake()
         {
             ResolvePartner();
             WireUp();
+
+            _pair = GetComponentInParent<PortalPair>();
+            ResolveMaskRig();
         }
 
         void LateUpdate()
         {
             ApplyHalfCrop();
+            UpdateMasks();
         }
 
         /// <summary>Finds the sibling group with the other side and connects both.</summary>
@@ -84,6 +99,42 @@ namespace Platformer
             partner.capture.output = output;
         }
 
+        /// <summary>Finds the mask rig created under this group.</summary>
+        public void ResolveMaskRig()
+        {
+            if (maskTop != null && maskBottom != null) return;
+
+            Transform maskRoot = transform.Find("Portal Mask");
+            if (maskRoot == null) maskRoot = transform;
+            if (maskTop == null) maskTop = maskRoot.Find("View Mask Top");
+            if (maskBottom == null) maskBottom = maskRoot.Find("View Mask Bottom");
+        }
+
+        /// <summary>
+        /// Puts the two masks on their offsets and turns them toward the player's eyes, so
+        /// the opening always faces the player.
+        /// </summary>
+        public void UpdateMasks()
+        {
+            if (maskTop == null || maskBottom == null) return;
+
+            maskTop.localPosition = new Vector3(0f, maskTopOffset, 0f);
+            maskBottom.localPosition = new Vector3(0f, maskBottomOffset, 0f);
+
+            if (_pair == null || _pair.player == null) return;
+
+            Vector3 eye = _pair.PlayerEye;
+            FacePoint(maskTop, eye);
+            FacePoint(maskBottom, eye);
+        }
+
+        static void FacePoint(Transform mask, Vector3 point)
+        {
+            Vector3 direction = point - mask.position;
+            float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg - 90f;
+            mask.rotation = Quaternion.Euler(0f, 0f, angle);
+        }
+
         /// <summary>
         /// Keeps only one half of the captured image: the sprite is rebuilt from that half
         /// of the texture and moved to where it sits in the full image.
@@ -98,9 +149,9 @@ namespace Platformer
             float fullWidth = full.bounds.size.x;
             float pixelsPerUnit = full.pixelsPerUnit;
 
-            // A keeps the right half, B keeps the left half. Both reach a little past the
-            // centre line so the two halves overlap: a single shared pixel column would be
-            // amplified by the cross-display recursion into a visible seam line.
+            // A keeps the right half, B keeps the left half. Both stop just short of the
+            // centre line: a shared pixel column would be amplified by the cross-display
+            // recursion into a visible seam line.
             bool rightHalf = side == CaptureGroupSide.A;
             float halfPixels = full.rect.width * 0.5f;
             float gapPixels = Mathf.Clamp(centerGapPixels, 0f, halfPixels * 0.5f);

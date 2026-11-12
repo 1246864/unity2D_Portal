@@ -590,8 +590,11 @@ namespace Platformer.EditorTools
             CreateCaptureGroup("Portal B", pair.transform, new Vector3(9f, 0f, 0f), CaptureGroupSide.B, mainCamera);
         }
 
-        static void BuildViewCovers(Transform view, int sortingOrder, Camera mainCamera)
+        static void BuildPortalMaskRig(Transform group, int sortingOrder, out Transform maskTop, out Transform maskBottom)
         {
+            maskTop = null;
+            maskBottom = null;
+
             var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(MaskSpritePath);
             if (sprite == null)
             {
@@ -599,30 +602,33 @@ namespace Platformer.EditorTools
                 return;
             }
 
-            float viewHeight = mainCamera.orthographicSize * 2f * ViewScale;
-            float viewWidth = viewHeight * (16f / 9f);
-            float coverHeight = Mathf.Max(0.01f, (viewHeight - PortalOpeningHeight) * 0.5f);
-            float offset = PortalOpeningHeight * 0.5f + coverHeight * 0.5f;
+            var root = new GameObject("Portal Mask");
+            root.transform.SetParent(group, false);
 
-            CreateViewMask("View Mask Top", view, sprite, sortingOrder, offset, viewWidth, coverHeight);
-            CreateViewMask("View Mask Bottom", view, sprite, sortingOrder, -offset, viewWidth, coverHeight);
+            maskTop = CreateMaskUnit("View Mask Top", root.transform, sprite, sortingOrder, 50f, 50f);
+            maskBottom = CreateMaskUnit("View Mask Bottom", root.transform, sprite, sortingOrder, 50f, -50f);
         }
 
-        static void CreateViewMask(string name, Transform parent, Sprite sprite, int sortingOrder,
-            float y, float width, float height)
+        static Transform CreateMaskUnit(string name, Transform parent, Sprite sprite, int sortingOrder,
+            float x, float y)
         {
-            var go = new GameObject(name);
-            go.transform.SetParent(parent, false);
-            go.transform.localPosition = new Vector3(0f, y, 0f);
-            go.transform.localScale = new Vector3(width, height, 1f);
+            var unit = new GameObject(name);
+            unit.transform.SetParent(parent, false);
 
-            // A SpriteMask writes to the stencil buffer only, so it clips the portal view
-            // without drawing over any other object.
-            var mask = go.AddComponent<SpriteMask>();
+            // The big SpriteMask child is what actually clips the view; the unit only
+            // carries the offset and rotation driven by CaptureDisplayGroup.
+            var maskGo = new GameObject("Mask");
+            maskGo.transform.SetParent(unit.transform, false);
+            maskGo.transform.localPosition = new Vector3(x, y, 0f);
+            maskGo.transform.localScale = new Vector3(100f, 100f, 1f);
+
+            var mask = maskGo.AddComponent<SpriteMask>();
             mask.sprite = sprite;
             mask.alphaCutoff = 0.01f;
             mask.frontSortingOrder = sortingOrder + 20;
             mask.backSortingOrder = 0;
+
+            return unit.transform;
         }
         static CaptureDisplayGroup CreateCaptureGroup(string name, Transform parent, Vector3 localPosition, CaptureGroupSide side, Camera mainCamera)
         {
@@ -657,7 +663,8 @@ namespace Platformer.EditorTools
 
             // Two covers under the view: they hide the view everywhere except the
             // opening band, so the portal shows through a horizontal slot.
-            BuildViewCovers(outputGo.transform, outputSprite.sortingOrder + 1, mainCamera);
+            BuildPortalMaskRig(root.transform, outputSprite.sortingOrder + 1,
+                out Transform maskTop, out Transform maskBottom);
 
             var captureGo = new GameObject("Portal Capture");
             captureGo.transform.SetParent(root.transform, false);
@@ -672,6 +679,8 @@ namespace Platformer.EditorTools
             group.side = side;
             group.capture = controller;
             group.output = outputSprite;
+            group.maskTop = maskTop;
+            group.maskBottom = maskBottom;
             return group;
         }
 
