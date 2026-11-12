@@ -168,7 +168,11 @@ namespace Platformer.Tests
             Assert.AreEqual(capturedHeight, snapshot.output.sprite.bounds.size.y, 0.001f,
                 "Snapshot height must equal the captured world height.");
             Assert.AreEqual(capturedWidth * 0.5f, snapshot.output.sprite.bounds.size.x, 0.05f,
-                "Snapshot shows the right half of the captured width.");
+                "Snapshot shows half of the captured width.");
+
+            // A keeps the right half, B keeps the left half.
+            Assert.Greater(groupA.output.transform.localPosition.x, 0f, "Group A should show the right half.");
+            Assert.Less(groupB.output.transform.localPosition.x, 0f, "Group B should show the left half.");
             Assert.AreEqual(Vector3.one, snapshot.output.transform.lossyScale,
                 "Snapshot output must not be scaled.");
 

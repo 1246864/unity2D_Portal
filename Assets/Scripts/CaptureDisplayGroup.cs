@@ -88,10 +88,14 @@ namespace Platformer
 
             float fullWidth = full.bounds.size.x;
 
+            // A keeps the right half, B keeps the left half.
+            bool rightHalf = side == CaptureGroupSide.A;
+            float halfWidthPixels = full.rect.width * 0.5f;
+
             var halfRect = new Rect(
-                full.rect.x + full.rect.width * 0.5f,
+                rightHalf ? full.rect.x + halfWidthPixels : full.rect.x,
                 full.rect.y,
-                full.rect.width * 0.5f,
+                halfWidthPixels,
                 full.rect.height);
 
             if (_halfSprite != null) Destroy(_halfSprite);
@@ -99,8 +103,9 @@ namespace Platformer
             _halfSprite.name = "Snapshot Half";
 
             output.sprite = _halfSprite;
-            // The right half sits a quarter of the full width to the right of the centre.
-            output.transform.localPosition = new Vector3(fullWidth * 0.25f, 0f, 0f);
+            // Centre the kept half where it sits in the full image.
+            float offset = rightHalf ? fullWidth * 0.25f : -fullWidth * 0.25f;
+            output.transform.localPosition = new Vector3(offset, 0f, 0f);
         }
     }
 }
