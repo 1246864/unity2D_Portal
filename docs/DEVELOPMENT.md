@@ -362,3 +362,4 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | 2026-11-12 | 每个瓦片增加内描边（贴图烘焙 0.929 亮度边），外轮廓阈值提到 0.28 |
 | 2026-11-12 | 新增相机快照：主相机视野 1.2 倍渲染成 RenderTexture → Sprite 输出 |
 | 2026-11-14 | 传送实现：门内薄碰撞箱 + 玩家中心碰撞点 + 连续碰撞；传送后强制双门捕获刷新；玩家绕到门背面时隐藏该门画面；场景中 A/B 移至地面附近并互换朝向（面对面），详见 `docs/UPDATE_2026-11-14.md` |
+| 2026-11-14 | 描边改为瓦片规则：移除 `ScreenOutlineFeature` / `ScreenOutline.shader` / 材质，新增 `TilemapOutline` 运行时描边层（四邻域枚举 + 独立 Outline Tilemap）；玩家与传送门不再有外描边 |

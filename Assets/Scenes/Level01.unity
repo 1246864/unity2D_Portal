@@ -1040,6 +1040,7 @@ GameObject:
   - component: {fileID: 1000252284}
   - component: {fileID: 1000252283}
   - component: {fileID: 1000252282}
+  - component: {fileID: 1000252287}
   m_Layer: 6
   m_Name: Terrain
   m_TagString: Untagged
@@ -2729,6 +2730,22 @@ Tilemap:
     e31: 0
     e32: 0
     e33: 1
+--- !u!114 &1000252287
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1000252280}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 840868965aea4d758eb711952a227055, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  outlineColor: {r: 0.7, g: 0.79, b: 0.92, a: 1}
+  sortingLayerName: Default
+  sortingOrder: 1
+  lineWidth: 1
 --- !u!1 &1086007093
 GameObject:
   m_ObjectHideFlags: 0

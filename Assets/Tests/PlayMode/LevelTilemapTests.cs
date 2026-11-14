@@ -37,14 +37,14 @@ namespace Platformer.Tests
             yield return new WaitForSeconds(0.75f);
 
             GameObject player = null;
-            Tilemap tilemap = null;
             foreach (GameObject root in scene.GetRootGameObjects())
             {
                 if (root.name == "Player") player = root;
-
-                Tilemap found = root.GetComponentInChildren<Tilemap>(true);
-                if (found != null) tilemap = found;
             }
+
+            // 场景里现在有 Terrain 和运行时的 Outline 两个 Tilemap，按名字取地形。
+            var terrainGo = GameObject.Find("Terrain");
+            Tilemap tilemap = terrainGo != null ? terrainGo.GetComponent<Tilemap>() : null;
 
             Assert.IsNotNull(player, "Player not found in Level01.");
             Assert.IsNotNull(tilemap, "Tilemap not found in Level01.");
@@ -68,6 +68,31 @@ namespace Platformer.Tests
             Assert.IsTrue(controller.IsGrounded, "Player should stand on the tilemap collider.");
             Assert.AreEqual(0.75f, player.transform.position.y, 0.15f,
                 "Player should rest on top of the tilemap ground.");
+        }
+
+        [UnityTest]
+        public IEnumerator Tilemap_Has_Outline_Layer()
+        {
+            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
+
+            Scene scene = SceneManager.GetSceneByName(LevelScene);
+            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
+
+            yield return new WaitForSeconds(0.3f);
+
+            var outlineGo = GameObject.Find("Outline");
+            Assert.IsNotNull(outlineGo, "Level01 应该有一个运行时生成的 Outline 描边层。");
+
+            var outline = outlineGo.GetComponent<Tilemap>();
+            Assert.IsNotNull(outline, "Outline 物体上应该有 Tilemap。");
+
+            int cells = 0;
+            foreach (Vector3Int position in outline.cellBounds.allPositionsWithin)
+            {
+                if (outline.HasTile(position)) cells++;
+            }
+
+            Assert.Greater(cells, 0, "描边层应该按邻居规则绘制了描边瓦片。");
         }
 
         [UnityTest]

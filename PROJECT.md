@@ -39,8 +39,7 @@
 unity2D_Portal/
 ├─ Assets/
 │  ├─ Art/Placeholders/     占位贴图（tile1x1、4 个斜坡、玩家胶囊、mask_white）
-│  ├─ Editor/ProjectBuilder.cs   一键构建关卡/预制体/描边/传送门（约 900 行）
-│  ├─ Materials/ScreenOutline.mat
+│  ├─ Editor/ProjectBuilder.cs   一键构建关卡/预制体/传送门（约 800 行）
 │  ├─ Palettes/TerrainPalette.prefab
 │  ├─ Prefabs/Player.prefab
 │  ├─ Scenes/Level01.unity       主场景
@@ -50,10 +49,9 @@ unity2D_Portal/
 │  │  ├─ CaptureDisplayGroup.cs  传送门端（A/B）
 │  │  ├─ PortalPair.cs           传送门对总控
 │  │  ├─ RegionSnapshotCamera.cs 相机捕获 → 贴图 → 精灵
-│  │  └─ Rendering/ScreenOutlineFeature.cs
-│  ├─ Settings/                  URP、Renderer2D、描边材质、物理材质
-│  ├─ Shaders/ScreenOutline.shader
-│  ├─ Tests/PlayMode/            9 个自动化测试
+│  │  └─ TilemapOutline.cs       瓦片规则描边层
+│  ├─ Settings/                  URP、Renderer2D、物理材质
+│  ├─ Tests/PlayMode/            15 个自动化测试
 │  └─ Tiles/                     2 个基础瓦片 + 8 个斜坡瓦片
 ├─ docs/DEVELOPMENT.md          分阶段开发记录
 ├─ Tools/generate_placeholders.py
@@ -227,8 +225,9 @@ mask.rotation = Quaternion.Euler(0f, 0f, angle);
 ## 10. 描边系统
 
 - **瓦片内描边**：贴图烘焙，`#E0E0E0 → #D0D0D0`
-- **全屏外轮廓**：`ScreenOutlineFeature`（背景掩码 + 色差类型边界），阈值 0.28，宽 1px，颜色 `(0.70, 0.79, 0.92)`
-- 背景色 `(0.086, 0.102, 0.153)`，依赖纯色相机背景
+- **瓦片规则外描边**：`TilemapOutline`（挂在 `Terrain` 上）在运行时创建独立的 `Outline` Tilemap；按四邻域枚举：地形格邻空画 1px 内描边，深灰格邻接普通地形时在深灰侧画交界线，斜坡格铺斜线；空格不画外圈；颜色 `(0.70, 0.79, 0.92)`，线宽 1px
+- 描边层排序 `Default` / order `1`，在地形之上、传送门画面与玩家之下
+- 已移除 `ScreenOutlineFeature`、`ScreenOutline.shader`、`ScreenOutline.mat`；玩家和传送门画面不再有外描边
 
 ## 11. 构建脚本（ProjectBuilder）
 
@@ -239,7 +238,7 @@ mask.rotation = Quaternion.Euler(0f, 0f, angle);
 | `Rebuild Level + Prefabs` | **重建整个场景**（会覆盖手动修改） |
 | `Rebuild + Render Preview` | 重建 + 出预览图 |
 | `Render Preview Image` | 只渲染预览，不改场景 |
-| `Validate Level` | 校验瓦片数、材质、描边 feature |
+| `Validate Level` | 校验瓦片数、材质、描边组件 |
 | `Open Level 01` | 打开主场景 |
 
 命令行：
@@ -249,7 +248,7 @@ Unity.exe -batchmode -projectPath <项目> -executeMethod Platformer.EditorTools
 Unity.exe -batchmode -projectPath <项目> -runTests -testPlatform PlayMode -testResults Logs\TestResults.xml
 ```
 
-## 12. 测试（9/9 通过）
+## 12. 测试（15 个 PlayMode 用例：14 通过 + 1 跳过快照）
 
 | 测试 | 校验内容 |
 |---|---|
@@ -261,13 +260,19 @@ Unity.exe -batchmode -projectPath <项目> -runTests -testPlatform PlayMode -tes
 | `Falls_Below_Limit_Respawn` | 坠落重生 |
 | `Camera_Follows_Player` | 相机跟随收敛 |
 | `Tilemap_Level_Has_Grounded_Player` | 关卡瓦片数与玩家站立 |
+| `Tilemap_Has_Outline_Layer` | 瓦片规则描边层存在且有瓦片 |
 | `Snapshot_Camera_Captures_Own_View` | 捕获相机独立、1.2 倍尺寸、1:1、画布随视野、A/B 半屏、交叉连线 |
+| `Portal_Gates_Match_Portal_Height` | 门碰撞箱高度与 PortalPair 门洞高度一致 |
+| `Player_Teleports_Through_Portal` | 走进门传送到对侧门正面 |
+| `Player_Still_Teleports_After_Portal_Reenable` | 重新启用门后仍能传送（碰撞箱不被当墙） |
+| `Portal_Opens_From_Zero_To_Pair_Height` | 开门动画从 0 增长到配置高度 |
+| `Portal_View_Hides_When_Player_Is_Behind` | 玩家在门背面时隐藏画面 |
 
 ## 13. 已知限制 / 下一步
 
 1. 传送已实现（碰撞箱 + 玩家中心碰撞点 + 连续碰撞），细节见 `docs/UPDATE_2026-11-14.md`；门背面的碰撞箱仍然有效，只是画面隐藏。
 2. 遮罩尺寸（`Mask` 子物体 `scale (200,100)`、偏移 `±50`）是当前调好的视觉参数，改动会影响门洞大小与朝向。
-3. 全屏描边会作用于 `Portal View` 的裁切边缘；若要完全排除，需要把快照放到不参与描边的相机/渲染层（暂未实现）。
+3. 瓦片描边只按四邻域枚举：斜坡外侧不额外描边、斜角内凹处按四邻域近似；描边层在 Play 时生成，不写入场景。
 4. 场景手动修改后**不要**跑 `Rebuild Level + Prefabs`。
 
 ## 14. 迁移记录

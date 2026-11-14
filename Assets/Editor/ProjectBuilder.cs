@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Platformer.Rendering;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEditor.U2D.Sprites;
@@ -26,9 +25,6 @@ namespace Platformer.EditorTools
         const string ScenePath = "Assets/Scenes/Level01.unity";
         const string PlayerPhysicsMaterialPath = "Assets/Settings/PlayerPhysicsMaterial.physicsMaterial2D";
         const string TerrainPhysicsMaterialPath = "Assets/Settings/TerrainPhysicsMaterial.physicsMaterial2D";
-        const string OutlineMaterialPath = "Assets/Materials/ScreenOutline.mat";
-        const string OutlineFeaturePath = "Assets/Settings/ScreenOutlineFeature.asset";
-        const string RendererDataPath = "Assets/Settings/Renderer2D.asset";
         const string TileDir = "Assets/Tiles";
         const string TerrainTilePath = "Assets/Tiles/TerrainTile.asset";
         const string DarkTilePath = "Assets/Tiles/DarkTerrainTile.asset";
@@ -54,7 +50,6 @@ namespace Platformer.EditorTools
         static readonly Color TerrainColor = new Color(0.8784314f, 0.8784314f, 0.8784314f); // #E0E0E0
         static readonly Color DarkTerrainColor = new Color(0.27f, 0.30f, 0.36f);
         static readonly Color BackgroundColor = new Color(0.086f, 0.102f, 0.153f);
-        static readonly Color OutlineColor = new Color(0.70f, 0.79f, 0.92f, 1f);
 
         [MenuItem("Platformer/Rebuild Level + Prefabs", priority = 10)]
         public static void BuildAll()
@@ -64,7 +59,6 @@ namespace Platformer.EditorTools
                 EnsureFolder(ArtDir);
                 EnsureFolder(PrefabDir);
                 EnsureFolder(SceneDir);
-                EnsureFolder("Assets/Materials");
                 EnsureFolder(TileDir);
 
                 ConfigureLayers();
@@ -76,14 +70,12 @@ namespace Platformer.EditorTools
                 PhysicsMaterial2D playerMaterial = EnsurePlayerMaterial();
                 PhysicsMaterial2D terrainMaterial = EnsureTerrainMaterial();
                 Material litMaterial = LoadLitSpriteMaterial();
-                Material outlineMaterial = EnsureOutlineMaterial();
 
                 GameObject playerPrefab = BuildPlayerPrefab(sprites, playerMaterial, litMaterial);
                 Tile terrainTile = EnsureTile(TerrainTilePath, "TerrainTile", sprites["tile1x1"], TerrainColor);
                 Tile darkTile = EnsureTile(DarkTilePath, "DarkTerrainTile", sprites["tile1x1"], DarkTerrainColor);
                 Tile[] slopeTiles = EnsureSlopeTiles(sprites);
 
-                EnsureScreenOutlineFeature(outlineMaterial);
                 BuildLevelScene(playerPrefab, terrainTile, darkTile, slopeTiles, terrainMaterial);
                 RegisterBuildScene();
                 DeleteSampleScene();
@@ -289,79 +281,6 @@ namespace Platformer.EditorTools
             return mat;
         }
 
-        static Material EnsureOutlineMaterial()
-        {
-            EnsureFolder("Assets/Materials");
-
-            Shader shader = Shader.Find("Hidden/Platformer/ScreenOutline");
-            if (shader == null)
-                throw new InvalidOperationException("Shader 'Hidden/Platformer/ScreenOutline' not found.");
-
-            var mat = AssetDatabase.LoadAssetAtPath<Material>(OutlineMaterialPath);
-            if (mat == null)
-            {
-                mat = new Material(shader);
-                AssetDatabase.CreateAsset(mat, OutlineMaterialPath);
-            }
-            else if (mat.shader != shader)
-            {
-                mat.shader = shader;
-            }
-
-            mat.SetColor("_OutlineColor", OutlineColor);
-            mat.SetFloat("_OutlineWidth", 1f);   // 像素
-            mat.SetFloat("_Threshold", 0.28f);
-            EditorUtility.SetDirty(mat);
-            return mat;
-        }
-
-        static void EnsureScreenOutlineFeature(Material outlineMaterial)
-        {
-            var rendererData = AssetDatabase.LoadAssetAtPath<Renderer2DData>(RendererDataPath);
-            if (rendererData == null)
-                throw new InvalidOperationException("Renderer2D.asset not found at " + RendererDataPath);
-
-            ScreenOutlineFeature feature = AssetDatabase.LoadAssetAtPath<ScreenOutlineFeature>(OutlineFeaturePath);
-            if (feature == null)
-            {
-                feature = ScriptableObject.CreateInstance<ScreenOutlineFeature>();
-                feature.name = "Screen Outline";
-                AssetDatabase.CreateAsset(feature, OutlineFeaturePath);
-            }
-
-            // 把特性持久化到 Renderer2D.asset 里。ScriptableRendererData.SetDirty()
-            // 只刷新内存中的渲染器，因此这里通过 SerializedObject 修改序列化列表，
-            // 并显式保存资产。
-            var so = new SerializedObject(rendererData);
-            SerializedProperty features = so.FindProperty("m_RendererFeatures");
-
-            bool alreadyListed = false;
-            for (int i = 0; i < features.arraySize; i++)
-            {
-                if (features.GetArrayElementAtIndex(i).objectReferenceValue == feature)
-                {
-                    alreadyListed = true;
-                    break;
-                }
-            }
-
-            if (!alreadyListed)
-            {
-                features.arraySize++;
-                features.GetArrayElementAtIndex(features.arraySize - 1).objectReferenceValue = feature;
-            }
-
-            so.ApplyModifiedPropertiesWithoutUndo();
-            EditorUtility.SetDirty(rendererData);
-
-            feature.outlineMaterial = outlineMaterial;
-            feature.widthPixels = 1f;
-            feature.edgeThreshold = 0.28f;
-            EditorUtility.SetDirty(feature);
-
-            AssetDatabase.SaveAssets();
-        }
-
         static PhysicsMaterial2D EnsurePlayerMaterial()
         {
             return EnsurePhysicsMaterial(PlayerPhysicsMaterialPath, "PlayerPhysicsMaterial", 1f, 0f);
@@ -495,6 +414,9 @@ namespace Platformer.EditorTools
             var tilemap = tilemapGo.AddComponent<Tilemap>();
             var tilemapRenderer = tilemapGo.AddComponent<TilemapRenderer>();
             tilemapRenderer.sortingOrder = 0;
+
+            // 描边由独立的 Tilemap 层按邻居规则生成，不再使用全屏描边 shader。
+            tilemapGo.AddComponent<TilemapOutline>();
 
             var body = tilemapGo.AddComponent<Rigidbody2D>();
             body.bodyType = RigidbodyType2D.Static;
@@ -708,7 +630,7 @@ namespace Platformer.EditorTools
 
             var group = root.AddComponent<CaptureDisplayGroup>();
             group.side = side;
-            group.facing = side == CaptureGroupSide.A ? PortalFacing.Right : PortalFacing.Left;
+            group.Facing = side == CaptureGroupSide.A ? PortalFacing.Right : PortalFacing.Left;
             group.capture = controller;
             group.output = outputSprite;
             group.maskTop = maskTop;
@@ -766,15 +688,12 @@ namespace Platformer.EditorTools
                 Debug.Log($"[Platformer] Player at {player.transform.position}, jumpHeight={(pc != null ? pc.jumpHeight : -1)}, layer={LayerMask.LayerToName(player.layer)}");
             }
 
-            var rendererData = AssetDatabase.LoadAssetAtPath<Renderer2DData>(RendererDataPath);
-            bool hasOutline = false;
-            if (rendererData != null)
-            {
-                foreach (var feature in rendererData.rendererFeatures)
-                    if (feature is ScreenOutlineFeature) hasOutline = true;
-            }
-            Debug.Log($"[Platformer] Screen outline feature: {(hasOutline ? "present" : "MISSING")}");
-            if (!hasOutline) issues++;
+            var terrainForOutline = GameObject.Find("Terrain");
+            var outlineComponent = terrainForOutline != null
+                ? terrainForOutline.GetComponent<TilemapOutline>()
+                : null;
+            Debug.Log($"[Platformer] Tilemap outline component: {(outlineComponent != null ? "present" : "MISSING")}");
+            if (outlineComponent == null) issues++;
 
             var tilemapGo = GameObject.Find("Terrain");
             var tilemap = tilemapGo != null ? tilemapGo.GetComponent<Tilemap>() : null;
@@ -828,6 +747,11 @@ namespace Platformer.EditorTools
         {
             ValidateLevel();
             if (!File.Exists(ScenePath)) return;
+
+            // 描边层是运行时的；出预览图前强制生成一次。
+            var terrainForOutline = GameObject.Find("Terrain");
+            var outline = terrainForOutline != null ? terrainForOutline.GetComponent<TilemapOutline>() : null;
+            if (outline != null) outline.Build();
 
             Camera cam = Camera.main;
             if (cam == null) { Debug.LogError("[Platformer] No camera for preview."); return; }

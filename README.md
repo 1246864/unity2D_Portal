@@ -4,7 +4,7 @@
 
 一个可直接运行、方便二次修改的 2D 平台跳跃最小模板。
 
-地图由 **Tilemap** 构建：一个 Grid、一个 Tilemap、一套合并碰撞体，**全部以 1×1 瓦片为单位**逐格绘制。地面、墙、台阶、平台**全部同一种颜色**，配合全屏描边，任意相邻地形都会自动合并成一条外轮廓。
+地图由 **Tilemap** 构建：一个 Grid、一个 Tilemap、一套合并碰撞体，**全部以 1×1 瓦片为单位**逐格绘制。地面、墙、台阶、平台**全部同一种颜色**，配合瓦片规则的描边层，任意相邻地形都会自动合并成一条外轮廓。
 
 ![整关俯瞰](Preview.png)
 ![游戏视角](Preview_Gameplay.png)
@@ -60,7 +60,7 @@ Level
 
 ## 描边系统
 
-描边分两层：**每个瓦片自带的内描边** + **全屏合并的外轮廓**。
+描边分两层：**每个瓦片自带的内描边** + **按邻居规则生成的瓦片描边层**。
 
 ### 1. 瓦片内描边（烘焙在贴图里）
 
@@ -70,30 +70,30 @@ Level
 - 因此每个方块都有独立的边，连成一片时也能看清每格
 - 想调暗边强度，改 `Tools/generate_placeholders.py` 里的 `RIM`（237/255 ≈ 0.929）
 
-### 2. 全屏合并外轮廓（Screen Outline）
+### 2. 瓦片规则描边层（Tilemap Outline）
 
-由 **URP 2D Renderer Feature** 在全屏最后阶段统一处理：
+由 `Assets/Scripts/TilemapOutline.cs`（挂在地形 `Terrain` 上）在运行时生成一层独立的 `Outline` Tilemap：
 
-- `Assets/Scripts/Rendering/ScreenOutlineFeature.cs` + `Assets/Shaders/ScreenOutline.shader`
-- **轮廓边**：与相机背景色比较判断“内外”，在形状内侧 1px、外侧 1px 画描边。用二值判断而不是直接比色差，斜边（45°）也能得到连续、不闪烁的单像素线
-- **类型边界**：普通 / 深灰地形之间颜色不同 → 画分界线，两种颜色不会融合
-- 同色地形内部只有瓦片自身的暗边，不会被外轮廓重复描一次（阈值 0.28 高于内描边的色差）
-- 角色也会被同一套描边勾勒
+- 逐格枚举**上下左右四个邻居**：
+  - 地形格：邻格为空 → 在该侧画 1px 内描边；
+  - 深灰格邻接普通地形 → 在深灰一侧画 1px 交界线（另一侧不重复画，避免线宽翻倍）；
+  - 斜坡格：铺对应方向的斜线描边瓦片；
+- 只在实心地形格内部描边，空格不画外圈，描边总宽度与原来的 1px 屏幕描边接近；
+- 描边层排序层 `Default`、order `1`，位于地形之上、传送门画面与玩家之下；
+- 已移除 URP Renderer Feature / `ScreenOutline` shader / 材质，玩家和传送门画面不再有外描边。
 
 可调项：
 
 | 内容 | 位置 |
 |---|---|
-| 外轮廓颜色 | `Assets/Materials/ScreenOutline.mat` → Outline Color |
-| 外轮廓宽度（像素） | `ScreenOutline.mat` → Width（默认 **1px**），或 `ScreenOutlineFeature.asset` → Width Pixels |
-| 类型边界灵敏度 | `_Threshold`（默认 **0.28**，需高于瓦片内描边的色差） |
-| 背景判定容差 | `ScreenOutlineFeature` 里的 `_BackgroundTolerance`（默认 0.05，背景不是纯色时需调大或关闭轮廓项） |
+| 描边颜色 | `Terrain` 上 `TilemapOutline` → Outline Color（默认 `(0.70,0.79,0.92)`） |
+| 线宽（像素） | `TilemapOutline` → Line Width（默认 **1**） |
+| 描边层排序 | `TilemapOutline` → Sorting Layer / Sorting Order |
 | 瓦片内描边强度 | `Tools/generate_placeholders.py` → `RIM` |
 | 地形颜色 | `Assets/Tiles/TerrainTile.asset` / `DarkTerrainTile.asset` → Color |
-| 插入时机 | `ScreenOutlineFeature.asset` → Injection Point |
 
-> 外轮廓是屏幕空间效果，粗细以像素计，不随镜头缩放变化；瓦片内描边是贴图效果，随镜头缩放。
-> 轮廓边依赖相机的纯色背景（Solid Color），如果以后换成 Skybox / 图片背景，需要相应调整判定方式。
+> 描边层在 **Play 时生成**（运行时对象，不写入场景）；修改地形后重新进入 Play 即可刷新。
+> 瓦片描边是贴图效果，粗细随镜头缩放；不再依赖相机纯色背景。
 
 ## 传送门端（Portal A / Portal B）
 
@@ -195,17 +195,19 @@ Portal A                          Portal B
 Assets/
   Art/Placeholders/     tile1x1.png / slope_up_right.png / slope_up_left.png / slope_down_right.png / slope_down_left.png / player_capsule.png
   Editor/               ProjectBuilder.cs（一键重建关卡与资产）
-  Materials/            ScreenOutline.mat
+  Palettes/             TerrainPalette.prefab
   Prefabs/              Player.prefab
   Scenes/Level01.unity  主场景
   Scripts/
     PlayerController2D.cs
     CameraFollow2D.cs
-    Rendering/ScreenOutlineFeature.cs
-  Shaders/              ScreenOutline.shader
-  Settings/             URP 管线资源 + ScreenOutlineFeature.asset + 物理材质
+    CaptureDisplayGroup.cs
+    PortalPair.cs
+    RegionSnapshotCamera.cs
+    TilemapOutline.cs     瓦片规则描边层
+  Settings/             URP 管线资源 + 物理材质
   Tiles/                TerrainTile.asset / DarkTerrainTile.asset
-  Tests/PlayMode/       角色物理、相机、Tilemap 关卡的自动化测试
+  Tests/PlayMode/       角色物理、相机、Tilemap 关卡、描边、传送门的自动化测试
 Tools/generate_placeholders.py   占位图生成脚本
 docs/DEVELOPMENT.md              开发文档
 ```
