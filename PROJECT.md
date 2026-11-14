@@ -16,7 +16,7 @@
   - 两端的画面**交叉输出**（A 的画面画在 B 上，B 的画在 A 上）
   - 门面用 `SpriteMask` 裁切，遮罩始终**朝向玩家眼睛**
   - 支持**镜中镜**（递归）：相机能看到另一扇门的画面，形成无限嵌套
-- 传送（玩家穿过门）的逻辑**尚未实现**，计划由使用者自行编写，所需属性已经准备好
+- 传送已实现：门内有极薄碰撞箱（高度 = 门洞高度），玩家中心的碰撞点撞到即传送到另一扇门 `facing` 外侧一点点；传送当帧强制双门重拍；玩家在门背面时该门画面隐藏（详见 `docs/UPDATE_2026-11-14.md`）
 
 ---
 
@@ -173,10 +173,11 @@ mask.rotation = Quaternion.Euler(0f, 0f, angle);
 ### 6.6 朝向
 
 `CaptureDisplayGroup.facing`（`PortalFacing.Left / Right`）：
-- A 默认 **Right**，B 默认 **Left**
+- 当前场景：A = **Left**，B = **Right**（两门面对面）
 - 辅助：`FacesLeft`、`FacingSign`（-1 / +1）
+- 开口方向 = `Quaternion.Euler(0, 0, FacingSign * -90) * Vector3.up`，即朝右 `(1,0)`、朝左 `(-1,0)`
 
-传送逻辑需要用它判断：两门同向 vs 相背时，画面/速度是否要水平翻转。
+传送用它决定：出口落在该门 `facing` 一侧；两门同向时水平速度取反、相背时保持；玩家与开口方向夹角 ≥ 90° 时隐藏该门画面。
 
 ---
 
@@ -193,6 +194,7 @@ mask.rotation = Quaternion.Euler(0f, 0f, angle);
 | 下落重力倍率 | 1.6 |
 | 松键跳跃削减 | 0.45 |
 | 地面层 | Ground (6) |
+| 中心碰撞点半径 | 0.08（传送门检测用） |
 
 特性：斜坡行走（按地面法线处理）、土狼时间、跳跃缓冲、坠落重生。
 
@@ -249,7 +251,7 @@ Unity.exe -batchmode -projectPath <项目> -runTests -testPlatform PlayMode -tes
 
 ## 13. 已知限制 / 下一步
 
-1. **传送逻辑尚未实现**：玩家穿过门的位置/速度变换需要按 `facing`、`FacingSign`、`PortalHeight` 编写（在 `PortalPair` 或新组件里）。
+1. 传送已实现（碰撞箱 + 玩家中心碰撞点 + 连续碰撞），细节见 `docs/UPDATE_2026-11-14.md`；门背面的碰撞箱仍然有效，只是画面隐藏。
 2. 遮罩尺寸（`Mask` 子物体 `scale (200,100)`、偏移 `±50`）是当前调好的视觉参数，改动会影响门洞大小与朝向。
 3. 全屏描边会作用于 `Portal View` 的裁切边缘；若要完全排除，需要把快照放到不参与描边的相机/渲染层（暂未实现）。
 4. 场景手动修改后**不要**跑 `Rebuild Level + Prefabs`。

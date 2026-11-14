@@ -51,9 +51,14 @@ namespace Platformer
         [Tooltip("低于该 Y 坐标时重生")]
         public float fallLimitY = -12f;
 
+        [Header("传送门碰撞点")]
+        [Tooltip("玩家中心碰撞点的半径（世界单位），用于和传送门的薄碰撞箱做连续碰撞")]
+        [Min(0.01f)] public float centerPointRadius = 0.08f;
+
         Rigidbody2D _rb;
         CapsuleCollider2D _col;
         SpriteRenderer _sr;
+        CircleCollider2D _centerPoint;
 
         float _moveInput;
         bool _manualInput;
@@ -72,12 +77,35 @@ namespace Platformer
         /// <summary>当前应用的水平输入（-1 到 1）。</summary>
         public float MoveInput => _moveInput;
 
+        /// <summary>玩家中心的碰撞点，传送门用它来检测是否撞到门。</summary>
+        public Collider2D CenterPoint => _centerPoint;
+
+        /// <summary>物理步开始前的速度，传送碰撞回调里用它恢复进门瞬间的速度。</summary>
+        public Vector2 VelocityBeforePhysics { get; private set; }
+
         void Awake()
         {
             _rb = GetComponent<Rigidbody2D>();
             _col = GetComponent<CapsuleCollider2D>();
             _sr = GetComponentInChildren<SpriteRenderer>();
             _spawnPoint = transform.position;
+
+            // 传送门的碰撞箱很薄，用连续碰撞避免高速时直接穿过去。
+            _rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+            CreateCenterPoint();
+        }
+
+        /// <summary>在玩家中心创建一个很小的碰撞点，专门用来撞传送门的薄碰撞箱。</summary>
+        void CreateCenterPoint()
+        {
+            var point = new GameObject("Center Point");
+            point.layer = gameObject.layer;
+            point.transform.SetParent(transform, false);
+            point.transform.localPosition = Vector3.zero;
+
+            _centerPoint = point.AddComponent<CircleCollider2D>();
+            _centerPoint.radius = centerPointRadius;
+            _centerPoint.isTrigger = false;
         }
 
         void Update()
@@ -107,6 +135,9 @@ namespace Platformer
             ApplyExtraFallGravity();
             ClampFallSpeed();
             RespawnIfFallen();
+
+            // 记录本物理步的速度，碰撞回调里用它恢复进门瞬间的速度。
+            VelocityBeforePhysics = _rb.velocity;
         }
 
         void UpdateGrounded()
@@ -267,6 +298,10 @@ namespace Platformer
             Gizmos.DrawLine(feet, apex);
             Gizmos.DrawWireSphere(apex, 0.12f);
             Gizmos.DrawLine(feet, feet + Vector3.down * groundCheckDistance);
+
+            // 玩家中心的传送门碰撞点。
+            Gizmos.color = new Color(1f, 0.5f, 0.2f, 0.9f);
+            Gizmos.DrawWireSphere(transform.position, centerPointRadius);
         }
     }
 }
