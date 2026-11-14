@@ -33,8 +33,8 @@ namespace Platformer
         [Tooltip("生成贴图的尺寸上限")]
         public int maxTextureSize = 2048;
 
-        [Tooltip("两次捕获之间的间隔（秒），0 表示每帧")]
-        public float captureInterval = 0.05f;
+        [Tooltip("两次捕获之间的间隔（秒），0 表示每帧渲染")]
+        public float captureInterval = 0f;
 
         [Header("输出")]
         [Tooltip("显示捕获画面的精灵渲染器")]
@@ -73,10 +73,17 @@ namespace Platformer
         {
             if (!EnsureResources()) return;
 
+            // captureInterval 为 0 时每帧都重新渲染/读取一次，分辨率不变。
+            if (captureInterval <= 0f)
+            {
+                Capture();
+                return;
+            }
+
             _timer -= Time.deltaTime;
             if (_timer <= 0f)
             {
-                _timer = Mathf.Max(0.0001f, captureInterval);
+                _timer = captureInterval;
                 Capture();
             }
         }

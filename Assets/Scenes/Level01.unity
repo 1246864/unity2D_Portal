@@ -539,7 +539,7 @@ MonoBehaviour:
   captureCamera: {fileID: 1086007094}
   pixelsPerUnit: 40
   maxTextureSize: 2048
-  captureInterval: 0.05
+  captureInterval: 0
   output: {fileID: 1492848402}
 --- !u!1 &251849552
 GameObject:
@@ -738,7 +738,7 @@ MonoBehaviour:
   captureCamera: {fileID: 235447639}
   pixelsPerUnit: 40
   maxTextureSize: 2048
-  captureInterval: 0.05
+  captureInterval: 0
   output: {fileID: 913622742}
 --- !u!1 &420369878
 GameObject:
