@@ -363,3 +363,4 @@ Unity.exe -batchmode -nographics -projectPath <项目> ^
 | 2026-11-12 | 新增相机快照：主相机视野 1.2 倍渲染成 RenderTexture → Sprite 输出 |
 | 2026-11-14 | 传送实现：门内薄碰撞箱 + 玩家中心碰撞点 + 连续碰撞；传送后强制双门捕获刷新；玩家绕到门背面时隐藏该门画面；场景中 A/B 移至地面附近并互换朝向（面对面），详见 `docs/UPDATE_2026-11-14.md` |
 | 2026-11-14 | 描边改为瓦片规则：移除 `ScreenOutlineFeature` / `ScreenOutline.shader` / 材质，新增 `TilemapOutline` 运行时描边层（四邻域枚举 + 独立 Outline Tilemap）；玩家与传送门不再有外描边 |
+| 2026-11-14 | 门位置光带：`PortalHintBeam` shader 实现靠门侧粗核心、沿 facing 渐隐、两端高亮、竖向流光 + UV 两轴持续滚动的噪音失真、整体 0.5 透明度且呼吸频率 6.283（1 秒一个周期）、alpha 在 0.2~1.0 间变化（圆角已撤销）；光带长度 0.45，高度 = 门洞 + 0.3，排在 Portal View 之下并由输出盖住，Default 层仍开放给传送门相机；粒子提升到 45/s、池 256 |

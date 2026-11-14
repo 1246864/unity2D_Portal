@@ -28,7 +28,7 @@ namespace Platformer
         [Header("跳跃")]
         [Tooltip("最大跳跃高度（世界单位，等于格）")]
         public float jumpHeight = 6f;
-        [Tooltip("角色高度（格），用于地面探测和 Gizmo")]
+        [Tooltip("角色高度（格），用于地面探测和场景辅助线")]
         public float playerHeight = 1.5f;
         [Tooltip("离开地面后仍可起跳的宽容时间")]
         public float coyoteTime = 0.1f;

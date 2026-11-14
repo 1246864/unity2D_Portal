@@ -273,6 +273,103 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Portal_Hint_Beam_Matches_Height_And_Sorting()
+        {
+            FindGroups(out var a, out var b);
+            var pair = Object.FindObjectOfType<PortalPair>();
+
+            Assert.IsNotNull(a);
+            Assert.IsNotNull(b);
+            Assert.IsNotNull(pair);
+
+            var hintA = a.HintRenderer;
+            var hintB = b.HintRenderer;
+            Assert.IsNotNull(hintA, "A 应有门位置光带。");
+            Assert.IsNotNull(hintB, "B 应有门位置光带。");
+
+            float expectedHeight = pair.PortalHeight + a.hintExtraHeight;
+            Assert.AreEqual(expectedHeight, hintA.transform.lossyScale.y, 0.01f,
+                "线高应等于门洞高度 + hintExtraHeight。");
+            Assert.Greater(hintA.transform.lossyScale.y, pair.PortalHeight,
+                "线高应比门洞高一点，两端才能从遮罩外露出来。");
+            Assert.AreEqual(a.hintBeamLength, hintA.transform.lossyScale.x, 0.01f,
+                "光带长度应符合 hintBeamLength。");
+
+            Assert.AreEqual(0, hintA.gameObject.layer,
+                "光带应在默认层，传送门相机才拍得到。");
+            Assert.AreNotEqual(0, a.capture.captureCamera.cullingMask & (1 << hintA.gameObject.layer),
+                "传送门相机不应排除光带层。");
+            Assert.AreEqual(a.output.sortingLayerName, hintA.sortingLayerName,
+                "光带应和 Portal View 在同一排序层。");
+            Assert.Less(hintA.sortingOrder, a.output.sortingOrder,
+                "光带应在 Portal View 之下，被输出盖住。");
+
+            var materialA = hintA.sharedMaterial;
+            var materialB = hintB.sharedMaterial;
+            Assert.IsNotNull(materialA, "A 光带应有提示材质。");
+            Assert.IsNotNull(materialB, "B 光带应有提示材质。");
+            Assert.AreEqual("Hidden/Platformer/PortalHintBeam", materialA.shader.name,
+                "光带应使用 PortalHintBeam shader。");
+            Assert.Greater(materialA.GetColor("_Color").b, materialA.GetColor("_Color").r,
+                "A 门光带应为蓝色。");
+            Assert.Greater(materialB.GetColor("_Color").r, materialB.GetColor("_Color").b,
+                "B 门光带应为红色。");
+            Assert.AreEqual(a.FacingSign, materialA.GetFloat("_Direction"), 0.01f,
+                "A 的渐变方向应朝 facing。");
+            Assert.AreEqual(b.FacingSign, materialB.GetFloat("_Direction"), 0.01f,
+                "B 的渐变方向应朝 facing。");
+            Assert.Less(materialA.GetFloat("_Alpha"), 0.7f,
+                "整体透明度应拉低。");
+            Assert.AreEqual(0.5f, materialA.GetFloat("_BreathFrequency"), 0.001f,
+                "代码配置的呼吸频率应传递给材质。");
+            Assert.Greater(materialA.GetFloat("_NoiseStrength"), 0f,
+                "光带应带噪音失真。");
+            Assert.Greater(materialA.GetFloat("_NoiseSpeed"), 0.5f,
+                "噪音掩码应持续移动。");
+
+            Assert.Greater(a.HintLinePosition.x, a.transform.position.x,
+                "A 朝左，细线应在门的背面（右侧）。");
+            Assert.Less(b.HintLinePosition.x, b.transform.position.x,
+                "B 朝右，细线应在门的背面（左侧）。");
+
+            // 高度只看 PortalPair，不跟开门动画。
+            a.PlayOpenAnimation();
+            yield return null;
+            Assert.AreEqual(expectedHeight, hintA.transform.lossyScale.y, 0.01f,
+                "开门动画不应改变线高。");
+
+            // 粒子：A 蓝 / B 红，从细线沿 facing 方向发射，排在输出之上且可被捕获。
+            var particlesA = a.HintParticles;
+            var particlesB = b.HintParticles;
+            Assert.IsNotNull(particlesA, "A 应有门位置粒子。");
+            Assert.IsNotNull(particlesB, "B 应有门位置粒子。");
+            Assert.AreEqual(0, particlesA.gameObject.layer,
+                "粒子应在默认层，传送门相机才拍得到。");
+            Assert.AreNotEqual(0, a.capture.captureCamera.cullingMask & (1 << particlesA.gameObject.layer),
+                "传送门相机不应排除粒子层。");
+
+            var particlesRendererA = particlesA.GetComponent<ParticleSystemRenderer>();
+            Assert.AreEqual(a.output.sortingLayerName, particlesRendererA.sortingLayerName,
+                "粒子和 Portal View 应在同一排序层。");
+            Assert.Greater(particlesRendererA.sortingOrder, a.output.sortingOrder,
+                "粒子应排在 Portal View 之上。");
+            Assert.Greater(particlesA.main.startColor.color.b, particlesA.main.startColor.color.r,
+                "A 门粒子应为蓝色。");
+            Assert.Greater(particlesB.main.startColor.color.r, particlesB.main.startColor.color.b,
+                "B 门粒子应为红色。");
+            float expectedEmitterHeight = Mathf.Max(0.01f, pair.PortalHeight - 0.1f);
+            Assert.AreEqual(expectedEmitterHeight, particlesA.shape.scale.y, 0.01f,
+                "粒子发射区域应比门洞略小。");
+            Assert.AreEqual(a.hintParticleRate * 0.25f,
+                particlesA.emission.rateOverTime.constant, 0.01f,
+                "粒子发射率应为配置值的四分之一。");
+            Assert.Less(particlesA.emission.rateOverTime.constant, 30f,
+                "粒子密度应较稀。");
+            Assert.GreaterOrEqual(particlesA.main.maxParticles, 256,
+                "粒子池应更大。");
+        }
+
+        [UnityTest]
         public IEnumerator Portal_View_Hides_When_Player_Is_Behind()
         {
             FindGroups(out var a, out _);

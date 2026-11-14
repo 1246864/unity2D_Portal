@@ -38,10 +38,10 @@ namespace Platformer
         [Tooltip("本组的画面精灵（会被对方那组画上画面）")]
         public SpriteRenderer output;
 
-        [Tooltip("Portal View 的父节点（视觉中心）；留空时自动取 output 的父节点")]
+        [Tooltip("传送门画面的父节点（视觉中心）；留空时自动取输出精灵的父节点")]
         public Transform viewCenter;
 
-        [Tooltip("本门显示精灵所在的游戏对象（Start 时自动获取）")]
+        [Tooltip("本门显示精灵所在的游戏对象（开始时自动获取）")]
         public GameObject viewObject;
 
         [Tooltip("左右两半在中线各让出的像素数。留一点缝可以避免半屏拼接把共用像素列放大成一条亮线")]
@@ -51,12 +51,56 @@ namespace Platformer
         [Tooltip("玩家离一扇门小于该距离时，另一扇门线性变透明；距离 0 时完全透明。单位与颜色距离公式一致")]
         [Min(0f)] public float otherViewFadeDistance = 3f;
 
+        [Header("门位置提示")]
+        [Tooltip("光带沿门朝向方向的长度（世界单位）")]
+        [Min(0.01f)] public float hintBeamLength = 0.45f;
+
+        [Tooltip("细线高度比传送门对的门洞高度多出的世界单位（两端露在门洞外）")]
+        public float hintExtraHeight = 0.3f;
+
+        [Tooltip("细线核心宽度（占光带长度的比例）")]
+        [Range(0.02f, 0.5f)] public float hintCoreWidth = 0.18f;
+
+        [Tooltip("流光速度")]
+        public float hintFlowSpeed = 2.5f;
+
+        [Tooltip("两端高亮宽度（纹理纵向比例）")]
+        [Range(0.02f, 0.5f)] public float hintEndWidth = 0.12f;
+
+        [Tooltip("整体透明度")]
+        [Range(0f, 1f)] public float hintAlpha = 0.5f;
+
+        // 仅由代码配置，避免已有场景组件的序列化值覆盖此频率。
+        [System.NonSerialized] public float hintBreathFrequency = 0.5f;
+
+        [Tooltip("噪音失真强度")]
+        [Range(0f, 0.3f)] public float hintNoiseStrength = 0.05f;
+
+        [Tooltip("噪音缩放")]
+        [Min(0.01f)] public float hintNoiseScale = 7f;
+
+        [Tooltip("噪音流动速度（纹理两轴持续滚动）")]
+        public float hintNoiseSpeed = 0.9f;
+
+        [Tooltip("细线向门朝向反方向（门的背面）偏移的世界单位")]
+        public float hintBackOffset = 0.1f;
+
+        [Header("门位置提示粒子")]
+        [Tooltip("粒子沿门朝向方向的基础前进速度")]
+        public float hintParticleSpeed = 1.8f;
+
+        [Tooltip("粒子发射速率（用于控制密度）")]
+        [Min(0f)] public float hintParticleRate = 45f;
+
+        [Tooltip("粒子基础存活时间（秒）")]
+        [Min(0.01f)] public float hintParticleLifetime = 1f;
+
         [Header("玩家")]
-        [Tooltip("本对传送门绑定的玩家游戏对象，由 Portal Pair 下发，无需手填")]
+        [Tooltip("本对传送门绑定的玩家游戏对象，由传送门对下发，无需手填")]
         public GameObject player;
 
         [Header("传送门")]
-        [Tooltip("门的朝向：定义出口在 Y 轴（竖直方向）的哪一侧；传送时据此决定出面对方向")]
+        [Tooltip("门的朝向：定义出口在竖直方向的哪一侧；传送时据此决定出面对方向")]
         [SerializeField] PortalFacing facing = PortalFacing.Right;
 
         public PortalFacing Facing
@@ -82,7 +126,7 @@ namespace Platformer
         public Transform maskBottom;
 
         [Header("开门动画")]
-        [Tooltip("开门动画时长（秒）：上下遮罩偏移从 0 增长到 PortalPair 配置值")]
+        [Tooltip("开门动画时长（秒）：上下遮罩偏移从 0 增长到传送门对配置值")]
         [Min(0f)] public float openDuration = 0.6f;
 
         [Tooltip("开门曲线：0 = 关闭，1 = 完全打开")]
@@ -93,6 +137,15 @@ namespace Platformer
 
         /// <summary>开门动画已播放次数（调试/测试用，含 OnEnable 的首次播放）。</summary>
         public int OpenAnimationCount { get; private set; }
+
+        /// <summary>门位置提示的渲染器（调试/测试用）。</summary>
+        public SpriteRenderer HintRenderer => _hint;
+
+        /// <summary>门位置提示的粒子系统（调试/测试用）。</summary>
+        public ParticleSystem HintParticles => _particles;
+
+        /// <summary>细线（光带靠门的一侧）的世界位置。</summary>
+        public Vector3 HintLinePosition => _hintLinePosition;
 
         /// <summary>所属的 PortalPair（必要时向上查找）。</summary>
         public PortalPair Pair
@@ -122,6 +175,16 @@ namespace Platformer
         PortalPair _pair;
         Transform _viewAnchor;
         Transform _partnerViewAnchor;
+        SpriteRenderer _hint;
+        ParticleSystem _particles;
+        Material _beamMaterial;
+        Vector3 _hintLinePosition;
+
+        static readonly Color HintBlue = new Color(0.35f, 0.65f, 1f, 1f);
+        static readonly Color HintRed = new Color(1f, 0.35f, 0.35f, 1f);
+        static Texture2D _hintTexture;
+        static Sprite _hintSprite;
+        static Material _particleMaterial;
 
         Vector3 _viewBaseLocalPosition;
         bool _hasViewBase;
@@ -142,12 +205,16 @@ namespace Platformer
             ResolveMaskRig();
             CachePlayer();
             CacheViewAnchors();
+            EnsureHint();
         }
 
         void OnEnable()
         {
             // 首次激活、以及禁用后重新启用 GameObject/组件时都会触发，重播开门动画。
             PlayOpenAnimation();
+
+            // playOnAwake=false 的粒子系统不会随物体重新启用而自动恢复播放。
+            if (_particles != null) _particles.Play(true);
         }
 
         void Start()
@@ -172,6 +239,7 @@ namespace Platformer
             ChangeFacing(facing);
             CachePlayer();
             CacheViewAnchors();
+            EnsureHint();
         }
 
         /// <summary>
@@ -253,11 +321,221 @@ namespace Platformer
             _partnerViewAnchor = partner != null ? partner.ViewAnchor : null;
         }
 
+        static Sprite HintSprite
+        {
+            get
+            {
+                if (_hintSprite != null) return _hintSprite;
+
+                _hintTexture = new Texture2D(1, 1, TextureFormat.RGBA32, false)
+                {
+                    hideFlags = HideFlags.DontSave
+                };
+                _hintTexture.SetPixel(0, 0, Color.white);
+                _hintTexture.Apply();
+
+                _hintSprite = Sprite.Create(
+                    _hintTexture, new Rect(0f, 0f, 1f, 1f),
+                    new Vector2(0.5f, 0.5f), 1f);
+                _hintSprite.hideFlags = HideFlags.DontSave;
+                return _hintSprite;
+            }
+        }
+
+        /// <summary>
+        /// 在门的背面创建一条细长的位置提示：高度跟随 PortalPair 门洞高度，
+        /// 颜色 A 蓝 / B 红，排序在 Portal View 之下（主相机里被输出盖住），
+        /// 但位于 Default 层，传送门相机仍能捕获。
+        /// </summary>
+        void EnsureHint()
+        {
+            if (_hint != null) return;
+
+            var go = new GameObject("Portal Hint");
+            go.hideFlags = HideFlags.DontSave;
+            go.layer = 0; // 不能放在 Snapshot 层，否则传送门相机会把它排除掉
+            go.transform.SetParent(transform, false);
+
+            _hint = go.AddComponent<SpriteRenderer>();
+            _hint.sprite = HintSprite;
+            _hint.color = Color.white;
+            _hint.maskInteraction = SpriteMaskInteraction.None; // 不被门遮罩裁掉
+
+            Shader beamShader = Shader.Find("Hidden/Platformer/PortalHintBeam");
+            if (beamShader != null)
+            {
+                _beamMaterial = new Material(beamShader)
+                {
+                    hideFlags = HideFlags.DontSave
+                };
+                _beamMaterial.SetColor("_Color", side == CaptureGroupSide.A ? HintBlue : HintRed);
+                _beamMaterial.SetFloat("_Direction", FacingSign);
+                _beamMaterial.SetFloat("_CoreWidth", hintCoreWidth);
+                _beamMaterial.SetFloat("_FlowSpeed", hintFlowSpeed);
+                _beamMaterial.SetFloat("_EndWidth", hintEndWidth);
+                _beamMaterial.SetFloat("_Alpha", hintAlpha);
+                _beamMaterial.SetFloat("_BreathFrequency", hintBreathFrequency);
+                _beamMaterial.SetFloat("_NoiseStrength", hintNoiseStrength);
+                _beamMaterial.SetFloat("_NoiseScale", hintNoiseScale);
+                _beamMaterial.SetFloat("_NoiseSpeed", hintNoiseSpeed);
+                _hint.material = _beamMaterial;
+            }
+
+            if (output != null)
+            {
+                _hint.sortingLayerName = output.sortingLayerName;
+                _hint.sortingOrder = output.sortingOrder - 1;
+            }
+            else
+            {
+                _hint.sortingOrder = 19;
+            }
+
+            EnsureHintParticles();
+            UpdateHint();
+        }
+
+        /// <summary>门位置提示的粒子：从细线沿 facing 方向发射，颜色与门一致。</summary>
+        void EnsureHintParticles()
+        {
+            if (_particles != null) return;
+
+            var go = new GameObject("Portal Hint Particles");
+            go.hideFlags = HideFlags.DontSave;
+            go.layer = 0;
+            go.transform.SetParent(transform, false);
+
+            _particles = go.AddComponent<ParticleSystem>();
+
+            var main = _particles.main;
+            main.loop = true;
+            main.playOnAwake = false;
+            main.startLifetime = hintParticleLifetime * 1.5f;
+            main.startSpeed = 0f;
+            main.startSize = 0.05f;
+            main.maxParticles = 256;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.startColor = new ParticleSystem.MinMaxGradient(
+                side == CaptureGroupSide.A ? HintBlue : HintRed);
+
+            var emission = _particles.emission;
+            emission.rateOverTime = hintParticleRate * 0.25f;
+
+            var shape = _particles.shape;
+            shape.enabled = true;
+            shape.shapeType = ParticleSystemShapeType.Box;
+            shape.scale = new Vector3(0.02f, 3f, 0.1f);
+
+            var velocity = _particles.velocityOverLifetime;
+            velocity.enabled = true;
+            velocity.space = ParticleSystemSimulationSpace.World;
+            velocity.x = FacingSign * hintParticleSpeed * 0.25f;
+            velocity.y = 0f;
+            velocity.z = 0f;
+
+            var colorOverLifetime = _particles.colorOverLifetime;
+            colorOverLifetime.enabled = true;
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+                new[]
+                {
+                    new GradientAlphaKey(1f, 0f),
+                    new GradientAlphaKey(0.8f, 0.7f),
+                    new GradientAlphaKey(0f, 1f)
+                });
+            colorOverLifetime.color = gradient;
+
+            var renderer = _particles.GetComponent<ParticleSystemRenderer>();
+            renderer.material = ParticleMaterial;
+            renderer.renderMode = ParticleSystemRenderMode.Billboard;
+            renderer.sortingLayerName = output != null ? output.sortingLayerName : "Default";
+            renderer.sortingOrder = output != null ? output.sortingOrder + 2 : 22;
+            renderer.maskInteraction = SpriteMaskInteraction.None;
+
+            _particles.Play();
+        }
+
+        static Material ParticleMaterial
+        {
+            get
+            {
+                if (_particleMaterial != null) return _particleMaterial;
+
+                Shader shader = Shader.Find("Sprites/Default");
+                if (shader == null) shader = Shader.Find("Universal Render Pipeline/2D/Sprite-Unlit-Default");
+                if (shader == null) return null;
+
+                _particleMaterial = new Material(shader)
+                {
+                    hideFlags = HideFlags.DontSave
+                };
+                _particleMaterial.mainTexture = Texture2D.whiteTexture;
+                return _particleMaterial;
+            }
+        }
+
+        /// <summary>更新光带的位置、高度、facing 方向渐变和粒子发射区域。</summary>
+        void UpdateHint()
+        {
+            if (_hint == null) return;
+
+            // 线高比门洞略高，两端会从 Portal View 的遮罩外露出来。
+            float height = (Pair != null ? Pair.PortalHeight : 3f) + hintExtraHeight;
+            Vector3 scale = new Vector3(hintBeamLength, height, 1f);
+            if (_hint.transform.localScale != scale)
+                _hint.transform.localScale = scale;
+
+            Vector3 line = _viewAnchor != null ? _viewAnchor.position : transform.position;
+            line.x -= FacingSign * hintBackOffset;
+            line.z = transform.position.z;
+            _hintLinePosition = line;
+
+            // 光带从细线沿 facing 方向铺开，细线是 u=0 的那一侧。
+            Vector3 beamPosition = line + new Vector3(FacingSign * hintBeamLength * 0.5f, 0f, 0f);
+            if (_hint.transform.position != beamPosition)
+                _hint.transform.position = beamPosition;
+
+            if (_beamMaterial != null)
+            {
+                _beamMaterial.SetFloat("_Direction", FacingSign);
+                _beamMaterial.SetFloat("_CoreWidth", hintCoreWidth);
+                _beamMaterial.SetFloat("_FlowSpeed", hintFlowSpeed);
+                _beamMaterial.SetFloat("_EndWidth", hintEndWidth);
+                _beamMaterial.SetFloat("_Alpha", hintAlpha);
+                _beamMaterial.SetFloat("_BreathFrequency", hintBreathFrequency);
+                _beamMaterial.SetFloat("_NoiseStrength", hintNoiseStrength);
+                _beamMaterial.SetFloat("_NoiseScale", hintNoiseScale);
+                _beamMaterial.SetFloat("_NoiseSpeed", hintNoiseSpeed);
+            }
+
+            if (_particles != null)
+            {
+                if (_particles.transform.position != line)
+                    _particles.transform.position = line;
+
+                var shape = _particles.shape;
+                float emitterHeight = Mathf.Max(0.01f, (Pair != null ? Pair.PortalHeight : 3f) - 0.1f);
+                shape.scale = new Vector3(0.02f, emitterHeight, 0.1f);
+
+                var velocity = _particles.velocityOverLifetime;
+                velocity.x = FacingSign * hintParticleSpeed * 0.25f;
+            }
+        }
+
+        void OnDestroy()
+        {
+            if (_hint != null) Destroy(_hint.gameObject);
+            if (_particles != null) Destroy(_particles.gameObject);
+            if (_beamMaterial != null) Destroy(_beamMaterial);
+        }
+
         void LateUpdate()
         {
             AdvanceOpenAnimation();
             ApplyHalfCrop();
             UpdateMasks();
+            UpdateHint();
         }
 
         void Update()
@@ -403,18 +681,41 @@ namespace Platformer
             FacePoint(maskBottom, eye);
         }
 
-        /// <summary>按 0..1 的开门比例设置上下遮罩的 Y 偏移（0 = 关闭，1 = 完全打开）。</summary>
+        /// <summary>按 0..1 的开门比例设置上下遮罩的 Y 偏移（0 = 关闭，1 = 完全打开）。
+        ///         按 0..1 的开门比例设置传送门成像颜色，0纯黑，1正常颜色
+        /// </summary>
         void ApplyMaskOffsets(float progress)
         {
             if (maskTop == null || maskBottom == null) return;
 
             PortalPair pair = Pair;
             float open = Mathf.Clamp01(progress);
+
+            if (open == 1) return;
+
             float topOffset = (pair != null ? pair.maskTopOffset : 1.5f) * open;
             float bottomOffset = (pair != null ? pair.maskBottomOffset : -1.5f) * open;
 
             maskTop.localPosition = new Vector3(0f, topOffset, 0f);
             maskBottom.localPosition = new Vector3(0f, bottomOffset, 0f);
+
+            // 颜色偏移
+            var tmp_color = viewObject.GetComponent<SpriteRenderer>().color;
+            
+                if (side == CaptureGroupSide.A)
+                {
+                    tmp_color.r *= open;
+                    tmp_color.g *= open;
+                    tmp_color.b *= open;
+                }
+                else
+                {
+                    tmp_color.g *= open;
+                    tmp_color.b *= open;
+                    tmp_color.r *= open;
+                }
+                viewObject.GetComponent<SpriteRenderer>().color = tmp_color;
+            
         }
 
         static void FacePoint(Transform mask, Vector3 point)

@@ -51,7 +51,8 @@ unity2D_Portal/
 │  │  ├─ RegionSnapshotCamera.cs 相机捕获 → 贴图 → 精灵
 │  │  └─ TilemapOutline.cs       瓦片规则描边层
 │  ├─ Settings/                  URP、Renderer2D、物理材质
-│  ├─ Tests/PlayMode/            15 个自动化测试
+│  ├─ Shaders/PortalHintBeam.shader  门位置光带（渐变/流光/两端高亮）
+│  ├─ Tests/PlayMode/            18 个自动化测试
 │  └─ Tiles/                     2 个基础瓦片 + 8 个斜坡瓦片
 ├─ docs/DEVELOPMENT.md          分阶段开发记录
 ├─ Tools/generate_placeholders.py
@@ -168,6 +169,7 @@ mask.rotation = Quaternion.Euler(0f, 0f, angle);
 - `PortalHeight = |maskTopOffset - maskBottomOffset|`：`PortalPair` 与 `CaptureDisplayGroup` 都暴露这个只读属性，后者直接委托给前者；
 - 开门动画：`CaptureDisplayGroup.PlayOpenAnimation()`（`OnEnable` 时自动调用，禁用后重新启用也会重播），在 `openDuration` 内把上下偏移从 **0** 增长到 `PortalPair` 配置值，节奏由 `openCurve` 控制；只驱动遮罩视觉，碰撞箱仍按完整门洞高度。传送时**发起传送的那扇门**额外重播一次自己的开门动画（从 A 进 → A 播，从 B 进 → B 播），另一扇门不重播。
 - 另一扇门透明度：`CaptureDisplayGroup.otherViewFadeDistance`（默认 **3**，与颜色距离公式同一世界单位）。玩家离某扇门越近，另一扇门的 alpha 越低：距离 0 → 0，达到阈值 → 1；本门自己不变透明。实现里缓存本门/对方门的视觉中心，每帧只做两次局部位移和一次颜色赋值。
+- 门位置光带：`CaptureDisplayGroup` 在门的背面（`-facing` 偏移 `hintBackOffset`）生成一块沿 facing 方向铺开的光带（`hintBeamLength` 默认 0.45），靠门一侧是加粗的细线核心；高度 = `PortalPair.PortalHeight + hintExtraHeight`（默认 +0.3，两端从门洞遮罩外露出一点）。`PortalHintBeam` shader：靠门侧粗核心、沿 facing 渐隐到透明、两端高亮、竖向流光叠加噪音失真（`hintNoiseStrength`），噪音掩码在 UV 两轴持续滚动（`hintNoiseSpeed` 0.9）、整体透明度 **0.5**，呼吸频率 **6.283（1 秒一个周期）**、alpha 在 **0.2~1.0** 之间变化（`hintBreathSpeed`）；A 蓝 / B 红。光带排序在 Portal View 之下（order-1），主相机里中间被输出盖住，但 Default 层仍开放给传送门相机；粒子从细线沿 facing 发射同色粒子（45/s、池 256），排序在输出之上。
 
 ### 6.5 不递归（排除输出层）
 
@@ -251,7 +253,7 @@ Unity.exe -batchmode -projectPath <项目> -executeMethod Platformer.EditorTools
 Unity.exe -batchmode -projectPath <项目> -runTests -testPlatform PlayMode -testResults Logs\TestResults.xml
 ```
 
-## 12. 测试（17 个 PlayMode 用例：16 通过 + 1 跳过快照）
+## 12. 测试（18 个 PlayMode 用例：17 通过 + 1 跳过快照）
 
 | 测试 | 校验内容 |
 |---|---|
@@ -272,6 +274,7 @@ Unity.exe -batchmode -projectPath <项目> -runTests -testPlatform PlayMode -tes
 | `Portal_View_Hides_When_Player_Is_Behind` | 玩家在门背面时隐藏画面 |
 | `Portal_View_Keeps_Offset_Under_View_Center` | 半屏裁剪保留 Portal View 的 Z 偏移 |
 | `Other_Portal_Fades_When_Player_Is_Near` | 靠近一扇门时另一扇门按距离变透明 |
+| `Portal_Hint_Beam_Matches_Height_And_Sorting` | 光带高度/排序/材质/朝向/呼吸/噪音/粒子 |
 
 ## 13. 已知限制 / 下一步
 
