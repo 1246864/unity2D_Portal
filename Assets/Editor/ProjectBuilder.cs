@@ -530,11 +530,11 @@ namespace Platformer.EditorTools
             var pairControl = pair.AddComponent<PortalPair>();
             pairControl.player = player.transform;
 
-            CreateCaptureGroup("Portal A", pair.transform, new Vector3(18.89f, 4f, 0f), CaptureGroupSide.A, mainCamera);
-            CreateCaptureGroup("Portal B", pair.transform, new Vector3(-10.38f, 1.94f, 0f), CaptureGroupSide.B, mainCamera);
+            CreateCaptureGroup("Portal A", pair.transform, new Vector3(0.83f, -1.46f, 0f), CaptureGroupSide.A, mainCamera);
+            CreateCaptureGroup("Portal B", pair.transform, new Vector3(-14.89f, -1.48f, 0f), CaptureGroupSide.B, mainCamera);
         }
 
-        static void BuildPortalMaskRig(Transform group, string sortingLayer, int sortingOrder,
+        static void BuildPortalMaskRig(Transform group, CaptureGroupSide side, string sortingLayer, int sortingOrder,
             out Transform maskTop, out Transform maskBottom)
         {
             maskTop = null;
@@ -550,8 +550,8 @@ namespace Platformer.EditorTools
             var root = new GameObject("Portal Mask");
             root.transform.SetParent(group, false);
 
-            float flip = group.GetComponent<CaptureDisplayGroup>() != null &&
-                         group.GetComponent<CaptureDisplayGroup>().side == CaptureGroupSide.A ? -1f : 1f;
+            // A 门的整块遮罩要上下翻转，B 门不翻转。
+            float flip = side == CaptureGroupSide.A ? -1f : 1f;
             maskTop = CreateMaskUnit("View Mask Top", root.transform, sprite, sortingLayer, sortingOrder, 0f, 50f, flip);
             maskBottom = CreateMaskUnit("View Mask Bottom", root.transform, sprite, sortingLayer, sortingOrder, 0f, -50f, flip);
         }
@@ -602,9 +602,17 @@ namespace Platformer.EditorTools
             capture.farClipPlane = 100f;
             capture.enabled = false; // 由 RegionSnapshotCamera 按需渲染
 
+            // 排除 Portal View 所在的 Snapshot 层，避免传送门相机拍到自己的输出形成递归。
+            capture.cullingMask &= ~(1 << SnapshotLayer);
+
+            // 视觉中心：Portal View 挂在它下面，方便整体移动画面而不动门/碰撞箱。
+            var viewCenterGo = new GameObject("Portal View Center");
+            viewCenterGo.transform.SetParent(root.transform, false);
+            viewCenterGo.transform.localPosition = Vector3.zero;
+
             var outputGo = new GameObject("Portal View");
             outputGo.layer = SnapshotLayer;
-            outputGo.transform.SetParent(root.transform, false);
+            outputGo.transform.SetParent(viewCenterGo.transform, false);
             outputGo.transform.localPosition = Vector3.zero;
 
             var outputSprite = outputGo.AddComponent<SpriteRenderer>();
@@ -616,7 +624,7 @@ namespace Platformer.EditorTools
 
             // 画面下面放两块遮挡：除门洞那条带以外全部遮住，
             // 于是传送门只从一条水平缝隙里透出画面。
-            BuildPortalMaskRig(root.transform, sortingLayer, outputSprite.sortingOrder + 1,
+            BuildPortalMaskRig(root.transform, side, sortingLayer, outputSprite.sortingOrder + 1,
                 out Transform maskTop, out Transform maskBottom);
 
             var captureGo = new GameObject("Portal Capture");
@@ -630,9 +638,11 @@ namespace Platformer.EditorTools
 
             var group = root.AddComponent<CaptureDisplayGroup>();
             group.side = side;
-            group.Facing = side == CaptureGroupSide.A ? PortalFacing.Right : PortalFacing.Left;
+            group.Facing = side == CaptureGroupSide.A ? PortalFacing.Left : PortalFacing.Right;
+            group.openDuration = 0.3f;
             group.capture = controller;
             group.output = outputSprite;
+            group.viewCenter = viewCenterGo.transform;
             group.maskTop = maskTop;
             group.maskBottom = maskBottom;
             return group;

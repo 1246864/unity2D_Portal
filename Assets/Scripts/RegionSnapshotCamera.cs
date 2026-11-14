@@ -11,8 +11,9 @@ namespace Platformer
     /// 随之变大，渲染纹理（输出画布）也等比放大，因此输出精灵始终与拍摄到的世界
     /// 保持 1:1：缩放为 1 时，画面覆盖多大，精灵就有多大。
     ///
-    /// 捕获相机不排除任何层，所以当它自己的输出精灵落在视野内时，快照会拍到自己，
-    /// 形成镜中镜效果。
+    /// 传送门端会由 <see cref="CaptureDisplayGroup"/> 把输出精灵所在的 Snapshot 层
+    /// 从捕获相机中排除，因此快照不会拍到自己的输出、不会递归；普通快照相机如果
+    /// 不排除任何层，仍可能拍到自己。
     /// </summary>
     public class RegionSnapshotCamera : MonoBehaviour
     {

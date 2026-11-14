@@ -96,6 +96,66 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Portal_View_Keeps_Offset_Under_View_Center()
+        {
+            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
+
+            Scene scene = SceneManager.GetSceneByName(LevelScene);
+            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
+
+            yield return new WaitForSeconds(0.3f);
+
+            CaptureDisplayGroup groupA = null;
+            CaptureDisplayGroup groupB = null;
+            foreach (var group in Object.FindObjectsOfType<CaptureDisplayGroup>())
+            {
+                if (group.side == CaptureGroupSide.A) groupA = group;
+                else if (group.side == CaptureGroupSide.B) groupB = group;
+            }
+
+            Assert.IsNotNull(groupA, "A 组未找到。");
+            Assert.IsNotNull(groupB, "B 组未找到。");
+
+            foreach (var group in new[] { groupA, groupB })
+            {
+                Assert.IsNotNull(group.viewCenter, $"{group.side} 应解析到 Portal View Center。");
+                Assert.AreEqual("Portal View Center", group.viewCenter.name,
+                    $"{group.side} 的视觉中心应为 Portal View Center。");
+                Assert.AreEqual(group.viewCenter, group.output.transform.parent,
+                    "Portal View 应是 Portal View Center 的直接子节点。");
+
+                int outputLayer = group.output.gameObject.layer;
+                Assert.AreNotEqual(0, outputLayer, "Portal View 应在专用层（Snapshot）。");
+                Assert.AreEqual(0, group.capture.captureCamera.cullingMask & (1 << outputLayer),
+                    "传送门相机应排除 Portal View 所在层，避免递归渲染。");
+
+                float baseLocalZ = group.output.transform.localPosition.z;
+                float baseWorldZ = group.output.transform.position.z;
+
+                // 用临时 Sprite 让 ApplyHalfCrop 真正走完，验证它只叠加 X 偏移。
+                var texture = new Texture2D(64, 32, TextureFormat.RGBA32, false);
+                var sprite = Sprite.Create(texture, new Rect(0, 0, 64, 32), new Vector2(0.5f, 0.5f), 40f);
+                group.output.sprite = sprite;
+                group.ApplyHalfCrop();
+
+                Assert.AreEqual(baseLocalZ, group.output.transform.localPosition.z, 0.001f,
+                    "半屏裁剪不能覆盖 Portal View 的 local Z。");
+                Assert.AreEqual(baseWorldZ, group.output.transform.position.z, 0.001f,
+                    "半屏裁剪不能移动 Portal View 的世界 Z。");
+
+                if (group.side == CaptureGroupSide.A)
+                    Assert.Greater(group.output.transform.localPosition.x, 0f, "A 应显示右半。");
+                else
+                    Assert.Less(group.output.transform.localPosition.x, 0f, "B 应显示左半。");
+
+                Object.Destroy(group.output.sprite);
+                group.output.sprite = null;
+                Object.Destroy(sprite);
+                Object.Destroy(texture);
+            }
+        }
+
+        [UnityTest]
         public IEnumerator Player_Climbs_Tilemap_Ramp()
         {
             yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
@@ -199,6 +259,18 @@ namespace Platformer.Tests
             Assert.AreEqual(Vector3.one, snapshot.output.transform.lossyScale,
                 "Snapshot output must not be scaled.");
 
+            // 新的 Portal View Center 层级：半屏 X 偏移不能覆盖 Portal View 自己的 Z 偏移。
+            Assert.AreEqual(0f, groupA.output.transform.position.z, 0.01f,
+                "A 的 Portal View 应保持在世界 z=0，不能被半屏偏移拉到 Portal View Center 的 z。");
+            Assert.AreEqual(0f, groupB.output.transform.position.z, 0.01f,
+                "B 的 Portal View 应保持在世界 z=0。");
+            Assert.IsNotNull(groupA.viewCenter, "A 应该解析到 Portal View Center。");
+            Assert.AreEqual("Portal View Center", groupA.viewCenter.name,
+                "A 的视觉中心应该是 Portal View Center。");
+            Assert.IsNotNull(groupB.viewCenter, "B 应该解析到 Portal View Center。");
+            Assert.AreEqual("Portal View Center", groupB.viewCenter.name,
+                "B 的视觉中心应该是 Portal View Center。");
+
             // 5. 画布保持恒定的像素密度。
             Assert.AreEqual(snapshot.pixelsPerUnit,
                 texture.height / snapshot.output.sprite.bounds.size.y, 0.5f,
@@ -223,10 +295,10 @@ namespace Platformer.Tests
             Assert.Greater(playerRenderer.sortingOrder, snapshot.output.sortingOrder,
                 "Player must be drawn above the snapshot output.");
 
-            // 8. 捕获相机能看见自己的输出（镜中镜递归）。
+            // 8. 捕获相机排除自己的输出层，不再递归。
             int outputLayerBit = 1 << snapshot.output.gameObject.layer;
-            Assert.AreNotEqual(0, snapshot.captureCamera.cullingMask & outputLayerBit,
-                "Capture camera must be able to capture its own output.");
+            Assert.AreEqual(0, snapshot.captureCamera.cullingMask & outputLayerBit,
+                "Capture camera must exclude the Portal View layer to avoid recursion.");
         }
 
         static float ColorDistance(Color a, Color b)

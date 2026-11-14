@@ -15,7 +15,7 @@
   - 每一端的画面由一台**独立相机**拍摄，实时显示成精灵
   - 两端的画面**交叉输出**（A 的画面画在 B 上，B 的画在 A 上）
   - 门面用 `SpriteMask` 裁切，遮罩始终**朝向玩家眼睛**
-  - 支持**镜中镜**（递归）：相机能看到另一扇门的画面，形成无限嵌套
+  - **不递归**：传送门相机排除输出精灵所在的 **Snapshot** 层，主相机照常显示门内画面
 - 传送已实现：门内有极薄碰撞箱（高度 = 门洞高度），玩家中心的碰撞点撞到即传送到另一扇门 `facing` 外侧一点点；传送当帧强制双门重拍；玩家在门背面时该门画面隐藏（详见 `docs/UPDATE_2026-11-14.md`）
 
 ---
@@ -71,19 +71,21 @@ Grid
 Player                      (预制体实例，Player 排序层，order 100)
 
 Portal Pair                 (3, 3)  ← PortalPair (player 已指向 Player)
-├─ Portal A                 local (18.89, 4)  → world (21.89, 7)
+├─ Portal A                 local (0.83, -1.46)  → world (3.83, 1.54)
 │  ├─ Portal Camera         (正交，z = -10，viewScale 1.2)
 │  ├─ Portal Capture        (RegionSnapshotCamera，驱动相机→贴图)
-│  ├─ Portal View           (SpriteRenderer，order 20，VisibleOutsideMask)
+│  ├─ Portal View Center     (视觉中心，local z = -10；View 的父节点)
+│  │  └─ Portal View         (SpriteRenderer，order 20，VisibleOutsideMask；local z = +10)
 │  └─ Portal Mask           (遮罩容器)
 │     ├─ View Mask Top      (scale (1, -1))
 │     │  └─ Mask            SpriteMask，local (0, 50)，scale (200, 100)
 │     └─ View Mask Bottom   (scale (1, -1))
 │        └─ Mask            SpriteMask，local (0, -50)，scale (200, 100)
-└─ Portal B                 local (-10.38, 1.94) → world (-7.38, 4.94)
+└─ Portal B                 local (-14.89, -1.48) → world (-11.89, 1.52)
    ├─ Portal Camera
    ├─ Portal Capture
-   ├─ Portal View           (SpriteRenderer，order 20，VisibleOutsideMask)
+   ├─ Portal View Center     (视觉中心，local z = 0)
+   │  └─ Portal View         (SpriteRenderer，order 20，VisibleOutsideMask)
    └─ Portal Mask
       ├─ View Mask Top      (scale (1, 1))
       │  └─ Mask            SpriteMask，local (0, 50)，scale (200, 100)
@@ -147,7 +149,7 @@ Portal B 的 Portal Capture  →  渲染 B 的相机  →  画到 A 的 Portal V
 | A | 右半 | 右移 `W/4` |
 | B | 左半 | 左移 `W/4` |
 
-`centerGapPixels`（默认 1）让两半在中线各让出一点，避免递归把共用像素列放大成亮线。
+`centerGapPixels`（默认 1）让两半在中线各让出一点，避免半屏拼接把共用像素列放大成亮线。
 
 ### 6.4 遮罩
 
@@ -164,11 +166,12 @@ mask.rotation = Quaternion.Euler(0f, 0f, angle);
 - 两个偏移配在 `PortalPair` 上，**一对门共用**，所以两扇门的门洞高度始终一致；
 - 遮罩只在**本门排序层**内生效（A 不影响 B）；
 - `PortalHeight = |maskTopOffset - maskBottomOffset|`：`PortalPair` 与 `CaptureDisplayGroup` 都暴露这个只读属性，后者直接委托给前者；
-- 开门动画：`CaptureDisplayGroup.PlayOpenAnimation()`（`OnEnable` 时自动调用，禁用后重新启用也会重播），在 `openDuration` 内把上下偏移从 **0** 增长到 `PortalPair` 配置值，节奏由 `openCurve` 控制；只驱动遮罩视觉，碰撞箱仍按完整门洞高度。
+- 开门动画：`CaptureDisplayGroup.PlayOpenAnimation()`（`OnEnable` 时自动调用，禁用后重新启用也会重播），在 `openDuration` 内把上下偏移从 **0** 增长到 `PortalPair` 配置值，节奏由 `openCurve` 控制；只驱动遮罩视觉，碰撞箱仍按完整门洞高度。传送时**发起传送的那扇门**额外重播一次自己的开门动画（从 A 进 → A 播，从 B 进 → B 播），另一扇门不重播。
+- 另一扇门透明度：`CaptureDisplayGroup.otherViewFadeDistance`（默认 **3**，与颜色距离公式同一世界单位）。玩家离某扇门越近，另一扇门的 alpha 越低：距离 0 → 0，达到阈值 → 1；本门自己不变透明。实现里缓存本门/对方门的视觉中心，每帧只做两次局部位移和一次颜色赋值。
 
-### 6.5 递归（镜中镜）
+### 6.5 不递归（排除输出层）
 
-捕获相机不排除任何层，因此当 `Portal View` 落在相机视野内时，会被再次拍进画面，形成嵌套。因为画面是 1:1 且与相机同位置，实际视觉效果取决于遮罩与摆放。
+传送门相机在 `CaptureDisplayGroup.Start`（以及 `ProjectBuilder`）里把 `Portal View` 所在的 **Snapshot(8)** 层从 `cullingMask` 排除；主相机仍渲染该层。因此捕获相机不会拍到自己的输出，两门互拍不会形成无限嵌套，门洞里是对方相机的**一次**成像。
 
 ### 6.6 朝向
 
@@ -248,7 +251,7 @@ Unity.exe -batchmode -projectPath <项目> -executeMethod Platformer.EditorTools
 Unity.exe -batchmode -projectPath <项目> -runTests -testPlatform PlayMode -testResults Logs\TestResults.xml
 ```
 
-## 12. 测试（15 个 PlayMode 用例：14 通过 + 1 跳过快照）
+## 12. 测试（17 个 PlayMode 用例：16 通过 + 1 跳过快照）
 
 | 测试 | 校验内容 |
 |---|---|
@@ -267,6 +270,8 @@ Unity.exe -batchmode -projectPath <项目> -runTests -testPlatform PlayMode -tes
 | `Player_Still_Teleports_After_Portal_Reenable` | 重新启用门后仍能传送（碰撞箱不被当墙） |
 | `Portal_Opens_From_Zero_To_Pair_Height` | 开门动画从 0 增长到配置高度 |
 | `Portal_View_Hides_When_Player_Is_Behind` | 玩家在门背面时隐藏画面 |
+| `Portal_View_Keeps_Offset_Under_View_Center` | 半屏裁剪保留 Portal View 的 Z 偏移 |
+| `Other_Portal_Fades_When_Player_Is_Near` | 靠近一扇门时另一扇门按距离变透明 |
 
 ## 13. 已知限制 / 下一步
 

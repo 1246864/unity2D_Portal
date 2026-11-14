@@ -121,6 +121,9 @@ namespace Platformer
             var partner = source.partner;
             if (partner == null) return;
 
+            // 哪扇门发起传送，哪扇门就重播一次自己的开门动画；另一扇门不动。
+            source.PlayOpenAnimation();
+
             Teleport(source, partner);
         }
 

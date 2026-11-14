@@ -419,7 +419,7 @@ Camera:
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 4294967039
   m_RenderingPath: -1
   m_TargetTexture: {fileID: 0}
   m_TargetDisplay: 0
@@ -626,8 +626,10 @@ MonoBehaviour:
   partner: {fileID: 0}
   capture: {fileID: 237158131}
   output: {fileID: 1492848402}
+  viewCenter: {fileID: 1039158994}
   viewObject: {fileID: 1492848401}
   centerGapPixels: 1
+  otherViewFadeDistance: 3
   player: {fileID: 0}
   facing: 0
   maskTop: {fileID: 2101707404}
@@ -2835,7 +2837,7 @@ Camera:
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 4294967039
   m_RenderingPath: -1
   m_TargetTexture: {fileID: 0}
   m_TargetDisplay: 0
@@ -3220,8 +3222,10 @@ MonoBehaviour:
   partner: {fileID: 0}
   capture: {fileID: 399463857}
   output: {fileID: 913622742}
+  viewCenter: {fileID: 1185482979}
   viewObject: {fileID: 913622741}
   centerGapPixels: 1
+  otherViewFadeDistance: 3
   player: {fileID: 0}
   facing: 1
   maskTop: {fileID: 1295214492}

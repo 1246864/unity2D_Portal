@@ -186,6 +186,9 @@ namespace Platformer.Tests
             Assert.IsNotNull(controller, "玩家缺少 PlayerController2D。");
             Assert.IsNotNull(pair, "场景缺少 PortalPair。");
 
+            int aOpenCount = a.OpenAnimationCount;
+            int bOpenCount = b.OpenAnimationCount;
+
             // 从 A 的正面（facing 一侧）往门里走。
             Vector3 start = new Vector3(
                 a.transform.position.x + a.FacingSign * 1.2f,
@@ -215,6 +218,10 @@ namespace Platformer.Tests
             controller.SetMoveInput(0f);
 
             Assert.IsTrue(teleported, "玩家走进门后应该被传送到另一扇门的正面。");
+            Assert.AreEqual(aOpenCount + 1, a.OpenAnimationCount,
+                "从 A 门进入应让 A 自己重播一次开门动画。");
+            Assert.AreEqual(bOpenCount, b.OpenAnimationCount,
+                "从 A 门进入不应触发 B 的开门动画。");
             Assert.Less(player.transform.position.x, a.transform.position.x - 5f,
                 "传送后玩家应该已经离开 A 的位置。");
 
@@ -222,6 +229,47 @@ namespace Platformer.Tests
             float safe = pair.gateThickness * 0.5f + controller.centerPointRadius + pair.exitMargin;
             Assert.GreaterOrEqual(distance, safe - 0.02f,
                 "传送后玩家中心不应该停在对方门的碰撞箱里。");
+        }
+
+        [UnityTest]
+        public IEnumerator Other_Portal_Fades_When_Player_Is_Near()
+        {
+            FindGroups(out var a, out var b);
+            var player = FindPlayer();
+
+            Assert.IsNotNull(a);
+            Assert.IsNotNull(b);
+            Assert.IsNotNull(player);
+
+            var controller = player.GetComponent<PlayerController2D>();
+            Assert.IsNotNull(controller);
+
+            float fade = a.otherViewFadeDistance;
+            Assert.Greater(fade, 0f, "淡出距离应大于 0。");
+
+            // 靠近 A 到淡出距离的一半：另一扇门 B 应半透明，A 自己保持不透明。
+            controller.Teleport(new Vector3(
+                a.transform.position.x + a.FacingSign * (fade * 0.5f),
+                0.75f,
+                0f));
+            yield return new WaitForFixedUpdate();
+            yield return null;
+
+            Assert.AreEqual(0.5f, b.output.color.a, 0.05f,
+                "靠近 A 到一半距离时，B 的画面应为半透明。");
+            Assert.AreEqual(1f, a.output.color.a, 0.05f,
+                "A 自己的画面不应变透明。");
+
+            // 退到淡出距离之外：B 恢复不透明。
+            controller.Teleport(new Vector3(
+                a.transform.position.x + a.FacingSign * (fade * 2f),
+                0.75f,
+                0f));
+            yield return new WaitForFixedUpdate();
+            yield return null;
+
+            Assert.AreEqual(1f, b.output.color.a, 0.05f,
+                "超过淡出距离后，B 的画面应恢复不透明。");
         }
 
         [UnityTest]

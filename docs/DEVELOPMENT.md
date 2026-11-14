@@ -171,11 +171,11 @@
 - 画布随视野变化：贴图尺寸按「捕获世界高度 × `pixelsPerUnit`」计算，主相机视野变大时画布等比放大、像素密度不变；视野变化时重建 RT/Sprite。
 - 快照是「另一台相机」的画面：只有尺寸跟随主相机（1.2 倍），位置完全独立，玩家移动不会带动它。
 - 输出精灵按 1:1 显示（不做缩放），调试用的红/蓝描边已在定稿时移除。
-- 递归：捕获相机不排除任何层，输出精灵落在视野内时会被一起拍进画面，形成「镜中镜」。
+- 不递归：传送门相机在 `CaptureDisplayGroup` 中排除 `Portal View` 所在的 Snapshot 层，输出精灵不会被拍进画面。
 - 玩家 SpriteRenderer 排序 100，始终绘制在快照输出（20）之上。
 - 快照贴图四周留 2px 背景色边，避免全屏描边把快照精灵当成地形描出一圈边框。
 - 无头模式（`-nographics`）下没有图形设备，`Camera.Render()` 会永久阻塞，因此启动时检测 `SystemInfo.graphicsDeviceType` 并自动禁用。
-- 预览渲染时临时 `CaptureNow()` 出图、渲染后 `ClearOutput()`；测试 `Snapshot_Camera_Captures_Own_View` 校验：捕获相机不跟随、1.2 倍尺寸、1:1 世界尺寸、画布随范围缩放、可拍到自身输出。
+- 预览渲染时临时 `CaptureNow()` 出图、渲染后 `ClearOutput()`；测试 `Snapshot_Camera_Captures_Own_View` 校验：捕获相机不跟随、1.2 倍尺寸、1:1 世界尺寸、画布随范围缩放、传送门相机排除输出层。
 
 ### 阶段 15 — 捕获显示组（交叉输出，现命名 Portal A/B）
 

@@ -101,14 +101,18 @@ Level
 
 ```
 Portal A                          Portal B
-├─ Snapshot Camera               ├─ Snapshot Camera
-├─ Snapshot Output               ├─ Snapshot Output
-└─ Snapshot Capture              └─ Snapshot Capture
+├─ Portal Camera                 ├─ Portal Camera
+├─ Portal Capture                ├─ Portal Capture
+├─ Portal Mask                   ├─ Portal Mask
+└─ Portal View Center            └─ Portal View Center
+   └─ Portal View                  └─ Portal View
 ```
 
-- 组内所有元素的 **localPosition 都是 0**
-- 两个组的 `otherGroup` **互相引用**（`CaptureDisplayGroup`）
-- **交叉输出**：A 的相机画面画到 B 的 `Snapshot Output`，B 的相机画面画到 A 的 `Snapshot Output`
+- 门/碰撞箱仍在 `Portal A/B` 根节点；`Portal View Center` 只负责画面（Portal View）的视觉定位
+- `Portal A` 的 View Center 在 local z=-10、View 在 local z=+10（世界 z=0）；`Portal B` 两者都在 0
+- 两个组的 `partner` **互相引用**（`CaptureDisplayGroup`）
+- **交叉输出**：A 的相机画面画到 B 的 `Portal View`，B 的相机画面画到 A 的 `Portal View`
+- 进入哪扇门，哪扇门就重播一次自己的开门动画（从 A 进 → A 播，从 B 进 → B 播），另一扇不播
 - 组内流程：相机 → RenderTexture → Texture2D.ReadPixels → Sprite
 
 | 项目 | 说明 |
@@ -117,13 +121,14 @@ Portal A                          Portal B
 | 捕获相机 | 每组自带一台正交相机，**独立视角**（位置自己决定、不跟随主相机），只有尺寸跟随主相机 |
 | 刷新间隔 | `captureInterval` 默认 **0（每帧渲染）**；分辨率（PPU 40、1.2 倍视野）保持不变 |
 | 输出 | 严格 **1:1**：输出精灵不做缩放，与拍摄区域完全同尺寸；画布（贴图）随捕获范围等比放大，像素密度不变 |
-| 递归 | 相机不排除任何层：输出精灵在视野内就会被拍进画面，两组互拍形成镜中镜 |
-| 透明背景 | 捕获相机以 `(0,0,0,0)` 清屏，描边 shader 保留源 alpha，输出像窗口一样透出场景（否则同位置相机会被自己的画面盖死） |
+| 递归 | **不递归**：传送门相机排除 `Portal View` 所在的 **Snapshot** 层，输出精灵不会被拍进画面 |
+| 背景 | 捕获相机使用与主相机相同的纯色背景；贴图 RGB24、输出不透明，门洞外的部分由遮罩裁掉 |
 | 无头模式 | 没有图形设备时自动禁用，避免 `Camera.Render()` 在 `-nographics` 下卡死 |
 | 玩家层级 | 玩家 SpriteRenderer 排序为 **100**，始终绘制在快照输出（20）之上 |
+| 另一扇门透明度 | 玩家靠近某扇门时，另一扇门按 `otherViewFadeDistance`（默认 3）线性变透明，距离 0 时 alpha=0，达到阈值时恢复 1 |
 
 > 输出的是**真实图像**（Texture2D），不是对象复制。
-> 预览渲染时会先 `WireUp()` 再连续捕获几次，让交叉反馈稳定后出图。
+> 预览渲染时会先 `WireUp()` 再连续捕获几次，确保两张输出都是最新画面。
 
 ## 物理材质
 

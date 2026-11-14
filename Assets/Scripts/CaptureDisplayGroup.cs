@@ -17,7 +17,7 @@ namespace Platformer
     }
 
     /// <summary>
-    /// 一个捕获显示组：把快照相机、输出精灵和捕获控制器打包在同一个空节点下。
+    /// 一个捕获显示组：把快照相机、Portal View Center（视觉中心）、输出精灵和捕获控制器打包在同一个组节点下。
     ///
     /// 两组并排放在同一父节点下。每组会自己找到另一侧的那一组并交叉连线：
     /// 本组的相机画到对方的输出上，对方的相机画到本组的输出上。
@@ -38,11 +38,18 @@ namespace Platformer
         [Tooltip("本组的画面精灵（会被对方那组画上画面）")]
         public SpriteRenderer output;
 
+        [Tooltip("Portal View 的父节点（视觉中心）；留空时自动取 output 的父节点")]
+        public Transform viewCenter;
+
         [Tooltip("本门显示精灵所在的游戏对象（Start 时自动获取）")]
         public GameObject viewObject;
 
-        [Tooltip("左右两半在中线各让出的像素数。留一点缝可以避免递归把共用像素列放大成一条亮线")]
+        [Tooltip("左右两半在中线各让出的像素数。留一点缝可以避免半屏拼接把共用像素列放大成一条亮线")]
         [Range(0f, 16f)] public float centerGapPixels = 1f;
+
+        [Header("另一扇门透明度")]
+        [Tooltip("玩家离一扇门小于该距离时，另一扇门线性变透明；距离 0 时完全透明。单位与颜色距离公式一致")]
+        [Min(0f)] public float otherViewFadeDistance = 3f;
 
         [Header("玩家")]
         [Tooltip("本对传送门绑定的玩家游戏对象，由 Portal Pair 下发，无需手填")]
@@ -84,6 +91,9 @@ namespace Platformer
         /// <summary>门洞高度，由 PortalPair 统一配置的上下遮罩偏移算出。</summary>
         public float PortalHeight => Pair != null ? Pair.PortalHeight : 3f;
 
+        /// <summary>开门动画已播放次数（调试/测试用，含 OnEnable 的首次播放）。</summary>
+        public int OpenAnimationCount { get; private set; }
+
         /// <summary>所属的 PortalPair（必要时向上查找）。</summary>
         public PortalPair Pair
         {
@@ -103,8 +113,18 @@ namespace Platformer
         /// <summary>玩家的 Transform（未下发玩家时为 null）。</summary>
         public Transform PlayerTransform => player != null ? player.transform : null;
 
+        /// <summary>门的视觉中心：优先用 Portal View Center，否则退回组根节点。</summary>
+        Transform ViewAnchor => viewCenter != null
+            ? viewCenter
+            : (output != null && output.transform.parent != null ? output.transform.parent : transform);
+
         Sprite _halfSprite;
         PortalPair _pair;
+        Transform _viewAnchor;
+        Transform _partnerViewAnchor;
+
+        Vector3 _viewBaseLocalPosition;
+        bool _hasViewBase;
 
         float _openElapsed;
         float _openProgress = 1f;
@@ -121,6 +141,7 @@ namespace Platformer
             _pair = GetComponentInParent<PortalPair>();
             ResolveMaskRig();
             CachePlayer();
+            CacheViewAnchors();
         }
 
         void OnEnable()
@@ -131,12 +152,26 @@ namespace Platformer
 
         void Start()
         {
-            // 获取本门显示精灵所在的游戏对象。
+            // 获取本门显示精灵所在的游戏对象，并记住它在视觉中心下的初始局部位置。
+            // ApplyHalfCrop 只在此基础上叠加 X 偏移，不能把 Portal View Center 的 Z 偏移覆盖掉。
             if (output != null)
+            {
                 viewObject = output.gameObject;
+
+                if (viewCenter == null)
+                    viewCenter = output.transform.parent;
+
+                _viewBaseLocalPosition = output.transform.localPosition;
+                _hasViewBase = true;
+
+                // 传送门相机排除 Portal View 所在层，避免把自己的输出拍进画面形成递归。
+                if (capture != null && capture.captureCamera != null && output.gameObject.layer != 0)
+                    capture.captureCamera.cullingMask &= ~(1 << output.gameObject.layer);
+            }
 
             ChangeFacing(facing);
             CachePlayer();
+            CacheViewAnchors();
         }
 
         /// <summary>
@@ -169,6 +204,7 @@ namespace Platformer
         /// </summary>
         public void PlayOpenAnimation()
         {
+            OpenAnimationCount++;
             _openElapsed = 0f;
             _isOpening = openDuration > 0f;
             _openProgress = _isOpening ? 0f : 1f;
@@ -210,6 +246,13 @@ namespace Platformer
                 player = _pair.player.gameObject;
         }
 
+        /// <summary>缓存本门与另一扇门的视觉中心，避免每帧重复解析层级。</summary>
+        void CacheViewAnchors()
+        {
+            _viewAnchor = ViewAnchor;
+            _partnerViewAnchor = partner != null ? partner.ViewAnchor : null;
+        }
+
         void LateUpdate()
         {
             AdvanceOpenAnimation();
@@ -240,32 +283,44 @@ namespace Platformer
             }
 
             Vector3 openingDirection = Quaternion.Euler(0f, 0f, FacingSign * -90f) * Vector3.up;
-            Vector3 toPlayer = player.transform.position - transform.position;
+            Vector3 anchor = _viewAnchor != null ? _viewAnchor.position : transform.position;
+            Vector3 toPlayer = player.transform.position - anchor;
 
             // 点积 <= 0 等价于夹角 >= 90°，此时玩家在门的背面。
             output.enabled = Vector3.Dot(openingDirection, toPlayer) > 0f;
         }
 
-        /// <summary>根据玩家距离更新本门显示精灵的颜色。</summary>
+        /// <summary>
+        /// 根据玩家与两扇门的距离更新画面颜色：
+        /// 到本门的距离决定 RGB 冷暖，到另一扇门的距离决定 alpha（越近越透明）。
+        /// </summary>
         void UpdateViewColor()
         {
-            if (player == null) return;
+            if (player == null || output == null) return;
 
-            // 玩家到本对象局部 Y 轴的垂直距离。
-            float playerDistanceToYAxis = Mathf.Abs(transform.InverseTransformPoint(player.transform.position).x);
+            Vector3 playerPosition = player.transform.position;
+
+            // 玩家到本门视觉中心局部 Y 轴的垂直距离。
+            Transform ownAnchor = _viewAnchor != null ? _viewAnchor : transform;
+            float playerDistanceToYAxis = Mathf.Abs(ownAnchor.InverseTransformPoint(playerPosition).x);
 
             float color_offs = 0.5f;
-            if(playerDistanceToYAxis <= 5f)
+            if (playerDistanceToYAxis <= 5f)
             {
                 color_offs = playerDistanceToYAxis / 10f;
             }
-            if (side == CaptureGroupSide.B) {
-                viewObject.GetComponent<SpriteRenderer>().color = new Color(1f, 1f - color_offs, 1f - color_offs, 1f);
-            }
-            else
+
+            // 另一扇门：玩家越靠近它，本门画面越透明；距离达到阈值时恢复 1。
+            float alpha = 1f;
+            if (_partnerViewAnchor != null && otherViewFadeDistance > 0f)
             {
-                viewObject.GetComponent<SpriteRenderer>().color = new Color(1f - color_offs, 1f - color_offs, 1f, 1f);
+                float distanceToPartner = Mathf.Abs(_partnerViewAnchor.InverseTransformPoint(playerPosition).x);
+                alpha = Mathf.Clamp01(distanceToPartner / otherViewFadeDistance);
             }
+
+            output.color = side == CaptureGroupSide.B
+                ? new Color(1f, 1f - color_offs, 1f - color_offs, alpha)
+                : new Color(1f - color_offs, 1f - color_offs, 1f, alpha);
         }
 
         /// <summary>门的碰撞转发给 PortalPair，由它统一处理传送。</summary>
@@ -405,7 +460,15 @@ namespace Platformer
             // 把保留的区域摆到它在完整画面中的位置。
             float gapWorld = gapPixels / pixelsPerUnit;
             float offset = (fullWidth * 0.25f + gapWorld * 0.5f) * (rightHalf ? 1f : -1f);
-            output.transform.localPosition = new Vector3(offset, 0f, 0f);
+
+            if (!_hasViewBase)
+            {
+                _viewBaseLocalPosition = output.transform.localPosition;
+                _hasViewBase = true;
+            }
+
+            // 在 Portal View 的初始局部位置（可能带有 Portal View Center 的 Z 偏移）上叠加半屏 X 偏移。
+            output.transform.localPosition = _viewBaseLocalPosition + new Vector3(offset, 0f, 0f);
         }
     }
 }
