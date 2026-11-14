@@ -126,8 +126,8 @@ Portal Pair                 (3, 3)  ← PortalPair (player 已指向 Player)
 
 | 组件 | 挂载位置 | 职责 |
 |---|---|---|
-| `PortalPair` | `Portal Pair` | 持有 `player` 引用与 `playerEyeOffset`（默认 0.4），提供 `PlayerEye` |
-| `CaptureDisplayGroup` | `Portal A` / `Portal B` | 每端的逻辑：配对、交叉连线、遮罩驱动、画面裁剪 |
+| `PortalPair` | `Portal Pair` | **传送业务总控**：玩家引用/眼高、薄碰撞箱、碰撞触发、位移/速度/相机、冷却、传送后双门成像刷新 |
+| `CaptureDisplayGroup` | `Portal A` / `Portal B` | 每端的显示逻辑：配对、交叉连线、遮罩驱动、画面裁剪、背面隐藏，并把门碰撞转发给 `PortalPair` |
 | `RegionSnapshotCamera` | `Portal Capture` | 相机 → RenderTexture → Texture2D → Sprite |
 
 ### 6.2 交叉输出
@@ -156,15 +156,17 @@ Portal B 的 Portal Capture  →  渲染 B 的相机  →  画到 A 的 Portal V
 每端两组 `View Mask Top/Bottom`，由 `UpdateMasks()` 每帧驱动：
 
 ```csharp
-maskTop.localPosition    = new Vector3(0f, maskTopOffset, 0f);     // 默认 +1.5
-maskBottom.localPosition = new Vector3(0f, maskBottomOffset, 0f); // 默认 -1.5
+maskTop.localPosition    = new Vector3(0f, pair.maskTopOffset, 0f);     // 默认 +1.5
+maskBottom.localPosition = new Vector3(0f, pair.maskBottomOffset, 0f);  // 默认 -1.5
 // 对准玩家眼睛后再旋转 90°
 float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
 mask.rotation = Quaternion.Euler(0f, 0f, angle);
 ```
 
-- 遮罩只在**本门排序层**内生效（A 不影响 B）
-- `PortalHeight` 是只读属性：`|maskTopOffset - maskBottomOffset|`
+- 两个偏移配在 `PortalPair` 上，**一对门共用**，所以两扇门的门洞高度始终一致；
+- 遮罩只在**本门排序层**内生效（A 不影响 B）；
+- `PortalHeight = |maskTopOffset - maskBottomOffset|`：`PortalPair` 与 `CaptureDisplayGroup` 都暴露这个只读属性，后者直接委托给前者；
+- 开门动画：`CaptureDisplayGroup.PlayOpenAnimation()`（`OnEnable` 时自动调用，禁用后重新启用也会重播），在 `openDuration` 内把上下偏移从 **0** 增长到 `PortalPair` 配置值，节奏由 `openCurve` 控制；只驱动遮罩视觉，碰撞箱仍按完整门洞高度。
 
 ### 6.5 递归（镜中镜）
 
@@ -178,6 +180,18 @@ mask.rotation = Quaternion.Euler(0f, 0f, angle);
 - 开口方向 = `Quaternion.Euler(0, 0, FacingSign * -90) * Vector3.up`，即朝右 `(1,0)`、朝左 `(-1,0)`
 
 传送用它决定：出口落在该门 `facing` 一侧；两门同向时水平速度取反、相背时保持；玩家与开口方向夹角 ≥ 90° 时隐藏该门画面。
+
+### 6.7 传送（PortalPair）
+
+传送业务集中在 `PortalPair`，`CaptureDisplayGroup` 只负责画面并把碰撞转发过来。
+
+- **碰撞箱**：`PortalPair` 在 `Portal A/B` 根节点上运行时创建 `BoxCollider2D`，`size = (gateThickness, PortalHeight)`、非 Trigger，高度随遮罩偏移同步；
+- **触发**：玩家中心的 `CircleCollider2D`（`PlayerController2D.centerPointRadius`，默认 0.08）撞到箱子；门箱放在 **Snapshot 层**，身体胶囊用 `excludeLayers` 排除该层（不用 `Physics2D.IgnoreCollision`——它在碰撞箱重新启用后会被重置，导致重新开门时被当成墙）；
+- **位移**：`target = partner 中轴 ± (gateThickness/2 + centerPointRadius + exitMargin)`，垂直保留相对高度；
+- **速度**：两门同向时水平速度取反，相背时保持；
+- **相机**：传送前记录与玩家的相对位置，传送后瞬间搬到"新玩家 + 同一相对位置"；
+- **冷却**：一对门共享 `teleportCooldown`；
+- **刷新**：传送后同一帧 `LateUpdate` 强制两门捕获相机各拍一次并重新半屏成像。
 
 ---
 
