@@ -3,12 +3,11 @@ using UnityEngine;
 namespace Platformer
 {
     /// <summary>
-    /// Minimal, tunable 2D platformer character controller.
+    /// 精简、可调的 2D 平台跳跃角色控制器。
     ///
-    /// Jump height is expressed in world units (1 unit = 1 grid cell) and is
-    /// independent from gravity: the launch velocity is derived from the
-    /// current gravity every time the player jumps, so changing
-    /// Physics2D.gravity keeps the jump height at <see cref="jumpHeight"/>.
+    /// 跳跃高度以世界单位表示（1 单位 = 1 格），并且与重力无关：
+    /// 每次起跳都会根据当前重力重新计算初速度，因此修改
+    /// Physics2D.gravity 后，跳跃高度仍等于 <see cref="jumpHeight"/>。
     /// </summary>
     [RequireComponent(typeof(Rigidbody2D))]
     [RequireComponent(typeof(CapsuleCollider2D))]
@@ -64,13 +63,13 @@ namespace Platformer
         Vector3 _spawnPoint;
         Vector2 _groundNormal = Vector2.up;
 
-        /// <summary>True while the character stands on (or right next to) walkable ground.</summary>
+        /// <summary>角色站在（或紧贴）可站立地面时为 true。</summary>
         public bool IsGrounded { get; private set; }
 
-        /// <summary>Current rigidbody velocity.</summary>
+        /// <summary>当前刚体速度。</summary>
         public Vector2 Velocity => _rb != null ? _rb.velocity : Vector2.zero;
 
-        /// <summary>Horizontal input currently applied (-1..1).</summary>
+        /// <summary>当前应用的水平输入（-1 到 1）。</summary>
         public float MoveInput => _moveInput;
 
         void Awake()
@@ -123,10 +122,9 @@ namespace Platformer
                 probeCenter, probeSize, 0f, Vector2.down,
                 groundCheckDistance, groundMask);
 
-            // While a jump is in progress the character is not considered grounded,
-            // even if the probe still touches the floor. This keeps the slope climb
-            // (which produces upward velocity) grounded, while a real jump is not
-            // re-grounded on its first frames.
+            // 跳跃进行中时，即使探测仍然接触地面也不判定为接地：
+            // 这样爬坡（会产生向上速度）仍算接地，而真正的跳跃不会在最初
+            // 几帧被重新判定为接地。
             IsGrounded = hit.collider != null && !_isJumping;
 
             if (IsGrounded)
@@ -152,10 +150,9 @@ namespace Platformer
             float vx = Mathf.MoveTowards(_rb.velocity.x, target, accel * Time.fixedDeltaTime);
             float vy = _rb.velocity.y;
 
-            // Follow the ground surface: on a slope, horizontal speed is converted
-            // into along-slope vertical speed, so the capsule walks up/down ramps
-            // instead of relying on friction. On flat ground stay glued to the floor
-            // so the slope climb velocity is not carried into the next platform.
+            // 贴合地面：在斜坡上把水平速度换算成沿坡的垂直速度，让胶囊
+            // 沿坡走上/走下，而不是依赖摩擦力；在平地上则把垂直速度归零，
+            // 避免爬坡时的速度被带到下一块平台上。
             if (IsGrounded && _groundNormal.y > 0.3f && Mathf.Abs(_groundNormal.x) > 0.02f)
             {
                 float slopeRise = -_groundNormal.x / Mathf.Max(0.0001f, _groundNormal.y);
@@ -174,8 +171,8 @@ namespace Platformer
             float gravity = Mathf.Abs(Physics2D.gravity.y * _rb.gravityScale);
             if (gravity < 0.01f) gravity = 9.81f;
 
-            // Add half a gravity step to compensate for the discrete integration,
-            // so the measured apex matches jumpHeight closely.
+            // 加上半帧重力补偿，抵消离散积分带来的误差，
+            // 使实测顶点高度尽量贴近 jumpHeight。
             float launchVelocity = Mathf.Sqrt(2f * gravity * jumpHeight)
                                    + 0.5f * gravity * Time.fixedDeltaTime;
 
@@ -208,10 +205,10 @@ namespace Platformer
         }
 
         // ------------------------------------------------------------------
-        // Public API (also used by the automated play-mode tests)
+        // 公开 API（自动化 PlayMode 测试也会用到）
         // ------------------------------------------------------------------
 
-        /// <summary>Move back to the spawn point and stop.</summary>
+        /// <summary>回到出生点并停止移动。</summary>
         public void Respawn()
         {
             _rb.velocity = Vector2.zero;
@@ -219,7 +216,7 @@ namespace Platformer
             _isJumping = false;
         }
 
-        /// <summary>Instantly moves the rigidbody to a position and stops it.</summary>
+        /// <summary>把刚体瞬移到指定位置并停止。</summary>
         public void Teleport(Vector2 position)
         {
             _rb.velocity = Vector2.zero;
@@ -228,32 +225,32 @@ namespace Platformer
             Physics2D.SyncTransforms();
         }
 
-        /// <summary>Resets the spawn point (useful after entering a new area).</summary>
+        /// <summary>重设出生点（进入新区域后很有用）。</summary>
         public void SetSpawnPoint(Vector3 worldPosition)
         {
             _spawnPoint = worldPosition;
         }
 
-        /// <summary>Overrides keyboard input (pass 0 to stop).</summary>
+        /// <summary>接管键盘输入（传 0 表示停下）。</summary>
         public void SetMoveInput(float horizontal)
         {
             _manualInput = true;
             _moveInput = Mathf.Clamp(horizontal, -1f, 1f);
         }
 
-        /// <summary>Gives control back to the keyboard.</summary>
+        /// <summary>把控制权交还给键盘。</summary>
         public void ClearManualInput()
         {
             _manualInput = false;
         }
 
-        /// <summary>Buffers a jump press (equivalent to pressing the jump button).</summary>
+        /// <summary>缓存一次跳跃输入（等价于按下跳跃键）。</summary>
         public void JumpPressed()
         {
             _jumpBufferCounter = jumpBufferTime;
         }
 
-        /// <summary>Applies the variable-height jump cut (equivalent to releasing jump).</summary>
+        /// <summary>应用可变跳高截断（等价于松开跳跃键）。</summary>
         public void JumpReleased()
         {
             if (_rb != null && _rb.velocity.y > 0f)

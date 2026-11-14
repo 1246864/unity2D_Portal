@@ -13,11 +13,10 @@ using UnityEngine.Tilemaps;
 namespace Platformer.EditorTools
 {
     /// <summary>
-    /// Builds the playable template from scratch: imports placeholder art,
-    /// creates prefabs, assembles the level and saves the scene.
+    /// 从零构建可运行的模板：导入占位美术、创建预制体、搭建关卡并保存场景。
     ///
-    /// Menu: Platformer > Rebuild Level + Prefabs
-    /// Batch: -executeMethod Platformer.EditorTools.ProjectBuilder.BuildAll -quit
+    /// 菜单：Platformer > Rebuild Level + Prefabs
+    /// 批处理：-executeMethod Platformer.EditorTools.ProjectBuilder.BuildAll -quit
     /// </summary>
     public static class ProjectBuilder
     {
@@ -51,7 +50,7 @@ namespace Platformer.EditorTools
 
         static readonly Vector2 Spawn = new Vector2(-9f, 0.75f);
 
-        // One colour for every terrain piece: floor, wall, step, platform.
+        // 所有地形（地板、墙、台阶、平台）共用同一种颜色。
         static readonly Color TerrainColor = new Color(0.8784314f, 0.8784314f, 0.8784314f); // #E0E0E0
         static readonly Color DarkTerrainColor = new Color(0.27f, 0.30f, 0.36f);
         static readonly Color BackgroundColor = new Color(0.086f, 0.102f, 0.153f);
@@ -117,7 +116,7 @@ namespace Platformer.EditorTools
         }
 
         // ------------------------------------------------------------------
-        // Project settings
+        // 工程设置
         // ------------------------------------------------------------------
 
         static void ConfigureLayers()
@@ -167,7 +166,7 @@ namespace Platformer.EditorTools
 
         static void ConfigurePhysics()
         {
-            // A snappier-than-real gravity makes a 6-cell jump feel good.
+            // 比真实重力更强的重力，让 6 格跳跃手感更干脆。
             Physics2D.gravity = new Vector2(0f, -40f);
             Physics2D.velocityIterations = 8;
             Physics2D.positionIterations = 3;
@@ -200,13 +199,12 @@ namespace Platformer.EditorTools
         }
 
         // ------------------------------------------------------------------
-        // Art import
+        // 美术导入
         // ------------------------------------------------------------------
 
-        // Exact triangular physics shapes for the slope sprites (normalised sprite space,
-        // counter-clockwise). Without this Unity's fallback shape is inset by the
-        // anti-aliased hypotenuse, which makes the player sink into the ramp.
-        // Points are in pixels relative to the sprite pivot (centre), counter-clockwise.
+        // 斜坡精灵的精确三角形物理形状。若不指定，Unity 的默认形状会
+        // 沿抗锯齿的斜边内缩，导致玩家陷进斜坡。
+        // 坐标是以精灵轴心（中心）为原点的像素值，逆时针方向。
         const float HalfTilePixels = 16f;
         static readonly Dictionary<string, Vector2[]> SlopePhysicsShapes = new Dictionary<string, Vector2[]>
         {
@@ -311,7 +309,7 @@ namespace Platformer.EditorTools
             }
 
             mat.SetColor("_OutlineColor", OutlineColor);
-            mat.SetFloat("_OutlineWidth", 1f);   // pixels
+            mat.SetFloat("_OutlineWidth", 1f);   // 像素
             mat.SetFloat("_Threshold", 0.28f);
             EditorUtility.SetDirty(mat);
             return mat;
@@ -331,9 +329,9 @@ namespace Platformer.EditorTools
                 AssetDatabase.CreateAsset(feature, OutlineFeaturePath);
             }
 
-            // Persist the feature inside Renderer2D.asset. ScriptableRendererData.SetDirty()
-            // only invalidates the in-memory renderer, so the serialized list is edited
-            // through SerializedObject and the asset is saved explicitly.
+            // 把特性持久化到 Renderer2D.asset 里。ScriptableRendererData.SetDirty()
+            // 只刷新内存中的渲染器，因此这里通过 SerializedObject 修改序列化列表，
+            // 并显式保存资产。
             var so = new SerializedObject(rendererData);
             SerializedProperty features = so.FindProperty("m_RendererFeatures");
 
@@ -371,8 +369,8 @@ namespace Platformer.EditorTools
 
         static PhysicsMaterial2D EnsureTerrainMaterial()
         {
-            // One shared material for every obstacle (blocks and slope) so friction and
-            // bounciness can be tuned from a single asset in the Inspector.
+            // 所有障碍物（方块和斜坡）共用一个材质，这样在 Inspector 里
+            // 改一次，摩擦和弹性就全部生效。
             return EnsurePhysicsMaterial(TerrainPhysicsMaterialPath, "TerrainPhysicsMaterial", 0.6f, 0f);
         }
 
@@ -388,12 +386,12 @@ namespace Platformer.EditorTools
                 EditorUtility.SetDirty(mat);
             }
 
-            // An existing asset keeps the values tuned in the Inspector.
+            // 已存在的资产保留在 Inspector 里调好的数值。
             return mat;
         }
 
         // ------------------------------------------------------------------
-        // Prefabs
+        // 预制体
         // ------------------------------------------------------------------
 
         static GameObject BuildPlayerPrefab(
@@ -404,8 +402,8 @@ namespace Platformer.EditorTools
 
             var sr = go.AddComponent<SpriteRenderer>();
             sr.sprite = sprites["player_capsule"];
-            sr.color = Color.white; // sprite is pre-coloured
-            sr.sortingLayerName = PlayerSortingLayer; // renders above both portal views
+            sr.color = Color.white; // 精灵已经着色
+            sr.sortingLayerName = PlayerSortingLayer; // 绘制在两扇门的画面之上
             sr.sortingOrder = 100;
             if (spriteMaterial != null) sr.sharedMaterial = spriteMaterial;
 
@@ -441,7 +439,7 @@ namespace Platformer.EditorTools
             tile.name = tileName;
             tile.sprite = sprite;
             tile.color = color;
-            tile.colliderType = Tile.ColliderType.Sprite; // use the sprite outline as the collision shape
+            tile.colliderType = Tile.ColliderType.Sprite; // 用精灵轮廓作为碰撞形状
             EditorUtility.SetDirty(tile);
             return tile;
         }
@@ -473,7 +471,7 @@ namespace Platformer.EditorTools
         }
 
         // ------------------------------------------------------------------
-        // Scene
+        // 场景
         // ------------------------------------------------------------------
 
         static void BuildLevelScene(
@@ -484,7 +482,7 @@ namespace Platformer.EditorTools
 
             var level = new GameObject("Level").transform;
 
-            // ---- Tilemap terrain: one Grid, one Tilemap, one merged collider ----
+            // ---- Tilemap 地形：一个 Grid、一个 Tilemap、一个合并碰撞体 ----
             var gridGo = new GameObject("Grid");
             gridGo.transform.SetParent(level);
             var grid = gridGo.AddComponent<Grid>();
@@ -510,35 +508,35 @@ namespace Platformer.EditorTools
             tilemapCollider.usedByComposite = true;
             tilemapCollider.sharedMaterial = terrainMaterial;
 
-            // ---- Ground: 2 cells tall, 4-cell pit between x=4 and x=8 ----
+            // ---- 地面：2 格厚，x=4 到 x=8 之间有一个 4 格宽的坑 ----
             for (int y = -2; y <= -1; y++)
             {
                 PaintRow(tilemap, terrainTile, -12, 3, y);
                 PaintRow(tilemap, terrainTile, 8, 23, y);
             }
 
-            // ---- Floating platforms ----
+            // ---- 悬浮平台 ----
             for (int y = 2; y <= 3; y++) PaintRow(tilemap, terrainTile, -8, -5, y);
             for (int y = 6; y <= 7; y++) PaintRow(tilemap, terrainTile, -4, -1, y);
 
-            // ---- Detail cells: a 2-cell ledge and a 1-cell-wide pillar ----
+            // ---- 细节瓦片：2 格宽的台阶板和 1 格宽的立柱 ----
             PaintRow(tilemap, terrainTile, 2, 3, 3);
             PaintColumn(tilemap, terrainTile, -2, 0, 1);
 
-            // ---- Stairs: every step is 2 cells high ----
+            // ---- 台阶：每级高 2 格 ----
             for (int y = 0; y <= 1; y++) PaintRow(tilemap, terrainTile, 12, 15, y);
             for (int y = 0; y <= 3; y++) PaintRow(tilemap, terrainTile, 16, 23, y);
 
-            // ---- Dark tiles: same colour merges, different colour never merges ----
+            // ---- 深灰瓦片：同色融合，异色永不融合 ----
             for (int y = 4; y <= 5; y++) PaintRow(tilemap, darkTile, 20, 23, y);
 
-            // ---- 45-degree ramp: two UpRight triangles plus the solid cell between them ----
+            // ---- 45 度坡道：两个右上斜坡瓦片，中间夹一个实心瓦片 ----
             PaintCell(tilemap, slopeTiles[0], 10, 0);
             PaintCell(tilemap, terrainTile, 11, 0);
             PaintCell(tilemap, slopeTiles[0], 11, 1);
 
-            // Tiles were written after the collider was created, so force the collider to
-            // process them now; otherwise the saved scene contains an empty collider.
+            // 瓦片是在创建碰撞体之后才写入的，这里强制碰撞体立即处理，
+            // 否则保存的场景里碰撞体是空的。
             tilemap.RefreshAllTiles();
             tilemapCollider.ProcessTilemapChanges();
             composite.GenerateGeometry();
@@ -578,7 +576,7 @@ namespace Platformer.EditorTools
 
             var cam = camGo.AddComponent<Camera>();
             cam.orthographic = true;
-            cam.orthographicSize = 5.625f; // 11.25 units tall => ~20 units wide at 16:9
+            cam.orthographicSize = 5.625f; // 高 11.25 单位，16:9 下宽约 20 单位
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = BackgroundColor;
             cam.nearClipPlane = 0.3f;
@@ -602,11 +600,11 @@ namespace Platformer.EditorTools
 
         static void BuildCaptureGroups(Camera mainCamera, GameObject player)
         {
-            // Both groups live under one empty node and pair up by their side.
+            // 两组都放在同一个空节点下，按 side 自动配对。
             var pair = new GameObject("Portal Pair");
             pair.transform.position = new Vector3(3f, 3f, 0f);
 
-            // Pair controller: keeps a reference to the player for view masking.
+            // 门对控制器：保存玩家引用，供画面遮罩使用。
             var pairControl = pair.AddComponent<PortalPair>();
             pairControl.player = player.transform;
 
@@ -643,8 +641,8 @@ namespace Platformer.EditorTools
             unit.transform.SetParent(parent, false);
             unit.transform.localScale = new Vector3(1f, flipY, 1f);
 
-            // The big SpriteMask child is what actually clips the view; the unit only
-            // carries the offset and rotation driven by CaptureDisplayGroup.
+            // 真正裁剪画面的是下面那个巨大的 SpriteMask 子节点；
+            // 这个节点只负责携带由 CaptureDisplayGroup 驱动的偏移和旋转。
             var maskGo = new GameObject("Mask");
             maskGo.transform.SetParent(unit.transform, false);
             maskGo.transform.localPosition = new Vector3(x, y, 0f);
@@ -667,10 +665,10 @@ namespace Platformer.EditorTools
             root.transform.SetParent(parent, false);
             root.transform.localPosition = localPosition;
 
-            // Every element of the group sits at the group origin (local position zero).
+            // 组内所有元素都位于组原点（localPosition 为 0）。
             var cameraGo = new GameObject("Portal Camera");
             cameraGo.transform.SetParent(root.transform, false);
-            // Pull the camera back on Z; at z = 0 it sits in the map plane and sees nothing.
+            // 把相机沿 Z 轴后拉；z = 0 时它位于地图平面内，什么都看不到。
             cameraGo.transform.localPosition = new Vector3(0f, 0f, -10f);
 
             var capture = cameraGo.AddComponent<Camera>();
@@ -680,7 +678,7 @@ namespace Platformer.EditorTools
             capture.backgroundColor = BackgroundColor;
             capture.nearClipPlane = 0.3f;
             capture.farClipPlane = 100f;
-            capture.enabled = false; // rendered on demand by RegionSnapshotCamera
+            capture.enabled = false; // 由 RegionSnapshotCamera 按需渲染
 
             var outputGo = new GameObject("Portal View");
             outputGo.layer = SnapshotLayer;
@@ -689,13 +687,13 @@ namespace Platformer.EditorTools
 
             var outputSprite = outputGo.AddComponent<SpriteRenderer>();
             outputSprite.sortingOrder = 20;
-            // Each portal uses its own sorting layer so its masks can only clip its own view.
+            // 每扇门使用自己的排序层，这样它的遮罩只会裁剪自己的画面。
             string sortingLayer = side == CaptureGroupSide.A ? PortalALayerName : PortalBLayerName;
             outputSprite.sortingLayerName = sortingLayer;
             outputSprite.maskInteraction = SpriteMaskInteraction.VisibleOutsideMask;
 
-            // Two covers under the view: they hide the view everywhere except the
-            // opening band, so the portal shows through a horizontal slot.
+            // 画面下面放两块遮挡：除门洞那条带以外全部遮住，
+            // 于是传送门只从一条水平缝隙里透出画面。
             BuildPortalMaskRig(root.transform, sortingLayer, outputSprite.sortingOrder + 1,
                 out Transform maskTop, out Transform maskBottom);
 
@@ -728,7 +726,7 @@ namespace Platformer.EditorTools
         }
 
         // ------------------------------------------------------------------
-        // Validation & preview
+        // 校验与预览
         // ------------------------------------------------------------------
 
         [MenuItem("Platformer/Validate Level", priority = 30)]
@@ -836,12 +834,12 @@ namespace Platformer.EditorTools
 
             string projectRoot = Directory.GetParent(Application.dataPath).FullName;
 
-            // Gameplay framing (as the player sees it at spawn).
+            // 游戏视角（玩家出生时看到的画面）。
             Vector3 gameplayPos = cam.transform.position;
             float gameplaySize = cam.orthographicSize;
             RenderShot(cam, Path.Combine(projectRoot, "Preview_Gameplay.png"), gameplayPos, gameplaySize);
 
-            // The snapshot only renders during play; force one capture for the preview.
+            // 快照只在运行时渲染；为了出预览图，这里强制捕获一次。
             var groups = UnityEngine.Object.FindObjectsOfType<CaptureDisplayGroup>();
             foreach (var group in groups)
             {
@@ -849,7 +847,7 @@ namespace Platformer.EditorTools
                 group.WireUp();
             }
 
-            // A few passes so the cross-display feedback settles before rendering.
+            // 多跑几轮，让交叉显示的反馈在出图前稳定下来。
             for (int pass = 0; pass < 3; pass++)
             {
                 foreach (var group in groups) if (group.capture != null) group.capture.CaptureNow();
@@ -863,7 +861,7 @@ namespace Platformer.EditorTools
             }
 
 
-            // Overview framed to fit every terrain and sprite renderer in the scene.
+            // 俯瞰视角：取景范围覆盖场景中所有地形和精灵渲染器。
             Bounds bounds = new Bounds();
             bool hasBounds = false;
             foreach (var renderer in UnityEngine.Object.FindObjectsOfType<Renderer>())
@@ -918,7 +916,7 @@ namespace Platformer.EditorTools
         }
 
         // ------------------------------------------------------------------
-        // Helpers
+        // 辅助函数
         // ------------------------------------------------------------------
 
         static void EnsureFolder(string assetPath)

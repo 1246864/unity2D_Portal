@@ -5,15 +5,14 @@ using UnityEngine.Rendering.Universal;
 namespace Platformer
 {
     /// <summary>
-    /// Shows the image of a dedicated camera as a sprite.
+    /// 把一台专用相机的画面显示成精灵。
     ///
-    /// The captured area is <see cref="viewScale"/> times the main camera view. When the
-    /// main view grows, the captured area grows with it and the render texture (the
-    /// output canvas) grows proportionally, so the sprite always stays 1:1 with the
-    /// captured world: at scale 1 it is exactly as big as the area it shows.
+    /// 捕获范围是主相机视野的 <see cref="viewScale"/> 倍。主视野变大时，捕获范围
+    /// 随之变大，渲染纹理（输出画布）也等比放大，因此输出精灵始终与拍摄到的世界
+    /// 保持 1:1：缩放为 1 时，画面覆盖多大，精灵就有多大。
     ///
-    /// The capture camera is not restricted to other layers, so if its output sprite is
-    /// inside its view the snapshot contains itself, producing a mirror-in-mirror effect.
+    /// 捕获相机不排除任何层，所以当它自己的输出精灵落在视野内时，快照会拍到自己，
+    /// 形成镜中镜效果。
     /// </summary>
     public class RegionSnapshotCamera : MonoBehaviour
     {
@@ -48,13 +47,13 @@ namespace Platformer
         float _timer;
         bool _renderingAvailable;
 
-        /// <summary>World height the snapshot covers.</summary>
+        /// <summary>快照覆盖的世界高度。</summary>
         float CapturedWorldHeight => sourceCamera.orthographicSize * 2f * viewScale;
 
         void Start()
         {
-            // Headless runs (batch tests with -nographics) cannot render to a texture;
-            // calling Camera.Render there blocks forever, so the snapshot disables itself.
+            // 无头运行（-nographics 的批处理测试）无法渲染到纹理，
+            // 此时调用 Camera.Render 会永久阻塞，因此快照自动禁用自己。
             _renderingAvailable = SystemInfo.graphicsDeviceType != GraphicsDeviceType.Null;
             if (!_renderingAvailable)
             {
@@ -64,8 +63,8 @@ namespace Platformer
 
             if (!EnsureResources()) return;
             captureCamera.targetTexture = _renderTexture;
-            // URP renders enabled cameras automatically; a manual Camera.Render() on a
-            // disabled camera is ignored, which is why this one stays enabled.
+            // URP 会自动渲染已启用的相机；对已禁用的相机手动调用 Camera.Render()
+            // 会被忽略，所以这台相机保持启用状态。
             captureCamera.enabled = true;
             Capture();
         }
@@ -82,13 +81,13 @@ namespace Platformer
             }
         }
 
-        /// <summary>Removes the preview sprite from the output renderer.</summary>
+        /// <summary>清空输出渲染器上的预览精灵。</summary>
         public void ClearOutput()
         {
             if (output != null) output.sprite = null;
         }
 
-        /// <summary>Captures immediately (also used by preview rendering).</summary>
+        /// <summary>立即捕获一次（预览渲染也会用到）。</summary>
         public void CaptureNow()
         {
             if (!_renderingAvailable && SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null) return;
@@ -100,7 +99,7 @@ namespace Platformer
         {
             if (sourceCamera == null || captureCamera == null || output == null) return false;
 
-            // The capture camera keeps its own view; only the size follows the main one.
+            // 捕获相机保持自己的视角；只有尺寸跟随主相机。
             captureCamera.orthographicSize = sourceCamera.orthographicSize * viewScale;
 
             float worldHeight = CapturedWorldHeight;
@@ -108,8 +107,7 @@ namespace Platformer
             int height = Mathf.Clamp(Mathf.RoundToInt(worldHeight * pixelsPerUnit), 16, maxTextureSize);
             int width = Mathf.Clamp(Mathf.RoundToInt(worldHeight * aspect * pixelsPerUnit), 16, maxTextureSize);
 
-            // Rebuild the canvas when the view changes so the texel density and the
-            // 1:1 world size are preserved.
+            // 视野变化时重建画布，保持像素密度和 1:1 的世界尺寸不变。
             if (_texture == null || _texture.width != width || _texture.height != height ||
                 !Mathf.Approximately(_spriteWorldHeight, worldHeight))
             {
@@ -135,8 +133,8 @@ namespace Platformer
 
         void Capture()
         {
-            // Render on demand: this works in edit mode and in batch play-mode tests,
-            // where the automatic camera loop does not present frames.
+            // 按需渲染：在编辑模式和批处理 PlayMode 测试中都有效，
+            // 因为这些场景里相机的自动渲染循环不会出帧。
             captureCamera.Render();
 
             RenderTexture previous = RenderTexture.active;

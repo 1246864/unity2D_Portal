@@ -5,11 +5,10 @@ using UnityEngine.Rendering.Universal;
 namespace Platformer.Rendering
 {
     /// <summary>
-    /// Full-screen outline for the 2D renderer.
+    /// 2D 渲染器的全屏描边。
     ///
-    /// Pixels whose neighbourhood has a colour discontinuity get the outline colour.
-    /// Because flat, uniformly coloured terrain has no internal discontinuities, any
-    /// number of adjacent blocks (of any size) melts into a single silhouette outline.
+    /// 邻域存在颜色突变的像素会被涂成描边色。因为纯色平地内部没有颜色突变，
+    /// 任意数量、任意尺寸的相邻瓦片都会融合成一条整体外轮廓。
     /// </summary>
     public class ScreenOutlineFeature : ScriptableRendererFeature
     {
@@ -90,9 +89,9 @@ namespace Platformer.Rendering
                 _material.SetFloat(WidthId, _width);
                 _material.SetFloat(ThresholdId, _threshold);
 
-                // The silhouette term classifies "inside" pixels by comparing against the
-                // camera clear colour, so the outline stays a clean single pixel on
-                // anti-aliased diagonal edges instead of a checkered line.
+                // 轮廓项通过与相机背景色比较来判断像素是否"在形状内部"，
+                // 这样在抗锯齿的斜边上描边仍是干净的单像素，
+                // 而不会变成虚线、棋盘格。
                 Color background = renderingData.cameraData.camera.backgroundColor;
                 if (QualitySettings.activeColorSpace == ColorSpace.Linear)
                     background = background.linear;

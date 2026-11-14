@@ -6,8 +6,8 @@ using UnityEngine.TestTools;
 namespace Platformer.Tests
 {
     /// <summary>
-    /// Play-mode tests for the character controller and camera.
-    /// Run from the Test Runner window, or in batch:
+    /// 角色控制器与相机的 PlayMode 测试。
+    /// 在 Test Runner 窗口运行，或用批处理：
     ///   Unity.exe -batchmode -projectPath . -runTests -testPlatform PlayMode
     /// </summary>
     public class PlayerControllerPlayTests
@@ -23,7 +23,7 @@ namespace Platformer.Tests
             Assert.AreNotEqual(-1, groundLayer,
                 "Layer 'Ground' is missing. Run Platformer > Rebuild Level + Prefabs first.");
 
-            // Match the project-wide gravity used by the template.
+            // 与模板使用的工程级重力保持一致。
             Physics2D.gravity = new Vector2(0f, -40f);
 
             _ground = new GameObject("TestGround");
@@ -43,7 +43,7 @@ namespace Platformer.Tests
             _player = Object.Instantiate(prefab, new Vector3(0f, 0.9f, 0f), Quaternion.identity);
             _controller = _player.GetComponent<PlayerController2D>();
 
-            // Let the capsule settle on the ground.
+            // 让胶囊在地面上稳定下来。
             for (int i = 0; i < 15; i++)
                 yield return new WaitForFixedUpdate();
 
@@ -114,7 +114,7 @@ namespace Platformer.Tests
 
             _controller.Teleport(new Vector2(_player.transform.position.x + 12f, _player.transform.position.y));
 
-            // Batch mode renders very fast, so wait in game time rather than frames.
+            // 批处理模式渲染极快，所以按游戏时间等待，而不是按帧。
             yield return new WaitForSeconds(1.5f);
             yield return null;
 

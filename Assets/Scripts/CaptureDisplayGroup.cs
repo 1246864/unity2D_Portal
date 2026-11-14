@@ -2,14 +2,14 @@ using UnityEngine;
 
 namespace Platformer
 {
-    /// <summary>Which half of the capture pair this group is.</summary>
+    /// <summary>本组属于捕获对中的哪一半。</summary>
     public enum CaptureGroupSide
     {
         [InspectorName("A 门")] A,
         [InspectorName("B 门")] B
     }
 
-    /// <summary>Direction the portal faces: left or right.</summary>
+    /// <summary>门的朝向：朝左或朝右。</summary>
     public enum PortalFacing
     {
         [InspectorName("朝左")] Left,
@@ -17,15 +17,12 @@ namespace Platformer
     }
 
     /// <summary>
-    /// One capture display group: a snapshot camera, an output sprite and the capture
-    /// controller packed under a single empty object.
+    /// 一个捕获显示组：把快照相机、输出精灵和捕获控制器打包在同一个空节点下。
     ///
-    /// Groups live side by side under one parent. A group finds the group of the other
-    /// side on its own and cross-connects them: this group's camera paints the other
-    /// group's output and the other group's camera paints this group's output.
+    /// 两组并排放在同一父节点下。每组会自己找到另一侧的那一组并交叉连线：
+    /// 本组的相机画到对方的输出上，对方的相机画到本组的输出上。
     ///
-    /// Two view masks clip the output to the portal opening and always turn toward the
-    /// player's eyes.
+    /// 两块画面遮罩把输出裁成门洞的形状，并且始终朝向玩家的眼睛。
     /// </summary>
     public class CaptureDisplayGroup : MonoBehaviour
     {
@@ -41,8 +38,15 @@ namespace Platformer
         [Tooltip("本组的画面精灵（会被对方那组画上画面）")]
         public SpriteRenderer output;
 
+        [Tooltip("本门显示精灵所在的游戏对象（Start 时自动获取）")]
+        public GameObject viewObject;
+
         [Tooltip("左右两半在中线各让出的像素数。留一点缝可以避免递归把共用像素列放大成一条亮线")]
         [Range(0f, 16f)] public float centerGapPixels = 1f;
+
+        [Header("玩家")]
+        [Tooltip("本对传送门绑定的玩家游戏对象，由 Portal Pair 下发，无需手填")]
+        public GameObject player;
 
         [Header("传送门")]
         [Tooltip("门的朝向：朝左或朝右。传送玩家时两种朝向的行为不同")]
@@ -60,14 +64,17 @@ namespace Platformer
         [Tooltip("下遮罩节点（自动查找 View Mask Bottom）")]
         public Transform maskBottom;
 
-        /// <summary>Portal opening height, derived from the two mask offsets.</summary>
+        /// <summary>门洞高度，由上下两块遮罩的偏移算出。</summary>
         public float PortalHeight => Mathf.Abs(maskTopOffset - maskBottomOffset);
 
-        /// <summary>True when this portal opens toward the left.</summary>
+        /// <summary>本门朝左时返回 true。</summary>
         public bool FacesLeft => facing == PortalFacing.Left;
 
-        /// <summary>-1 when facing left, +1 when facing right.</summary>
+        /// <summary>朝左为 -1，朝右为 +1。</summary>
         public float FacingSign => FacesLeft ? -1f : 1f;
+
+        /// <summary>玩家的 Transform（未下发玩家时为 null）。</summary>
+        public Transform PlayerTransform => player != null ? player.transform : null;
 
         Sprite _halfSprite;
         PortalPair _pair;
@@ -79,6 +86,32 @@ namespace Platformer
 
             _pair = GetComponentInParent<PortalPair>();
             ResolveMaskRig();
+            CachePlayer();
+        }
+
+        void Start()
+        {
+            // 获取本门显示精灵所在的游戏对象。
+            if (output != null)
+                viewObject = output.gameObject;
+
+            CachePlayer();
+        }
+
+        /// <summary>接收 PortalPair 下发的玩家实例。</summary>
+        public void SetPlayer(GameObject playerObject)
+        {
+            player = playerObject;
+        }
+
+        /// <summary>玩家尚未下发时，从所属的 PortalPair 上取一次。</summary>
+        void CachePlayer()
+        {
+            if (player != null) return;
+
+            if (_pair == null) _pair = GetComponentInParent<PortalPair>();
+            if (_pair != null && _pair.player != null)
+                player = _pair.player.gameObject;
         }
 
         void LateUpdate()
@@ -87,7 +120,35 @@ namespace Platformer
             UpdateMasks();
         }
 
-        /// <summary>Finds the sibling group with the other side and connects both.</summary>
+        void Update()
+        {
+            CachePlayer();
+            UpdateViewColor();
+        }
+
+        /// <summary>根据玩家距离更新本门显示精灵的颜色。</summary>
+        void UpdateViewColor()
+        {
+            if (player == null) return;
+
+            // 玩家到本对象局部 Y 轴的垂直距离。
+            float playerDistanceToYAxis = Mathf.Abs(transform.InverseTransformPoint(player.transform.position).x);
+
+            float color_offs = 1f;
+            if(playerDistanceToYAxis <= 10f)
+            {
+                color_offs = playerDistanceToYAxis / 10f;
+            }
+            if (facing == PortalFacing.Left) {
+                viewObject.GetComponent<SpriteRenderer>().color = new Color(1f, 1f - color_offs, 1f - color_offs, 1f);
+            }
+            else
+            {
+                viewObject.GetComponent<SpriteRenderer>().color = new Color(1f - color_offs, 1f - color_offs, 1f, 1f);
+            }
+        }
+
+        /// <summary>在兄弟节点中找到另一侧的组，并把两者连接起来。</summary>
         public void ResolvePartner()
         {
             if (partner != null && partner.side != side) return;
@@ -107,7 +168,7 @@ namespace Platformer
             }
         }
 
-        /// <summary>Connects both groups so each camera feeds the other group's output.</summary>
+        /// <summary>双向连线：每组的相机都画到另一组的输出上。</summary>
         public void WireUp()
         {
             if (capture == null || output == null) return;
@@ -117,7 +178,7 @@ namespace Platformer
             partner.capture.output = output;
         }
 
-        /// <summary>Finds the mask rig created under this group.</summary>
+        /// <summary>找到本组下面创建的遮罩节点。</summary>
         public void ResolveMaskRig()
         {
             if (maskTop != null && maskBottom != null) return;
@@ -129,21 +190,23 @@ namespace Platformer
         }
 
         /// <summary>
-        /// Puts the two masks on their offsets and turns them toward the player's eyes, so
-        /// the opening always faces the player.
+        /// 把两块遮罩放回各自的偏移位置，并转向玩家的眼睛，
+        /// 让门洞始终正对玩家。
         /// </summary>
         public void UpdateMasks()
         {
             if (maskTop == null || maskBottom == null) return;
 
-            if (_pair == null) _pair = GetComponentInParent<PortalPair>();
+            CachePlayer();
 
             maskTop.localPosition = new Vector3(0f, maskTopOffset, 0f);
             maskBottom.localPosition = new Vector3(0f, maskBottomOffset, 0f);
 
-            if (_pair == null || _pair.player == null) return;
+            if (player == null) return;
 
-            Vector3 eye = _pair.PlayerEye;
+            // 眼睛位置 = 玩家中心 + 门对配置的眼睛高度。
+            float eyeOffset = _pair != null ? _pair.playerEyeOffset : 0.4f;
+            Vector3 eye = player.transform.position + Vector3.up * eyeOffset;
             FacePoint(maskTop, eye);
             FacePoint(maskBottom, eye);
         }
@@ -151,14 +214,14 @@ namespace Platformer
         static void FacePoint(Transform mask, Vector3 point)
         {
             Vector3 direction = point - mask.position;
-            // Aim at the eye, then turn another 90 degrees.
+            // 先对准眼睛，再旋转 90 度。
             float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
             mask.rotation = Quaternion.Euler(0f, 0f, angle);
         }
 
         /// <summary>
-        /// Keeps only one half of the captured image: the sprite is rebuilt from that half
-        /// of the texture and moved to where it sits in the full image.
+        /// 只保留捕获画面的一半：用贴图的一半重建精灵，
+        /// 并把它摆到完整画面中对应的位置。
         /// </summary>
         public void ApplyHalfCrop()
         {
@@ -170,9 +233,8 @@ namespace Platformer
             float fullWidth = full.bounds.size.x;
             float pixelsPerUnit = full.pixelsPerUnit;
 
-            // A keeps the right half, B keeps the left half. Both stop just short of the
-            // centre line: a shared pixel column would be amplified by the cross-display
-            // recursion into a visible seam line.
+            // A 保留右半，B 保留左半。两半都在中线处留出一点缝隙：
+            // 共用的像素列会被交叉显示的递归放大成一条明显的接缝。
             bool rightHalf = side == CaptureGroupSide.A;
             float halfPixels = full.rect.width * 0.5f;
             float gapPixels = Mathf.Clamp(centerGapPixels, 0f, halfPixels * 0.5f);
@@ -189,7 +251,7 @@ namespace Platformer
 
             output.sprite = _halfSprite;
 
-            // Centre the kept region where it sits in the full image.
+            // 把保留的区域摆到它在完整画面中的位置。
             float gapWorld = gapPixels / pixelsPerUnit;
             float offset = (fullWidth * 0.25f + gapWorld * 0.5f) * (rightHalf ? 1f : -1f);
             output.transform.localPosition = new Vector3(offset, 0f, 0f);

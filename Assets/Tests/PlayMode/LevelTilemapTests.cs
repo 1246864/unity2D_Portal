@@ -8,9 +8,8 @@ using UnityEngine.Tilemaps;
 namespace Platformer.Tests
 {
     /// <summary>
-    /// Integration test for the tilemap-built level: loads Level01 additively,
-    /// checks the tilemap is populated and that the player is standing on the
-    /// merged Tilemap/Composite collider.
+    /// Tilemap 关卡的集成测试：以叠加方式加载 Level01，
+    /// 检查 Tilemap 已绘制瓦片，且玩家站在 Tilemap/Composite 合并碰撞体上。
     /// </summary>
     public class LevelTilemapTests
     {
@@ -34,7 +33,7 @@ namespace Platformer.Tests
             Scene scene = SceneManager.GetSceneByName(LevelScene);
             Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
 
-            // Let physics settle on the tilemap collider.
+            // 让物理在 Tilemap 碰撞体上稳定下来。
             yield return new WaitForSeconds(0.75f);
 
             GameObject player = null;
@@ -90,7 +89,7 @@ namespace Platformer.Tests
             Assert.IsNotNull(player, "Player not found in Level01.");
             var controller = player.GetComponent<PlayerController2D>();
 
-            // Place the player just left of the 45-degree tile ramp (x = 10..12).
+            // 把玩家放到 45 度瓦片坡道（x = 10..12）左侧一点的位置。
             controller.Teleport(new Vector2(9f, 0.75f));
             yield return new WaitForFixedUpdate();
 
@@ -132,7 +131,7 @@ namespace Platformer.Tests
             Assert.IsNotNull(groupA, "Capture Display Group A not found.");
             Assert.IsNotNull(groupB, "Capture Display Group B not found.");
 
-            // Cross display: A's camera paints B's output and B's camera paints A's output.
+            // 交叉显示：A 的相机画到 B 的输出上，B 的相机画到 A 的输出上。
             Assert.AreEqual(groupB.output, groupA.capture.output, "A's camera must paint B's output.");
             Assert.AreEqual(groupA.output, groupB.capture.output, "B's camera must paint A's output.");
 
@@ -142,14 +141,12 @@ namespace Platformer.Tests
                 Assert.Ignore("Rendering is disabled in this run; snapshot image check skipped.");
             }
 
-            // 1. The image comes from the capture camera. Batch play mode does not render
-            // cameras, so pixel content is validated by the preview render instead; here
-            // the output sprite must exist and be sized by the capture camera.
+            // 1. 画面来自捕获相机。批处理 PlayMode 不会渲染相机，所以像素内容
+            //    改由预览渲染来验证；这里只要求输出精灵存在，且尺寸由捕获相机决定。
             Texture2D texture = snapshot.output.sprite.texture;
             Assert.IsNotNull(texture, "Snapshot output sprite should have a texture.");
 
-            // 2. The snapshot is the capture camera's own image: moving the player camera
-            // must not move the capture camera.
+            // 2. 快照是捕获相机自己的画面：移动玩家相机的不会带动捕获相机。
             Vector3 capturePosition = snapshot.captureCamera.transform.position;
             snapshot.sourceCamera.transform.position += new Vector3(4f, 0f, 0f);
             yield return null;
@@ -157,32 +154,32 @@ namespace Platformer.Tests
             Assert.AreEqual(capturePosition, snapshot.captureCamera.transform.position,
                 "Capture camera must keep its own position, not follow the player camera.");
 
-            // 3. Its size is 1.2x the main view.
+            // 3. 尺寸是主视野的 1.2 倍。
             Assert.AreEqual(snapshot.sourceCamera.orthographicSize * 1.2f,
                 snapshot.captureCamera.orthographicSize, 0.01f,
                 "Capture camera should cover 1.2x the main view.");
 
-            // 4. 1:1 in both axes, measured against what the capture camera really covers.
+            // 4. 两个轴都是 1:1，以捕获相机真正覆盖的范围为准。
             float capturedHeight = snapshot.captureCamera.orthographicSize * 2f;
             float capturedWidth = capturedHeight * (texture.width / (float)texture.height);
             Assert.AreEqual(capturedHeight, snapshot.output.sprite.bounds.size.y, 0.001f,
                 "Snapshot height must equal the captured world height.");
-            // Half the width plus the small overlap the two halves use to hide the seam.
+            // 宽度是一半，再加上两半为遮住接缝而留出的少量重叠。
             Assert.AreEqual(capturedWidth * 0.5f, snapshot.output.sprite.bounds.size.x, 0.2f,
                 "Snapshot shows half of the captured width.");
 
-            // A keeps the right half, B keeps the left half.
+            // A 保留右半，B 保留左半。
             Assert.Greater(groupA.output.transform.localPosition.x, 0f, "Group A should show the right half.");
             Assert.Less(groupB.output.transform.localPosition.x, 0f, "Group B should show the left half.");
             Assert.AreEqual(Vector3.one, snapshot.output.transform.lossyScale,
                 "Snapshot output must not be scaled.");
 
-            // 5. The canvas keeps a constant texel density.
+            // 5. 画布保持恒定的像素密度。
             Assert.AreEqual(snapshot.pixelsPerUnit,
                 texture.height / snapshot.output.sprite.bounds.size.y, 0.5f,
                 "Canvas should keep the configured texel density.");
 
-            // 6. Growing the main view grows the captured area and the canvas with it.
+            // 6. 主视野变大时，捕获范围和画布一起变大。
             float originalOrtho = snapshot.sourceCamera.orthographicSize;
             int textureHeightBefore = texture.height;
             snapshot.sourceCamera.orthographicSize = originalOrtho * 2f;
@@ -196,12 +193,12 @@ namespace Platformer.Tests
             yield return null;
             yield return null;
 
-            // 7. The player is drawn above the snapshot output.
+            // 7. 玩家绘制在快照输出之上。
             var playerRenderer = Object.FindObjectOfType<PlayerController2D>().GetComponent<SpriteRenderer>();
             Assert.Greater(playerRenderer.sortingOrder, snapshot.output.sortingOrder,
                 "Player must be drawn above the snapshot output.");
 
-            // 8. The capture camera can see its own output (mirror-in-mirror recursion).
+            // 8. 捕获相机能看见自己的输出（镜中镜递归）。
             int outputLayerBit = 1 << snapshot.output.gameObject.layer;
             Assert.AreNotEqual(0, snapshot.captureCamera.cullingMask & outputLayerBit,
                 "Capture camera must be able to capture its own output.");

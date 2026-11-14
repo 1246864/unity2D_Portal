@@ -3,8 +3,8 @@ using UnityEngine;
 namespace Platformer
 {
     /// <summary>
-    /// Smooth 2D camera follow with optional horizontal look-ahead.
-    /// Attach to the orthographic main camera and assign a target.
+    /// 平滑跟随的 2D 相机，可选水平前瞻。
+    /// 挂在正交主相机上，并指定跟随目标。
     /// </summary>
     [RequireComponent(typeof(Camera))]
     public class CameraFollow2D : MonoBehaviour
@@ -66,7 +66,7 @@ namespace Platformer
                 transform.position, desired, ref _followVelocity, smoothTime);
         }
 
-        /// <summary>Instantly centers the camera on the target (no smoothing).</summary>
+        /// <summary>立即把相机对准目标（不做平滑）。</summary>
         public void SnapToTarget()
         {
             if (target == null) return;

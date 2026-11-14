@@ -51,17 +51,16 @@ Shader "Hidden/Platformer/ScreenOutline"
 
                 half3 background = _BackgroundColor.rgb;
 
-                // Colour discontinuity (used for different tile colours: normal vs dark).
+                // 颜色突变（用于区分不同瓦片颜色：普通 vs 深灰）。
                 half edge = max(
                     max(max(distance(center, left), distance(center, right)),
                         max(distance(center, down), distance(center, up))),
                     max(max(distance(center, downLeft), distance(center, downRight)),
                         max(distance(center, upLeft), distance(center, upRight))));
 
-                // Silhouette test against the camera background. Sampling a raw colour
-                // difference on an anti-aliased 45-degree edge produced a checkered line,
-                // so the silhouette is detected as "inside pixel touching a background
-                // pixel" and drawn on the inside only: one clean pixel, no halo.
+                // 与相机背景做轮廓判定。直接在抗锯齿的 45 度斜边上采样原始
+                // 色差会出现棋盘格，因此改为判断"内部像素是否与背景像素相邻"，
+                // 并且只画在内侧：干净的一个像素，没有光晕。
                 half inCenter = step(_BackgroundTolerance, distance(center, background));
                 half inLeft   = step(_BackgroundTolerance, distance(left, background));
                 half inRight  = step(_BackgroundTolerance, distance(right, background));
@@ -79,22 +78,19 @@ Shader "Hidden/Platformer/ScreenOutline"
                     max(max(inLeft, inRight), max(inDown, inUp)),
                     max(max(inDownLeft, inDownRight), max(inUpLeft, inUpRight)));
 
-                // 1 px inside + 1 px outside the silhouette. Because the inside/outside
-                // test is a binary comparison against the clear colour, the band stays
-                // continuous on anti-aliased diagonals instead of turning into a
-                // checkered line.
+                // 轮廓内侧 1px + 外侧 1px。由于内外判定是与背景色做二值比较，
+                // 这条带子在抗锯齿的斜边上保持连续，不会变成棋盘格。
                 half silhouette = inCenter * (1.0 - allNeighboursInside)
                                 + (1.0 - inCenter) * anyNeighbourInside;
 
-                // Colour-type boundaries are only outlined when both sides are inside the
-                // silhouette; otherwise the silhouette term above handles the edge.
+                // 只有两侧都在轮廓内部时才把颜色类型边界描出来；
+                // 否则交给上面的轮廓项处理。
                 half colorEdge = smoothstep(_Threshold, _Threshold + 0.03, edge) * inCenter * allNeighboursInside;
 
                 half mask = saturate(silhouette + colorEdge);
                 half3 result = lerp(center, _OutlineColor.rgb, mask * _OutlineColor.a);
 
-                // Keep the source alpha so cameras with a transparent background (the
-                // capture groups) produce see-through snapshots.
+                // 保留源 alpha，让透明背景的相机（捕获组）能输出可透视的快照。
                 return half4(result, centerSample.a);
             }
             ENDHLSL
