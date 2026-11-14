@@ -50,7 +50,23 @@ namespace Platformer
 
         [Header("传送门")]
         [Tooltip("门的朝向：定义出口在 Y 轴（竖直方向）的哪一侧；传送时据此决定出面对方向")]
-        public PortalFacing facing = PortalFacing.Right;
+        [SerializeField] PortalFacing facing = PortalFacing.Right;
+
+        public PortalFacing Facing
+        {
+            get { return facing; }
+            set
+            {
+                if (facing == value) return;
+                facing = value;
+                _lastFacing = value;
+                _hasLastFacing = true;
+                ChangeFacing(value);
+            }
+        }
+
+        PortalFacing _lastFacing;
+        bool _hasLastFacing;
 
         [Header("遮罩")]
         [Tooltip("上遮罩节点（自动查找 View Mask Top）")]
@@ -96,6 +112,9 @@ namespace Platformer
 
         void Awake()
         {
+            _lastFacing = facing;
+            _hasLastFacing = true;
+
             ResolvePartner();
             WireUp();
 
@@ -116,7 +135,32 @@ namespace Platformer
             if (output != null)
                 viewObject = output.gameObject;
 
+            ChangeFacing(facing);
             CachePlayer();
+        }
+
+        /// <summary>
+        /// Inspector 直接修改序列化字段 facing，不会执行 Facing 属性的 setter。
+        /// 缓存上一次朝向，确保只有值实际变化时才调用 ChangeFacing；首次加载只记录初始值。
+        /// </summary>
+        void OnValidate()
+        {
+            if (!_hasLastFacing)
+            {
+                _lastFacing = facing;
+                _hasLastFacing = true;
+                return;
+            }
+
+            if (_lastFacing == facing) return;
+
+            _lastFacing = facing;
+            ChangeFacing(facing);
+        }
+
+        void ChangeFacing(PortalFacing newFacing)
+        {
+            Debug.Log("ChangeFacing: " + newFacing);
         }
 
         /// <summary>
@@ -181,7 +225,7 @@ namespace Platformer
         }
 
         /// <summary>
-        /// 用 Y 轴正方向按 facing 旋转 90° 得到开口方向（朝右 -90°，朝左 +90°）。
+        /// 用 Y 轴正方向按 Facing 旋转 90° 得到开口方向（朝右 -90°，朝左 +90°）。
         /// 玩家相对门的向量与开口方向的夹角 ≥ 90° 时，说明玩家绕到了门后面，隐藏本门画面。
         /// </summary>
         void UpdateVisibility()
