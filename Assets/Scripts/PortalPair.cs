@@ -49,6 +49,7 @@ namespace Platformer
 
         float _cooldown;
         bool _forceCapture;
+        Transform _lastPlayer;
 
         /// <summary>门碰撞箱所在层（复用 Snapshot 层，玩家身体胶囊会排除该层）。</summary>
         const int GateLayer = 8;
@@ -80,6 +81,14 @@ namespace Platformer
 
         void Update()
         {
+            // 支持运行时换玩家：重新下发引用，并让新玩家的身体胶囊排除门层。
+            if (_lastPlayer != player)
+            {
+                _lastPlayer = player;
+                PushPlayerToGroups();
+                IgnorePlayerBodyCollision();
+            }
+
             if (_cooldown > 0f)
                 _cooldown -= Time.deltaTime;
         }

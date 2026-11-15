@@ -86,14 +86,17 @@ namespace Platformer
         public float hintBackOffset = 0.1f;
 
         [Header("门位置提示粒子")]
-        [Tooltip("粒子沿门朝向方向的基础前进速度")]
+        [Tooltip("粒子沿门朝向方向的基础前进速度（实际速度为其 1/4）")]
         public float hintParticleSpeed = 1.8f;
 
-        [Tooltip("粒子发射速率（用于控制密度）")]
+        [Tooltip("粒子发射速率（实际发射率为其 1/4）")]
         [Min(0f)] public float hintParticleRate = 45f;
 
-        [Tooltip("粒子基础存活时间（秒）")]
+        [Tooltip("粒子基础存活时间（实际生命周期为其 1.5 倍）")]
         [Min(0.01f)] public float hintParticleLifetime = 1f;
+
+        [Tooltip("粒子发射区域比门洞高度小多少（世界单位）")]
+        [Min(0f)] public float hintParticleHeightInset = 0.1f;
 
         [Header("玩家")]
         [Tooltip("本对传送门绑定的玩家游戏对象，由传送门对下发，无需手填")]
@@ -112,7 +115,7 @@ namespace Platformer
                 facing = value;
                 _lastFacing = value;
                 _hasLastFacing = true;
-                ChangeFacing(value);
+                ChangeFacing();
             }
         }
 
@@ -144,15 +147,26 @@ namespace Platformer
         /// <summary>门位置提示的粒子系统（调试/测试用）。</summary>
         public ParticleSystem HintParticles => _particles;
 
-        /// <summary>细线（光带靠门的一侧）的世界位置。</summary>
-        public Vector3 HintLinePosition => _hintLinePosition;
+        /// <summary>细线（光带靠门的一侧）的世界位置；随视觉中心/朝向/偏移实时计算。</summary>
+        public Vector3 HintLinePosition
+        {
+            get
+            {
+                Vector3 line = ViewAnchor.position;
+                line.x -= FacingSign * hintBackOffset;
+                line.z = transform.position.z;
+                return line;
+            }
+        }
 
         /// <summary>所属的 PortalPair（必要时向上查找）。</summary>
         public PortalPair Pair
         {
             get
             {
-                if (_pair == null) _pair = GetComponentInParent<PortalPair>();
+                // 父级被换到另一个 PortalPair 时重新解析，避免缓存指向旧门对。
+                if (_pair == null || !transform.IsChildOf(_pair.transform))
+                    _pair = GetComponentInParent<PortalPair>();
                 return _pair;
             }
         }
@@ -178,7 +192,6 @@ namespace Platformer
         SpriteRenderer _hint;
         ParticleSystem _particles;
         Material _beamMaterial;
-        Vector3 _hintLinePosition;
 
         static readonly Color HintBlue = new Color(0.35f, 0.65f, 1f, 1f);
         static readonly Color HintRed = new Color(1f, 0.35f, 0.35f, 1f);
@@ -236,7 +249,7 @@ namespace Platformer
                     capture.captureCamera.cullingMask &= ~(1 << output.gameObject.layer);
             }
 
-            ChangeFacing(facing);
+            ChangeFacing();
             CachePlayer();
             CacheViewAnchors();
             EnsureHint();
@@ -258,12 +271,13 @@ namespace Platformer
             if (_lastFacing == facing) return;
 
             _lastFacing = facing;
-            ChangeFacing(facing);
+            ChangeFacing();
         }
 
-        void ChangeFacing(PortalFacing newFacing)
+        void ChangeFacing()
         {
-            Debug.Log("ChangeFacing: " + newFacing);
+            // 立刻把光带方向/粒子方向同步到新朝向，而不是等下一帧 LateUpdate。
+            UpdateHint();
         }
 
         /// <summary>
@@ -480,16 +494,18 @@ namespace Platformer
         {
             if (_hint == null) return;
 
+            // 视觉中心引用可能被动态替换，这里重新取一次，避免使用旧的缓存。
+            _viewAnchor = ViewAnchor;
+
             // 线高比门洞略高，两端会从 Portal View 的遮罩外露出来。
             float height = (Pair != null ? Pair.PortalHeight : 3f) + hintExtraHeight;
             Vector3 scale = new Vector3(hintBeamLength, height, 1f);
             if (_hint.transform.localScale != scale)
                 _hint.transform.localScale = scale;
 
-            Vector3 line = _viewAnchor != null ? _viewAnchor.position : transform.position;
+            Vector3 line = _viewAnchor.position;
             line.x -= FacingSign * hintBackOffset;
             line.z = transform.position.z;
-            _hintLinePosition = line;
 
             // 光带从细线沿 facing 方向铺开，细线是 u=0 的那一侧。
             Vector3 beamPosition = line + new Vector3(FacingSign * hintBeamLength * 0.5f, 0f, 0f);
@@ -515,7 +531,8 @@ namespace Platformer
                     _particles.transform.position = line;
 
                 var shape = _particles.shape;
-                float emitterHeight = Mathf.Max(0.01f, (Pair != null ? Pair.PortalHeight : 3f) - 0.1f);
+                float emitterHeight = Mathf.Max(0.01f,
+                    (Pair != null ? Pair.PortalHeight : 3f) - hintParticleHeightInset);
                 shape.scale = new Vector3(0.02f, emitterHeight, 0.1f);
 
                 var velocity = _particles.velocityOverLifetime;
@@ -525,6 +542,7 @@ namespace Platformer
 
         void OnDestroy()
         {
+            if (_halfSprite != null) Destroy(_halfSprite);
             if (_hint != null) Destroy(_hint.gameObject);
             if (_particles != null) Destroy(_particles.gameObject);
             if (_beamMaterial != null) Destroy(_beamMaterial);
@@ -541,6 +559,7 @@ namespace Platformer
         void Update()
         {
             CachePlayer();
+            CacheViewAnchors();
             UpdateViewColor();
             UpdateVisibility();
         }
@@ -599,6 +618,14 @@ namespace Platformer
             output.color = side == CaptureGroupSide.B
                 ? new Color(1f, 1f - color_offs, 1f - color_offs, alpha)
                 : new Color(1f - color_offs, 1f - color_offs, 1f, alpha);
+
+            // 开门动画的明暗只在这里乘一次，避免 ApplyMaskOffsets 反复乘导致颜色越来越黑。
+            float open = Mathf.Clamp01(_openProgress);
+            Color color = output.color;
+            color.r *= open;
+            color.g *= open;
+            color.b *= open;
+            output.color = color;
         }
 
         /// <summary>门的碰撞转发给 PortalPair，由它统一处理传送。</summary>
@@ -615,8 +642,8 @@ namespace Platformer
 
         void ForwardGateCollision(Collision2D collision)
         {
-            if (_pair == null) _pair = GetComponentInParent<PortalPair>();
-            if (_pair != null) _pair.OnGateHit(this, collision);
+            PortalPair pair = Pair;
+            if (pair != null) pair.OnGateHit(this, collision);
         }
 
         /// <summary>在兄弟节点中找到另一侧的组，并把两者连接起来。</summary>
@@ -681,41 +708,18 @@ namespace Platformer
             FacePoint(maskBottom, eye);
         }
 
-        /// <summary>按 0..1 的开门比例设置上下遮罩的 Y 偏移（0 = 关闭，1 = 完全打开）。
-        ///         按 0..1 的开门比例设置传送门成像颜色，0纯黑，1正常颜色
-        /// </summary>
+        /// <summary>按 0..1 的开门比例设置上下遮罩的 Y 偏移（0 = 关闭，1 = 完全打开）。</summary>
         void ApplyMaskOffsets(float progress)
         {
             if (maskTop == null || maskBottom == null) return;
 
             PortalPair pair = Pair;
             float open = Mathf.Clamp01(progress);
-
-            if (open == 1) return;
-
             float topOffset = (pair != null ? pair.maskTopOffset : 1.5f) * open;
             float bottomOffset = (pair != null ? pair.maskBottomOffset : -1.5f) * open;
 
             maskTop.localPosition = new Vector3(0f, topOffset, 0f);
             maskBottom.localPosition = new Vector3(0f, bottomOffset, 0f);
-
-            // 颜色偏移
-            var tmp_color = viewObject.GetComponent<SpriteRenderer>().color;
-            
-                if (side == CaptureGroupSide.A)
-                {
-                    tmp_color.r *= open;
-                    tmp_color.g *= open;
-                    tmp_color.b *= open;
-                }
-                else
-                {
-                    tmp_color.g *= open;
-                    tmp_color.b *= open;
-                    tmp_color.r *= open;
-                }
-                viewObject.GetComponent<SpriteRenderer>().color = tmp_color;
-            
         }
 
         static void FacePoint(Transform mask, Vector3 point)
@@ -741,7 +745,7 @@ namespace Platformer
             float pixelsPerUnit = full.pixelsPerUnit;
 
             // A 保留右半，B 保留左半。两半都在中线处留出一点缝隙：
-            // 共用的像素列会被交叉显示的递归放大成一条明显的接缝。
+            // 共用的像素列会在交叉显示时被放大成一条明显的接缝。
             bool rightHalf = side == CaptureGroupSide.A;
             float halfPixels = full.rect.width * 0.5f;
             float gapPixels = Mathf.Clamp(centerGapPixels, 0f, halfPixels * 0.5f);

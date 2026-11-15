@@ -126,7 +126,7 @@ Portal A                          Portal B
 | 无头模式 | 没有图形设备时自动禁用，避免 `Camera.Render()` 在 `-nographics` 下卡死 |
 | 玩家层级 | 玩家 SpriteRenderer 排序为 **100**，始终绘制在快照输出（20）之上 |
 | 另一扇门透明度 | 玩家靠近某扇门时，另一扇门按 `otherViewFadeDistance`（默认 3）线性变透明，距离 0 时 alpha=0，达到阈值时恢复 1 |
-| 门位置光带 | 门背面一块沿 facing 渐隐的光带（`PortalHintBeam` shader）：粗核心、两端高亮、竖向流光 + UV 两轴持续滚动的噪音失真、整体 0.5 透明度，呼吸频率 6.283（1 秒一个周期）、alpha 0.2~1.0；高度 = 门洞 + 0.3，A 蓝 / B 红；在 Portal View 之下（中间被盖住），Default 层可被传送门相机捕获；粒子 45/s、池 256 |
+| 门位置光带 | 门背面一块沿 facing 渐隐的光带（`PortalHintBeam` shader）：粗核心、两端高亮、竖向流光 + UV 两轴持续滚动的噪音失真、整体 0.5 透明度，呼吸频率 0.5 Hz（2 秒一个周期）、alpha 0.2~1.0；高度 = 门洞 + 0.3，A 蓝 / B 红；在 Portal View 之下（中间被盖住），Default 层可被传送门相机捕获；粒子有效 11.25/s、池 256 |
 
 > 输出的是**真实图像**（Texture2D），不是对象复制。
 > 预览渲染时会先 `WireUp()` 再连续捕获几次，确保两张输出都是最新画面。

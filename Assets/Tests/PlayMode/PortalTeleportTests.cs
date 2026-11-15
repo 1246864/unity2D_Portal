@@ -357,7 +357,7 @@ namespace Platformer.Tests
                 "A 门粒子应为蓝色。");
             Assert.Greater(particlesB.main.startColor.color.r, particlesB.main.startColor.color.b,
                 "B 门粒子应为红色。");
-            float expectedEmitterHeight = Mathf.Max(0.01f, pair.PortalHeight - 0.1f);
+            float expectedEmitterHeight = Mathf.Max(0.01f, pair.PortalHeight - a.hintParticleHeightInset);
             Assert.AreEqual(expectedEmitterHeight, particlesA.shape.scale.y, 0.01f,
                 "粒子发射区域应比门洞略小。");
             Assert.AreEqual(a.hintParticleRate * 0.25f,
@@ -367,6 +367,56 @@ namespace Platformer.Tests
                 "粒子密度应较稀。");
             Assert.GreaterOrEqual(particlesA.main.maxParticles, 256,
                 "粒子池应更大。");
+        }
+
+        [UnityTest]
+        public IEnumerator Portal_Hint_Properties_Follow_Runtime_Changes()
+        {
+            FindGroups(out var a, out _);
+
+            Assert.IsNotNull(a);
+            Assert.IsNotNull(a.viewCenter, "A 应有视觉中心。");
+            Assert.IsNotNull(a.HintRenderer, "A 应有门位置光带。");
+
+            Transform center = a.viewCenter;
+            Vector3 originalCenter = center.localPosition;
+            PortalFacing originalFacing = a.Facing;
+
+            // 移动视觉中心：实时属性立即反映，光带视觉下一帧跟随。
+            center.localPosition = originalCenter + new Vector3(0.5f, 0f, 0f);
+
+            float expectedLineX = center.position.x - a.FacingSign * a.hintBackOffset;
+            Assert.AreEqual(expectedLineX, a.HintLinePosition.x, 0.01f,
+                "HintLinePosition 应实时反映视觉中心的新位置。");
+
+            yield return null;
+
+            float actualLineX = a.HintRenderer.transform.position.x - a.FacingSign * a.hintBeamLength * 0.5f;
+            Assert.AreEqual(expectedLineX, actualLineX, 0.01f,
+                "光带视觉应跟随移动后的视觉中心。");
+
+            // 改变朝向：派生属性、材质方向、粒子方向立即同步。
+            PortalFacing newFacing = originalFacing == PortalFacing.Left
+                ? PortalFacing.Right
+                : PortalFacing.Left;
+            a.Facing = newFacing;
+
+            Assert.AreEqual(newFacing == PortalFacing.Left ? -1f : 1f, a.FacingSign, 0.001f,
+                "FacingSign 应立即跟随朝向。");
+            Assert.AreEqual(a.FacingSign, a.HintRenderer.sharedMaterial.GetFloat("_Direction"), 0.001f,
+                "材质渐变方向应立即跟随朝向。");
+            Assert.AreEqual(a.FacingSign * a.hintParticleSpeed * 0.25f,
+                a.HintParticles.velocityOverLifetime.x.constant, 0.01f,
+                "粒子发射方向应立即跟随朝向。");
+
+            float expectedFlippedLineX = center.position.x - a.FacingSign * a.hintBackOffset;
+            Assert.AreEqual(expectedFlippedLineX, a.HintLinePosition.x, 0.01f,
+                "改变朝向后细线位置应实时更新。");
+
+            // 还原，避免影响后续测试。
+            a.Facing = originalFacing;
+            center.localPosition = originalCenter;
+            yield return null;
         }
 
         [UnityTest]
