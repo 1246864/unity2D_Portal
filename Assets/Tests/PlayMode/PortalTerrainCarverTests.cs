@@ -106,6 +106,16 @@ namespace Platformer.Tests
                 "门停用后，矩形内部的 Ground 碰撞应该恢复。");
             Assert.IsNotNull(Physics2D.OverlapPoint(outside, groundMask),
                 "门停用后，矩形外部的 Ground 碰撞应该保持。");
+
+            // 再启用一次：这是之前的回归点，不能对 "(Carved)" Sprite 再次 OverridePhysicsShape。
+            groupA.gameObject.SetActive(true);
+            yield return new WaitForFixedUpdate();
+            yield return null;
+
+            Assert.IsNull(Physics2D.OverlapPoint(inside, groundMask),
+                "门重新启用后，矩形内部的 Ground 碰撞应该重新被剔除。");
+            Assert.IsNotNull(Physics2D.OverlapPoint(outside, groundMask),
+                "门重新启用后，矩形外部的 Ground 碰撞应该保持。");
         }
 
         [UnityTest]

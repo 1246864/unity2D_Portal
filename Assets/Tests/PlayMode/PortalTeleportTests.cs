@@ -142,7 +142,6 @@ namespace Platformer.Tests
             // A 在场景中被旋转过，不适合用水平行走进入；用未旋转的 B 做入口。
             Vector3 start = (Vector3)b.transform.position
                             + (Vector3)b.OpeningDirection * 1.2f;
-            start.y = 0.75f;
             controller.Teleport(start);
             yield return new WaitForFixedUpdate();
             yield return new WaitForFixedUpdate();
@@ -195,7 +194,6 @@ namespace Platformer.Tests
             // 用未旋转的 B 做入口：玩家水平走进 B，出口是旋转后的 A。
             Vector3 start = (Vector3)b.transform.position
                             + (Vector3)b.OpeningDirection * 1.2f;
-            start.y = 0.75f;
             controller.Teleport(start);
             yield return new WaitForFixedUpdate();
             yield return new WaitForFixedUpdate();
@@ -269,29 +267,55 @@ namespace Platformer.Tests
             var controller = player.GetComponent<PlayerController2D>();
             Assert.IsNotNull(controller);
 
-            float fade = a.otherViewFadeDistance;
+            // B 的 alpha 由“玩家到 A”的距离和 B 自己的 otherViewFadeDistance 决定。
+            float fade = b.otherViewFadeDistance;
             Assert.Greater(fade, 0f, "淡出距离应大于 0。");
 
-            // 靠近 A 到淡出距离的一半：另一扇门 B 应半透明，A 自己保持不透明。
-            // A 被旋转过，用它的本地 X 轴（transform.right）定义“靠近”的距离。
-            controller.Teleport((Vector2)a.transform.position
-                                + (Vector2)a.transform.right * (fade * 0.5f));
-            yield return new WaitForFixedUpdate();
-            yield return null;
+            // 用 A 的实际视觉中心作为距离基准，并临时关闭重力，
+            // 避免玩家在等待 LateUpdate 时下落导致距离和 alpha 不精确。
+            Transform anchor = a.viewCenter != null ? a.viewCenter : a.transform;
+            Rigidbody2D rb = player.GetComponent<Rigidbody2D>();
+            float originalGravity = rb != null ? rb.gravityScale : 1f;
+            RigidbodyType2D originalBodyType = rb != null ? rb.bodyType : RigidbodyType2D.Dynamic;
+            if (rb != null)
+            {
+                // 这个测试只验证距离与 alpha，不验证物理；改成 Kinematic 避免
+                // 传送点落在地形/残余碰撞里时被物理解算器推开。
+                rb.bodyType = RigidbodyType2D.Kinematic;
+                rb.gravityScale = 0f;
+                rb.velocity = Vector2.zero;
+            }
 
-            Assert.AreEqual(0.5f, b.output.color.a, 0.05f,
-                "靠近 A 到一半距离时，B 的画面应为半透明。");
-            Assert.AreEqual(1f, a.output.color.a, 0.05f,
-                "A 自己的画面不应变透明。");
+            try
+            {
+                // 靠近 A 到淡出距离的一半：另一扇门 B 应半透明，A 自己保持不透明。
+                controller.Teleport((Vector2)anchor.position
+                                    + (Vector2)anchor.right * (fade * 0.5f));
+                yield return new WaitForFixedUpdate();
+                yield return null;
 
-            // 退到淡出距离之外：B 恢复不透明。
-            controller.Teleport((Vector2)a.transform.position
-                                + (Vector2)a.transform.right * (fade * 2f));
-            yield return new WaitForFixedUpdate();
-            yield return null;
+                Assert.AreEqual(0.5f, b.output.color.a, 0.05f,
+                    "靠近 A 到一半距离时，B 的画面应为半透明。");
+                Assert.AreEqual(1f, a.output.color.a, 0.05f,
+                    "A 自己的画面不应变透明。");
 
-            Assert.AreEqual(1f, b.output.color.a, 0.05f,
-                "超过淡出距离后，B 的画面应恢复不透明。");
+                // 退到淡出距离之外：B 恢复不透明。
+                controller.Teleport((Vector2)anchor.position
+                                    + (Vector2)anchor.right * (fade * 2f));
+                yield return new WaitForFixedUpdate();
+                yield return null;
+
+                Assert.AreEqual(1f, b.output.color.a, 0.05f,
+                    "超过淡出距离后，B 的画面应恢复不透明。");
+            }
+            finally
+            {
+                if (rb != null)
+                {
+                    rb.gravityScale = originalGravity;
+                    rb.bodyType = originalBodyType;
+                }
+            }
         }
 
         [UnityTest]

@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
@@ -16,11 +15,11 @@ namespace Platformer
     ///   设为 0 就是严格从门中轴开始。
     ///
     /// 这不是按瓦片格整格删除，而是把矩形和每一格的 Sprite 物理形状做布尔差：
-    /// 一个 1×1 方块可以被切成 0.5 格、甚至更小的碎片。结果通过给该格换一个
-    /// “同图但物理形状被裁过”的运行时 Tile 来实现，视觉不变，TilemapCollider2D
-    /// 和 CompositeCollider2D 照常合并，所以相邻地形仍然是一条连续的碰撞面。
+    /// 一个 1×1 方块可以被切成 0.5 格、甚至更小的碎片。视觉 Tile 保持不变；
+    /// 被影响的格子从 TilemapCollider2D 中移除，剩余碰撞用运行时 PolygonCollider2D 补回。
+    /// 这样不需要在运行时 OverridePhysicsShape，也不会在门禁用/重新启用后残留 carve 状态。
     ///
-    /// 门停用/场景卸载时恢复原 Tile，并重建 CompositeCollider2D。
+    /// 门停用/场景卸载时移除残余碰撞、恢复原 ColliderType，并重建 CompositeCollider2D。
     /// </summary>
     [RequireComponent(typeof(PortalPair))]
     public class PortalTerrainCarver : MonoBehaviour
@@ -56,11 +55,8 @@ namespace Platformer
         /// <summary>一个格子的原始碰撞信息，用于恢复。</summary>
         sealed class CarvedCell
         {
-            public TileBase originalTile;
             public Tile.ColliderType originalColliderType;
-            public bool tileReplaced;
-            public Tile customTile;
-            public Sprite customSprite;
+            public GameObject residualCollider;
         }
 
         /// <summary>
@@ -97,6 +93,9 @@ namespace Platformer
         void OnEnable()
         {
             ResolveTerrain();
+
+            // 重新启用时先把上一轮留下的运行时碰撞恢复掉，再按当前门状态重切。
+            RestoreCells();
             _lastRects.Clear(); // 重新启用时强制按当前门状态重建一次
             Refresh();
         }
@@ -252,54 +251,37 @@ namespace Platformer
                 // 没有真正切到这一格，保持原样。
                 if (Mathf.Abs(originalArea - remainingArea) <= 0.0001f) continue;
 
-                if (remaining.Count == 0)
-                {
-                    // 整格都被切掉：只改 ColliderType，视觉 Tile 保持不动。
-                    _carved[cell] = new CarvedCell
-                    {
-                        originalTile = tile,
-                        originalColliderType = colliderType,
-                        tileReplaced = false
-                    };
-                    terrain.SetColliderType(cell, Tile.ColliderType.None);
-                }
-                else
-                {
-                    // 只切掉一部分：给这一格换一个同图、但物理形状被裁过的 Tile。
-                    Vector2 spriteSize = tile.sprite.bounds.size;
-                    if (spriteSize.x <= 0.0001f || spriteSize.y <= 0.0001f) continue;
+                // 不再替换 Tile/Sprite，只把这一格从 TilemapCollider 里移除。
+                // 剩余碰撞用独立的 PolygonCollider2D 补回来，避免运行时改 Sprite 物理形状。
+                terrain.SetColliderType(cell, Tile.ColliderType.None);
 
-                    var shapePoints = new List<Vector2[]>(remaining.Count);
-                    float ppu = Mathf.Max(0.0001f, tile.sprite.pixelsPerUnit);
-                    Vector2 pivotPixels = tile.sprite.pivot;
-                    foreach (Vector2[] shape in remaining)
+                GameObject residual = null;
+                if (remaining.Count > 0)
+                {
+                    residual = new GameObject("Carved Collider " + cell.x + "," + cell.y);
+                    residual.layer = terrain.gameObject.layer;
+                    residual.transform.SetParent(terrain.transform, true);
+                    residual.transform.position = center;
+                    residual.transform.rotation = Quaternion.identity;
+                    residual.transform.localScale = Vector3.one;
+
+                    var polygon = residual.AddComponent<PolygonCollider2D>();
+                    polygon.pathCount = remaining.Count;
+                    for (int i = 0; i < remaining.Count; i++)
                     {
+                        Vector2[] shape = remaining[i];
                         var points = new Vector2[shape.Length];
-                        for (int i = 0; i < shape.Length; i++)
-                        {
-                            // OverridePhysicsShape 需要 Sprite.rect 空间的像素坐标
-                            // （原点在 rect 左下角，不是轴心）。
-                            points[i] = new Vector2(
-                                pivotPixels.x + (shape[i].x - center.x) * ppu,
-                                pivotPixels.y + (shape[i].y - center.y) * ppu);
-                        }
-                        shapePoints.Add(points);
+                        for (int j = 0; j < shape.Length; j++)
+                            points[j] = residual.transform.InverseTransformPoint(shape[j]);
+                        polygon.SetPath(i, points);
                     }
-
-                    Sprite customSprite = CreateCarvedSprite(tile.sprite, shapePoints);
-                    if (customSprite == null) continue;
-
-                    Tile customTile = CreateCarvedTile(tile, customSprite);
-                    _carved[cell] = new CarvedCell
-                    {
-                        originalTile = tile,
-                        originalColliderType = colliderType,
-                        tileReplaced = true,
-                        customTile = customTile,
-                        customSprite = customSprite
-                    };
-                    terrain.SetTile(cell, customTile);
                 }
+
+                _carved[cell] = new CarvedCell
+                {
+                    originalColliderType = colliderType,
+                    residualCollider = residual
+                };
             }
         }
 
@@ -477,51 +459,6 @@ namespace Platformer
             return shapes;
         }
 
-        static Sprite CreateCarvedSprite(Sprite source, List<Vector2[]> rectSpaceShapes)
-        {
-            if (source == null || source.texture == null || source.rect.width <= 0f) return null;
-
-            Vector2 pivot = new Vector2(
-                source.pivot.x / source.rect.width,
-                source.pivot.y / source.rect.height);
-
-            var sprite = Sprite.Create(
-                source.texture,
-                source.rect,
-                pivot,
-                source.pixelsPerUnit,
-                0,
-                SpriteMeshType.FullRect);
-            sprite.name = source.name + " (Carved)";
-            sprite.hideFlags = HideFlags.DontSave;
-
-            try
-            {
-                // OverridePhysicsShape 需要 Sprite.rect 空间（像素，原点在 rect 左下角）。
-                sprite.OverridePhysicsShape(rectSpaceShapes);
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning("[PortalTerrainCarver] OverridePhysicsShape 失败: " + e.Message, null);
-                Destroy(sprite);
-                return null;
-            }
-            return sprite;
-        }
-
-        static Tile CreateCarvedTile(Tile source, Sprite sprite)
-        {
-            var tile = ScriptableObject.CreateInstance<Tile>();
-            tile.name = source.name + " (Carved)";
-            tile.sprite = sprite;
-            tile.color = source.color;
-            tile.transform = source.transform;
-            tile.gameObject = source.gameObject;
-            tile.flags = source.flags;
-            tile.colliderType = Tile.ColliderType.Sprite;
-            tile.hideFlags = HideFlags.DontSave;
-            return tile;
-        }
 
         // ------------------------------------------------------------------
         // 恢复与重建
@@ -530,23 +467,17 @@ namespace Platformer
         /// <summary>把所有被切过的格子恢复原 Tile/ColliderType，并销毁运行时资源。</summary>
         void RestoreCells()
         {
-            if (terrain != null)
-            {
-                foreach (var pair in _carved)
-                {
-                    CarvedCell entry = pair.Value;
-                    if (entry.tileReplaced)
-                        terrain.SetTile(pair.Key, entry.originalTile);
-                    else
-                        terrain.SetColliderType(pair.Key, entry.originalColliderType);
-                }
-            }
-
             foreach (var pair in _carved)
             {
                 CarvedCell entry = pair.Value;
-                if (entry.customTile != null) Destroy(entry.customTile);
-                if (entry.customSprite != null) Destroy(entry.customSprite);
+                if (entry.residualCollider != null)
+                {
+                    entry.residualCollider.SetActive(false);
+                    Destroy(entry.residualCollider);
+                }
+
+                if (terrain != null)
+                    terrain.SetColliderType(pair.Key, entry.originalColliderType);
             }
 
             _carved.Clear();

@@ -101,8 +101,9 @@ bf8e267 fix(portal): 同步动态属性并修复开门遮罩/颜色状态
 8. **地形开洞**
    - 运行时由 `PortalPair` 自动补 `PortalTerrainCarver`；
    - 门洞矩形与瓦片物理形状做布尔差；
-   - 支持半格切割、门移动/旋转跟随、门停用恢复；
-   - 不调用 `Tilemap.RefreshAllTiles()`，避免覆盖 per-cell collider。
+   - 被切格子从 TilemapCollider2D 移除，剩余碎片用独立 `PolygonCollider2D` 补回；
+   - 支持半格切割、门移动/旋转跟随、门停用/重新启用恢复；
+   - 不调用 `Sprite.OverridePhysicsShape`，不会留下 `(Carved)` Sprite。
 
 9. **中文 Inspector**
    - 自定义编辑器显示中文标签/说明；
@@ -121,13 +122,12 @@ bf8e267 fix(portal): 同步动态属性并修复开门遮罩/颜色状态
 
 ### 测试记录
 
-- 最近一次完整 PlayMode：**23/23 passed**（`Logs/TestResults_refactor3.xml`）；
-- 该记录早于最后的相机局部空间跟随、中文 Inspector、回正动态加速调整；
-- 当前工作区最后这些改动未重新跑完整 PlayMode。
+- 完整 PlayMode：**23/23 passed**，耗时 **24.66 秒**（`Logs/TestResults_carvefix2.xml`）；
+- 覆盖传送、旋转/回正、相机、地形开洞、门禁用/重新启用、地形移动跟随。
 
-### 提交前建议
+### 重新跑命令
 
-关闭 Unity 编辑器后执行：
+如果后续再次修改传送/地形，可关闭 Unity 编辑器后执行：
 
 ```powershell
 Unity.exe -batchmode -projectPath <project> `
@@ -140,7 +140,7 @@ Unity.exe -batchmode -projectPath <project> `
 
 ## 6. 风险与注意事项
 
-- 地形开洞目前依赖运行时 Tile/Sprite 克隆；如果后续改成静态烘焙碰撞，需要同步调整。
+- 地形开洞目前依赖运行时残余 `PolygonCollider2D`；如果后续改成静态烘焙碰撞，需要同步调整。
 - `Player Visual` 在运行时创建；若改为 Prefab 内固定子节点，需要保留排序层/材质配置。
 - 相机跟随现在完全依赖玩家显示节点局部空间；`CameraFollow2D.target` 必须指向玩家根节点。
 - 回正参数是玩家手感参数，建议按关卡节奏在 Inspector 中调整。
