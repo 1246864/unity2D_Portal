@@ -128,6 +128,49 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Portal_Exit_Rotates_Player_And_Camera_Then_Realigns()
+        {
+            float originalSpeed = _controller.portalRealignSpeed;
+            _controller.portalRealignSpeed = 5f;
+
+            // 玩家当前角度 0°，出口门 Y+ 角度 -45°，相加后玩家应为 -45°。
+            _controller.TeleportWithPortalRotation(new Vector2(0f, 0.9f), -45f);
+            yield return null;
+
+            Assert.AreEqual(-45f, _controller.CurrentRotationAngle, 2f,
+                "玩家角度应等于当前角度与出口门角度的和。");
+
+            var cameraGo = new GameObject("RotateTestCamera");
+            var camera = cameraGo.AddComponent<Camera>();
+            camera.orthographic = true;
+            var follow = cameraGo.AddComponent<CameraFollow2D>();
+            follow.target = _player.transform;
+            follow.offset = new Vector2(0f, 1.2f);
+            follow.useLookAhead = false;
+            follow.smoothTime = 0f;
+            follow.SnapToTarget();
+            yield return null;
+
+            Assert.AreEqual(-45f, Mathf.DeltaAngle(0f, camera.transform.eulerAngles.z), 1f,
+                "相机 Z 旋转应等于玩家旋转。");
+            Vector3 expectedOffset = Quaternion.Euler(0f, 0f, -45f) * new Vector3(0f, 1.2f, 0f);
+            Assert.Less(Vector3.Distance(camera.transform.position,
+                _player.transform.position + expectedOffset), 0.05f,
+                "相机应绕玩家旋转同样的角度，保持原来的相对偏移。");
+
+            _controller.portalRealignSpeed = 180f;
+            yield return new WaitForSeconds(0.4f);
+
+            Assert.AreEqual(0f, _controller.CurrentRotationAngle, 2f,
+                "回正动画结束后玩家应恢复竖直。");
+            Assert.AreEqual(0f, Mathf.DeltaAngle(0f, camera.transform.eulerAngles.z), 2f,
+                "回正后相机也应恢复 0°。");
+
+            Object.Destroy(cameraGo);
+            _controller.portalRealignSpeed = originalSpeed;
+        }
+
+        [UnityTest]
         public IEnumerator Falls_Below_Limit_Respawn()
         {
             _controller.SetMoveInput(0f);

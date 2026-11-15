@@ -55,6 +55,27 @@ namespace Platformer
         [Tooltip("玩家中心碰撞点的半径（世界单位），用于和传送门的薄碰撞箱做连续碰撞")]
         [Min(0.01f)] public float centerPointRadius = 0.08f;
 
+        [Header("显示")]
+        [Tooltip("玩家精灵的父节点；留空时运行时自动创建，物理根节点只保留碰撞")]
+        public Transform visualRoot;
+
+        [Header("传送门旋转（玩家管理）")]
+        [Tooltip("回正角速度（度/秒）。越大回正越快")]
+        [Min(0.01f)] public float portalRealignSpeed = 80f;
+
+        [Tooltip("回正曲线：横轴 0~1 为回正进度，纵轴 0~1 为角度插值权重")]
+        public AnimationCurve portalRealignCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
+
+        [Header("传送门回正动态加速")]
+        [Tooltip("下坠速度达到该值时，下坠加速达到最大值（世界单位/秒）")]
+        [Min(0.01f)] public float portalRealignFallSpeedForMaxBoost = 12f;
+
+        [Tooltip("下坠速度达到最大值时，回正速度倍率")]
+        [Min(1f)] public float portalRealignMaxFallSpeedMultiplier = 3f;
+
+        [Tooltip("玩家触地时的回正速度倍率")]
+        [Min(1f)] public float portalRealignGroundedSpeedMultiplier = 6f;
+
         Rigidbody2D _rb;
         CapsuleCollider2D _col;
         SpriteRenderer _sr;
@@ -67,6 +88,10 @@ namespace Platformer
         float _jumpBufferCounter;
         Vector3 _spawnPoint;
         Vector2 _groundNormal = Vector2.up;
+
+        bool _isRealigning;
+        float _realignElapsed;
+        float _realignStartAngle;
 
         /// <summary>角色站在（或紧贴）可站立地面时为 true。</summary>
         public bool IsGrounded { get; private set; }
@@ -83,16 +108,67 @@ namespace Platformer
         /// <summary>物理步开始前的速度，传送碰撞回调里用它恢复进门瞬间的速度。</summary>
         public Vector2 VelocityBeforePhysics { get; private set; }
 
+        /// <summary>当前玩家显示部分的 Z 旋转角（-180~180），相机用它对齐。</summary>
+        public float CurrentRotationAngle => visualRoot != null
+            ? Mathf.DeltaAngle(0f, visualRoot.eulerAngles.z)
+            : 0f;
+
+        /// <summary>玩家显示部分的根节点；物理根节点不旋转。</summary>
+        public Transform VisualRoot => visualRoot;
+
+        /// <summary>是否正处于“出传送门后回正”的动画中。</summary>
+        public bool IsRealigning => _isRealigning;
+
         void Awake()
         {
             _rb = GetComponent<Rigidbody2D>();
             _col = GetComponent<CapsuleCollider2D>();
-            _sr = GetComponentInChildren<SpriteRenderer>();
             _spawnPoint = transform.position;
+
+            EnsureVisualRoot();
+            _sr = visualRoot.GetComponent<SpriteRenderer>();
 
             // 传送门的碰撞箱很薄，用连续碰撞避免高速时直接穿过去。
             _rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
             CreateCenterPoint();
+        }
+
+        /// <summary>
+        /// 把原玩家根节点上的 SpriteRenderer 拆到一个子节点。
+        /// 物理根节点只负责 Rigidbody2D/碰撞，子节点只负责显示和传送门旋转。
+        /// </summary>
+        void EnsureVisualRoot()
+        {
+            SpriteRenderer source = GetComponent<SpriteRenderer>();
+
+            if (visualRoot == null)
+            {
+                var visualGo = new GameObject("Player Visual");
+                visualGo.layer = gameObject.layer;
+                visualGo.transform.SetParent(transform, false);
+                visualGo.transform.localPosition = Vector3.zero;
+                visualGo.transform.localRotation = Quaternion.identity;
+                visualRoot = visualGo.transform;
+            }
+
+            SpriteRenderer visualSr = visualRoot.GetComponent<SpriteRenderer>();
+            if (visualSr == null) visualSr = visualRoot.gameObject.AddComponent<SpriteRenderer>();
+
+            if (source != null)
+            {
+                visualSr.sprite = source.sprite;
+                visualSr.color = source.color;
+                visualSr.sharedMaterial = source.sharedMaterial;
+                visualSr.sortingLayerID = source.sortingLayerID;
+                visualSr.sortingOrder = source.sortingOrder;
+                visualSr.flipX = source.flipX;
+                visualSr.flipY = source.flipY;
+                visualSr.maskInteraction = source.maskInteraction;
+                visualSr.enabled = true;
+
+                // 根节点不再绘制精灵，避免显示两份。
+                source.enabled = false;
+            }
         }
 
         /// <summary>在玩家中心创建一个很小的碰撞点，专门用来撞传送门的薄碰撞箱。</summary>
@@ -110,6 +186,8 @@ namespace Platformer
 
         void Update()
         {
+            AdvancePortalRealign();
+
             if (!_manualInput)
             {
                 _moveInput = Input.GetAxisRaw("Horizontal");
@@ -119,6 +197,58 @@ namespace Platformer
 
             if (_sr != null && Mathf.Abs(_moveInput) > 0.01f)
                 _sr.flipX = _moveInput < 0f;
+        }
+
+        /// <summary>
+        /// 出传送门后的回正：从出口角按曲线平滑转回 0°（竖直）。
+        /// 只旋转显示子节点，物理根节点和胶囊碰撞体始终不动。
+        /// </summary>
+        void AdvancePortalRealign()
+        {
+            if (!_isRealigning) return;
+
+            // 速度决定基础时长；下坠越快、触地时，时间推进倍率越高。
+            float duration = Mathf.Abs(_realignStartAngle) /
+                             Mathf.Max(0.01f, portalRealignSpeed);
+            float speedMultiplier = GetRealignSpeedMultiplier();
+            _realignElapsed += Time.deltaTime * speedMultiplier;
+            float t = duration > 0.0001f
+                ? Mathf.Clamp01(_realignElapsed / duration)
+                : 1f;
+            float eased = portalRealignCurve != null ? portalRealignCurve.Evaluate(t) : t;
+            float angle = Mathf.LerpAngle(_realignStartAngle, 0f, eased);
+            ApplyRotation(angle);
+
+            if (t >= 1f)
+            {
+                _isRealigning = false;
+                ApplyRotation(0f);
+            }
+        }
+
+        /// <summary>
+        /// 下坠速度越大，回正越快；触地时再乘一个更大的倍率。
+        /// 返回值最小为 1，不会比配置的基础速度更慢。
+        /// </summary>
+        float GetRealignSpeedMultiplier()
+        {
+            float fallSpeed = _rb != null ? Mathf.Max(0f, -_rb.velocity.y) : 0f;
+            float fall01 = Mathf.Clamp01(
+                fallSpeed / Mathf.Max(0.01f, portalRealignFallSpeedForMaxBoost));
+            float fallMultiplier = Mathf.Lerp(
+                1f, Mathf.Max(1f, portalRealignMaxFallSpeedMultiplier), fall01);
+
+            if (IsGrounded)
+                return Mathf.Max(fallMultiplier, portalRealignGroundedSpeedMultiplier);
+
+            return fallMultiplier;
+        }
+
+        /// <summary>只旋转玩家显示子节点；物理 Rigidbody2D 和碰撞体保持不变。</summary>
+        void ApplyRotation(float angle)
+        {
+            if (visualRoot == null) return;
+            visualRoot.localRotation = Quaternion.Euler(0f, 0f, angle);
         }
 
         void FixedUpdate()
@@ -245,10 +375,38 @@ namespace Platformer
             _rb.velocity = Vector2.zero;
             transform.position = _spawnPoint;
             _isJumping = false;
+            _isRealigning = false;
+            ApplyRotation(0f);
         }
 
-        /// <summary>把刚体瞬移到指定位置并停止。</summary>
+        /// <summary>把刚体瞬移到指定位置并停止，同时恢复竖直。</summary>
         public void Teleport(Vector2 position)
+        {
+            TeleportCore(position);
+            _isRealigning = false;
+            ApplyRotation(0f);
+        }
+
+        /// <summary>
+        /// 传送门专用：位置瞬移后，把玩家旋转到指定的绝对角度；
+        /// 之后按 portalRealignSpeed 和回正曲线平滑回正。
+        /// 返回刚出传送门时的初始旋转角，供相机同步。
+        /// </summary>
+        public float TeleportWithPortalRotation(Vector2 position, float exitAngle)
+        {
+            TeleportCore(position);
+
+            _realignStartAngle = Mathf.DeltaAngle(0f, exitAngle);
+            _realignElapsed = 0f;
+            _isRealigning = portalRealignSpeed > 0.0001f &&
+                            Mathf.Abs(_realignStartAngle) > 0.01f;
+
+            float appliedAngle = _isRealigning ? _realignStartAngle : 0f;
+            ApplyRotation(appliedAngle);
+            return appliedAngle;
+        }
+
+        void TeleportCore(Vector2 position)
         {
             _rb.velocity = Vector2.zero;
             _rb.position = position;

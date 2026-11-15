@@ -132,22 +132,22 @@ namespace Platformer.Tests
             var controller = player.GetComponent<PlayerController2D>();
             Assert.IsNotNull(controller);
 
-            // 先禁用再启用 A 的 GameObject，复现“重新开门后碰撞箱被当成墙”。
-            a.gameObject.SetActive(false);
+            // 先禁用再启用 B 的 GameObject，复现“重新开门后碰撞箱被当成墙”。
+            b.gameObject.SetActive(false);
             yield return null;
-            a.gameObject.SetActive(true);
+            b.gameObject.SetActive(true);
             yield return new WaitForFixedUpdate();
             yield return new WaitForFixedUpdate();
 
-            Vector3 start = new Vector3(
-                a.transform.position.x + a.FacingSign * 1.2f,
-                0.75f,
-                0f);
+            // A 在场景中被旋转过，不适合用水平行走进入；用未旋转的 B 做入口。
+            Vector3 start = (Vector3)b.transform.position
+                            + (Vector3)b.OpeningDirection * 1.2f;
+            start.y = 0.75f;
             controller.Teleport(start);
             yield return new WaitForFixedUpdate();
             yield return new WaitForFixedUpdate();
 
-            controller.SetMoveInput(-a.FacingSign);
+            controller.SetMoveInput(-b.FacingSign);
 
             bool teleported = false;
             float elapsed = 0f;
@@ -156,8 +156,8 @@ namespace Platformer.Tests
                 yield return new WaitForFixedUpdate();
                 elapsed += Time.fixedDeltaTime;
 
-                float toPartner = (player.transform.position.x - b.transform.position.x) * b.FacingSign;
-                if (toPartner > 0f && toPartner < 1.5f)
+                // 出口是 A；A 被旋转/抬高，不能用单一 X 判断，改用距离。
+                if (Vector2.Distance(player.transform.position, a.transform.position) < 2f)
                 {
                     teleported = true;
                     break;
@@ -186,19 +186,21 @@ namespace Platformer.Tests
             Assert.IsNotNull(controller, "玩家缺少 PlayerController2D。");
             Assert.IsNotNull(pair, "场景缺少 PortalPair。");
 
+            // 放慢回正，便于断言出口门 Y+ 对齐。
+            controller.portalRealignSpeed = 5f;
+
             int aOpenCount = a.OpenAnimationCount;
             int bOpenCount = b.OpenAnimationCount;
 
-            // 从 A 的正面（facing 一侧）往门里走。
-            Vector3 start = new Vector3(
-                a.transform.position.x + a.FacingSign * 1.2f,
-                0.75f,
-                0f);
+            // 用未旋转的 B 做入口：玩家水平走进 B，出口是旋转后的 A。
+            Vector3 start = (Vector3)b.transform.position
+                            + (Vector3)b.OpeningDirection * 1.2f;
+            start.y = 0.75f;
             controller.Teleport(start);
             yield return new WaitForFixedUpdate();
             yield return new WaitForFixedUpdate();
 
-            controller.SetMoveInput(-a.FacingSign);
+            controller.SetMoveInput(-b.FacingSign);
 
             bool teleported = false;
             float elapsed = 0f;
@@ -207,8 +209,8 @@ namespace Platformer.Tests
                 yield return new WaitForFixedUpdate();
                 elapsed += Time.fixedDeltaTime;
 
-                float toPartner = (player.transform.position.x - b.transform.position.x) * b.FacingSign;
-                if (toPartner > 0f && toPartner < 1.5f)
+                // 出口 A 被旋转/抬高，用距离判断是否已经到对面门。
+                if (Vector2.Distance(player.transform.position, a.transform.position) < 2f)
                 {
                     teleported = true;
                     break;
@@ -216,16 +218,39 @@ namespace Platformer.Tests
             }
 
             controller.SetMoveInput(0f);
+            yield return null; // wait for CameraFollow2D LateUpdate
 
             Assert.IsTrue(teleported, "玩家走进门后应该被传送到另一扇门的正面。");
-            Assert.AreEqual(aOpenCount + 1, a.OpenAnimationCount,
-                "从 A 门进入应让 A 自己重播一次开门动画。");
-            Assert.AreEqual(bOpenCount, b.OpenAnimationCount,
-                "从 A 门进入不应触发 B 的开门动画。");
-            Assert.Less(player.transform.position.x, a.transform.position.x - 5f,
-                "传送后玩家应该已经离开 A 的位置。");
 
-            float distance = (player.transform.position.x - b.transform.position.x) * b.FacingSign;
+            // 出口是 A、入口是 B：出口旋转 = A 角度 - B 角度。
+            // B 未旋转，所以这里等价于 A 的角度约 42°。
+            Transform visual = controller.VisualRoot != null
+                ? controller.VisualRoot
+                : player.transform;
+            Assert.Less(Vector2.Distance(
+                    (Vector2)visual.up, (Vector2)a.transform.up), 0.05f,
+                "出传送门后，玩家显示部分的 Y+ 应与出口门 Y+ 方向一致。");
+            float expectedPlayerAngle = Mathf.DeltaAngle(0f, a.transform.eulerAngles.z);
+            Assert.AreEqual(expectedPlayerAngle, controller.CurrentRotationAngle, 5f,
+                "玩家角度应等于出口门角度减入口门角度。");
+
+            if (Camera.main != null)
+            {
+                Assert.AreEqual(controller.CurrentRotationAngle,
+                    Mathf.DeltaAngle(0f, Camera.main.transform.eulerAngles.z), 3f,
+                    "相机旋转角度应等于玩家旋转角度。");
+            }
+
+            Assert.AreEqual(bOpenCount + 1, b.OpenAnimationCount,
+                "从 B 门进入应让 B 自己重播一次开门动画。");
+            Assert.AreEqual(aOpenCount, a.OpenAnimationCount,
+                "从 B 门进入不应触发 A 的开门动画。");
+            Assert.Greater(Vector2.Distance(player.transform.position, b.transform.position), 5f,
+                "传送后玩家应该已经离开 B 的位置。");
+
+            float distance = Vector2.Dot(
+                (Vector2)player.transform.position - (Vector2)a.transform.position,
+                a.OpeningDirection);
             float safe = pair.gateThickness * 0.5f + controller.centerPointRadius + pair.exitMargin;
             Assert.GreaterOrEqual(distance, safe - 0.02f,
                 "传送后玩家中心不应该停在对方门的碰撞箱里。");
@@ -248,10 +273,9 @@ namespace Platformer.Tests
             Assert.Greater(fade, 0f, "淡出距离应大于 0。");
 
             // 靠近 A 到淡出距离的一半：另一扇门 B 应半透明，A 自己保持不透明。
-            controller.Teleport(new Vector3(
-                a.transform.position.x + a.FacingSign * (fade * 0.5f),
-                0.75f,
-                0f));
+            // A 被旋转过，用它的本地 X 轴（transform.right）定义“靠近”的距离。
+            controller.Teleport((Vector2)a.transform.position
+                                + (Vector2)a.transform.right * (fade * 0.5f));
             yield return new WaitForFixedUpdate();
             yield return null;
 
@@ -261,10 +285,8 @@ namespace Platformer.Tests
                 "A 自己的画面不应变透明。");
 
             // 退到淡出距离之外：B 恢复不透明。
-            controller.Teleport(new Vector3(
-                a.transform.position.x + a.FacingSign * (fade * 2f),
-                0.75f,
-                0f));
+            controller.Teleport((Vector2)a.transform.position
+                                + (Vector2)a.transform.right * (fade * 2f));
             yield return new WaitForFixedUpdate();
             yield return null;
 
@@ -431,15 +453,16 @@ namespace Platformer.Tests
 
             var controller = player.GetComponent<PlayerController2D>();
 
-            // 开口方向的反侧 = 门背面
-            Vector3 behind = a.transform.position - new Vector3(a.FacingSign * 2f, 0f, 0f);
+            // 开口方向的反侧 = 门背面（A 被旋转过，用实际开口向量）。
+            Vector3 opening = a.OpeningDirection;
+            Vector3 behind = a.transform.position - opening * 2f;
             controller.Teleport(behind);
             yield return null;
             yield return null;
             Assert.IsFalse(a.output.enabled, "玩家在门背面时应该隐藏该门的画面。");
 
             // 回到开口方向一侧
-            Vector3 front = a.transform.position + new Vector3(a.FacingSign * 2f, 0f, 0f);
+            Vector3 front = a.transform.position + opening * 2f;
             controller.Teleport(front);
             yield return null;
             yield return null;

@@ -177,6 +177,25 @@ namespace Platformer
         /// <summary>朝左为 -1，朝右为 +1。</summary>
         public float FacingSign => FacesLeft ? -1f : 1f;
 
+        /// <summary>
+        /// 开口/朝向向量：把“本地 Y 轴正方向”按 facing 旋转 90°，再变换到世界空间。
+        /// 朝右 = (1,0)，朝左 = (-1,0)；门整体旋转时方向也会实时跟着转。
+        /// 这是属性而不是字段，每次读取都会重新计算，不做一次性缓存。
+        /// </summary>
+        public Vector2 OpeningDirection
+        {
+            get
+            {
+                Vector3 local = Quaternion.Euler(0f, 0f, FacingSign * -90f) * Vector3.up;
+                Vector3 world = transform.TransformDirection(local);
+                Vector2 result = world;
+                return result.sqrMagnitude > 0.000001f ? result.normalized : Vector2.right;
+            }
+        }
+
+        /// <summary>门背后方向：开口方向的反向量，实时计算。</summary>
+        public Vector2 BackDirection => -OpeningDirection;
+
         /// <summary>玩家的 Transform（未下发玩家时为 null）。</summary>
         public Transform PlayerTransform => player != null ? player.transform : null;
 
@@ -223,11 +242,22 @@ namespace Platformer
 
         void OnEnable()
         {
+            // 门激活期间，把门洞矩形覆盖到的关卡地形碰撞剔除。
+            PortalPair pair = Pair;
+            if (pair != null) pair.SetPortalTerrainState(this, true);
+
             // 首次激活、以及禁用后重新启用 GameObject/组件时都会触发，重播开门动画。
             PlayOpenAnimation();
 
             // playOnAwake=false 的粒子系统不会随物体重新启用而自动恢复播放。
             if (_particles != null) _particles.Play(true);
+        }
+
+        void OnDisable()
+        {
+            // 门停用后恢复地形上被剔除的碰撞。
+            PortalPair pair = Pair;
+            if (pair != null) pair.SetPortalTerrainState(this, false);
         }
 
         void Start()
@@ -548,6 +578,22 @@ namespace Platformer
             if (_beamMaterial != null) Destroy(_beamMaterial);
         }
 
+        /// <summary>在 Scene 视图里实时画出开口方向（蓝/红）和门背后方向（灰）。</summary>
+        void OnDrawGizmosSelected()
+        {
+            Vector3 origin = transform.position;
+            Vector2 opening = OpeningDirection;
+
+            Gizmos.color = side == CaptureGroupSide.A
+                ? new Color(0.35f, 0.65f, 1f, 1f)
+                : new Color(1f, 0.35f, 0.35f, 1f);
+            Gizmos.DrawRay(origin, opening * 1.5f);
+            Gizmos.DrawWireSphere(origin + (Vector3)opening * 1.5f, 0.06f);
+
+            Gizmos.color = new Color(0.7f, 0.7f, 0.7f, 0.8f);
+            Gizmos.DrawRay(origin, -opening * 1.5f);
+        }
+
         void LateUpdate()
         {
             AdvanceOpenAnimation();
@@ -579,7 +625,7 @@ namespace Platformer
                 return;
             }
 
-            Vector3 openingDirection = Quaternion.Euler(0f, 0f, FacingSign * -90f) * Vector3.up;
+            Vector3 openingDirection = OpeningDirection;
             Vector3 anchor = _viewAnchor != null ? _viewAnchor.position : transform.position;
             Vector3 toPlayer = player.transform.position - anchor;
 
