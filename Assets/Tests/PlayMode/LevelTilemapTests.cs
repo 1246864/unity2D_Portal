@@ -174,6 +174,17 @@ namespace Platformer.Tests
             Assert.IsNotNull(player, "Player not found in Level01.");
             var controller = player.GetComponent<PlayerController2D>();
 
+            // 这个测试只验证 Tilemap 斜坡；关闭传送门开洞，避免当前门洞矩形
+            // 覆盖到坡道区域后把 Ground 碰撞替换掉，影响测试目标。
+            var pair = Object.FindObjectOfType<PortalPair>();
+            if (pair != null)
+            {
+                pair.carveTerrain = false;
+                var carver = pair.GetComponent<PortalTerrainCarver>();
+                if (carver != null) carver.enabled = false;
+            }
+            yield return new WaitForFixedUpdate();
+
             // 把玩家放到 45 度瓦片坡道（x = 10..12）左侧一点的位置。
             controller.Teleport(new Vector2(9f, 0.75f));
             yield return new WaitForFixedUpdate();

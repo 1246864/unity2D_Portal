@@ -171,8 +171,9 @@ namespace Platformer.Tests
             Assert.IsNull(Physics2D.OverlapPoint(oldInside, groundMask),
                 "移动前，A 门洞内部应该没有 Ground 碰撞。");
 
-            // 把门整体上移 2 格，门洞矩形也应该跟着移动到新位置。
-            groupA.transform.position = (Vector3)originalPosition + Vector3.up * 2f;
+            // 把门整体上移超过一个门洞高度，确保旧矩形完全离开新矩形。
+            groupA.transform.position =
+                (Vector3)originalPosition + Vector3.up * (pair.PortalHeight + 0.5f);
             yield return new WaitForFixedUpdate();
             yield return null;
 

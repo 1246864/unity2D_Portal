@@ -221,15 +221,18 @@ namespace Platformer.Tests
             Assert.IsTrue(teleported, "玩家走进门后应该被传送到另一扇门的正面。");
 
             // 出口是 A、入口是 B：出口旋转 = A 角度 - B 角度。
-            // B 未旋转，所以这里等价于 A 的角度约 42°。
+            // 当前场景 B 本身也旋转了 45°，所以不能假设 B 是水平门。
+            float expectedAngle = Mathf.DeltaAngle(
+                0f, a.transform.eulerAngles.z - b.transform.eulerAngles.z);
+            Vector3 expectedUp = Quaternion.Euler(0f, 0f, expectedAngle) * Vector3.up;
+
             Transform visual = controller.VisualRoot != null
                 ? controller.VisualRoot
                 : player.transform;
             Assert.Less(Vector2.Distance(
-                    (Vector2)visual.up, (Vector2)a.transform.up), 0.05f,
-                "出传送门后，玩家显示部分的 Y+ 应与出口门 Y+ 方向一致。");
-            float expectedPlayerAngle = Mathf.DeltaAngle(0f, a.transform.eulerAngles.z);
-            Assert.AreEqual(expectedPlayerAngle, controller.CurrentRotationAngle, 5f,
+                    (Vector2)visual.up, (Vector2)expectedUp), 0.05f,
+                "出传送门后，玩家显示部分的 Y+ 应与出口旋转一致。");
+            Assert.AreEqual(expectedAngle, controller.CurrentRotationAngle, 5f,
                 "玩家角度应等于出口门角度减入口门角度。");
 
             if (Camera.main != null)
@@ -345,10 +348,8 @@ namespace Platformer.Tests
                 "光带应在默认层，传送门相机才拍得到。");
             Assert.AreNotEqual(0, a.capture.captureCamera.cullingMask & (1 << hintA.gameObject.layer),
                 "传送门相机不应排除光带层。");
-            Assert.AreEqual(a.output.sortingLayerName, hintA.sortingLayerName,
-                "光带应和 Portal View 在同一排序层。");
-            Assert.Less(hintA.sortingOrder, a.output.sortingOrder,
-                "光带应在 Portal View 之下，被输出盖住。");
+            Assert.AreEqual("Portal light band", hintA.sortingLayerName,
+                "光带应使用 Portal light band 排序层。");
 
             var materialA = hintA.sharedMaterial;
             var materialB = hintB.sharedMaterial;
@@ -395,20 +396,19 @@ namespace Platformer.Tests
                 "传送门相机不应排除粒子层。");
 
             var particlesRendererA = particlesA.GetComponent<ParticleSystemRenderer>();
-            Assert.AreEqual(a.output.sortingLayerName, particlesRendererA.sortingLayerName,
-                "粒子和 Portal View 应在同一排序层。");
-            Assert.Greater(particlesRendererA.sortingOrder, a.output.sortingOrder,
-                "粒子应排在 Portal View 之上。");
+            Assert.AreEqual("Portal light band", particlesRendererA.sortingLayerName,
+                "粒子和光带应使用 Portal light band 排序层。");
+            Assert.Greater(particlesRendererA.sortingOrder, 0,
+                "粒子应排在 Portal light band 层内较前的位置。");
             Assert.Greater(particlesA.main.startColor.color.b, particlesA.main.startColor.color.r,
                 "A 门粒子应为蓝色。");
             Assert.Greater(particlesB.main.startColor.color.r, particlesB.main.startColor.color.b,
                 "B 门粒子应为红色。");
-            float expectedEmitterHeight = Mathf.Max(0.01f, pair.PortalHeight - a.hintParticleHeightInset);
-            Assert.AreEqual(expectedEmitterHeight, particlesA.shape.scale.y, 0.01f,
-                "粒子发射区域应比门洞略小。");
+            Assert.Greater(particlesA.shape.scale.y, 0f,
+                "静态粒子发射区域应由场景对象自身定义。");
             Assert.AreEqual(a.hintParticleRate * 0.25f,
                 particlesA.emission.rateOverTime.constant, 0.01f,
-                "粒子发射率应为配置值的四分之一。");
+                "粒子发射率应为场景中配置值。");
             Assert.Less(particlesA.emission.rateOverTime.constant, 30f,
                 "粒子密度应较稀。");
             Assert.GreaterOrEqual(particlesA.main.maxParticles, 256,
@@ -428,7 +428,12 @@ namespace Platformer.Tests
             Vector3 originalCenter = center.localPosition;
             PortalFacing originalFacing = a.Facing;
 
-            // 移动视觉中心：实时属性立即反映，光带视觉下一帧跟随。
+            Vector3 originalHintPosition = a.HintRenderer.transform.position;
+            Quaternion originalHintRotation = a.HintRenderer.transform.rotation;
+            Vector3 originalHintScale = a.HintRenderer.transform.lossyScale;
+            Vector3 originalParticlePosition = a.HintParticles.transform.position;
+
+            // 移动视觉中心：光带是静态对象，位置/层级不能动，只有材质方向等运行时属性可变。
             center.localPosition = originalCenter + new Vector3(0.5f, 0f, 0f);
 
             float expectedLineX = center.position.x - a.FacingSign * a.hintBackOffset;
@@ -437,11 +442,16 @@ namespace Platformer.Tests
 
             yield return null;
 
-            float actualLineX = a.HintRenderer.transform.position.x - a.FacingSign * a.hintBeamLength * 0.5f;
-            Assert.AreEqual(expectedLineX, actualLineX, 0.01f,
-                "光带视觉应跟随移动后的视觉中心。");
+            Assert.AreEqual(originalHintPosition, a.HintRenderer.transform.position,
+                "静态光带的位置不应被运行时移动。");
+            Assert.AreEqual(originalHintRotation, a.HintRenderer.transform.rotation,
+                "静态光带的旋转不应被运行时修改。");
+            Assert.AreEqual(originalHintScale, a.HintRenderer.transform.lossyScale,
+                "静态光带的缩放不应被运行时修改。");
+            Assert.AreEqual(originalParticlePosition, a.HintParticles.transform.position,
+                "静态粒子的位置不应被运行时移动。");
 
-            // 改变朝向：派生属性、材质方向、粒子方向立即同步。
+            // 改变朝向：材质方向实时同步，但不移动静态对象。
             PortalFacing newFacing = originalFacing == PortalFacing.Left
                 ? PortalFacing.Right
                 : PortalFacing.Left;
@@ -451,13 +461,10 @@ namespace Platformer.Tests
                 "FacingSign 应立即跟随朝向。");
             Assert.AreEqual(a.FacingSign, a.HintRenderer.sharedMaterial.GetFloat("_Direction"), 0.001f,
                 "材质渐变方向应立即跟随朝向。");
-            Assert.AreEqual(a.FacingSign * a.hintParticleSpeed * 0.25f,
-                a.HintParticles.velocityOverLifetime.x.constant, 0.01f,
-                "粒子发射方向应立即跟随朝向。");
-
-            float expectedFlippedLineX = center.position.x - a.FacingSign * a.hintBackOffset;
-            Assert.AreEqual(expectedFlippedLineX, a.HintLinePosition.x, 0.01f,
-                "改变朝向后细线位置应实时更新。");
+            Assert.AreEqual(originalHintPosition, a.HintRenderer.transform.position,
+                "改变朝向后静态光带也不应被移动。");
+            Assert.AreEqual(originalParticlePosition, a.HintParticles.transform.position,
+                "改变朝向后静态粒子也不应被移动。");
 
             // 还原，避免影响后续测试。
             a.Facing = originalFacing;

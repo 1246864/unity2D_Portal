@@ -41,6 +41,12 @@ TagManager:
   - name: Default
     uniqueID: 0
     locked: 0
+  - name: Portal light band
+    uniqueID: 3700759211
+    locked: 0
+  - name: Portal view
+    uniqueID: 4127090001
+    locked: 0
   - name: Portal A
     uniqueID: 916715397
     locked: 0

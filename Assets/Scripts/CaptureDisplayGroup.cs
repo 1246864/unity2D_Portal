@@ -51,7 +51,13 @@ namespace Platformer
         [Tooltip("玩家离一扇门小于该距离时，另一扇门线性变透明；距离 0 时完全透明。单位与颜色距离公式一致")]
         [Min(0f)] public float otherViewFadeDistance = 3f;
 
-        [Header("门位置提示")]
+        [Header("门位置提示对象")]
+        [Tooltip("场景中的静态光带 SpriteRenderer；不再运行时创建")]
+        public SpriteRenderer hintRenderer;
+
+        [Tooltip("场景中的静态粒子系统；不再运行时创建")]
+        public ParticleSystem hintParticles;
+
         [Tooltip("光带沿门朝向方向的长度（世界单位）")]
         [Min(0.01f)] public float hintBeamLength = 0.45f;
 
@@ -214,6 +220,7 @@ namespace Platformer
 
         static readonly Color HintBlue = new Color(0.35f, 0.65f, 1f, 1f);
         static readonly Color HintRed = new Color(1f, 0.35f, 0.35f, 1f);
+        const string PortalLightBandLayer = "Portal light band";
         static Texture2D _hintTexture;
         static Sprite _hintSprite;
         static Material _particleMaterial;
@@ -393,17 +400,26 @@ namespace Platformer
         /// </summary>
         void EnsureHint()
         {
-            if (_hint != null) return;
+            // 光带是场景里的静态对象；这里只取引用并运行时换材质，不再 new GameObject。
+            _hint = hintRenderer;
+            if (_hint == null)
+            {
+                Transform existing = transform.Find("Portal Hint");
+                if (existing != null) _hint = existing.GetComponent<SpriteRenderer>();
+            }
 
-            var go = new GameObject("Portal Hint");
-            go.hideFlags = HideFlags.DontSave;
-            go.layer = 0; // 不能放在 Snapshot 层，否则传送门相机会把它排除掉
-            go.transform.SetParent(transform, false);
+            if (_hint == null)
+            {
+                Debug.LogWarning("[CaptureDisplayGroup] 没有指定静态光带 hintRenderer。", this);
+                return;
+            }
 
-            _hint = go.AddComponent<SpriteRenderer>();
-            _hint.sprite = HintSprite;
+            if (_hint.sprite == null) _hint.sprite = HintSprite;
             _hint.color = Color.white;
             _hint.maskInteraction = SpriteMaskInteraction.None; // 不被门遮罩裁掉
+
+            // 所有光带相关渲染资源统一使用专用排序层。
+            _hint.sortingLayerName = PortalLightBandLayer;
 
             Shader beamShader = Shader.Find("Hidden/Platformer/PortalHintBeam");
             if (beamShader != null)
@@ -425,31 +441,19 @@ namespace Platformer
                 _hint.material = _beamMaterial;
             }
 
-            if (output != null)
-            {
-                _hint.sortingLayerName = output.sortingLayerName;
-                _hint.sortingOrder = output.sortingOrder - 1;
-            }
-            else
-            {
-                _hint.sortingOrder = 19;
-            }
-
             EnsureHintParticles();
             UpdateHint();
         }
 
-        /// <summary>门位置提示的粒子：从细线沿 facing 方向发射，颜色与门一致。</summary>
+        /// <summary>门位置提示的粒子：直接使用场景中的静态 ParticleSystem，仅在运行时配置效果。</summary>
         void EnsureHintParticles()
         {
-            if (_particles != null) return;
-
-            var go = new GameObject("Portal Hint Particles");
-            go.hideFlags = HideFlags.DontSave;
-            go.layer = 0;
-            go.transform.SetParent(transform, false);
-
-            _particles = go.AddComponent<ParticleSystem>();
+            _particles = hintParticles;
+            if (_particles == null)
+            {
+                Debug.LogWarning("[CaptureDisplayGroup] 没有指定静态粒子系统 hintParticles。", this);
+                return;
+            }
 
             var main = _particles.main;
             main.loop = true;
@@ -458,7 +462,7 @@ namespace Platformer
             main.startSpeed = 0f;
             main.startSize = 0.05f;
             main.maxParticles = 256;
-            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.simulationSpace = ParticleSystemSimulationSpace.Local;
             main.startColor = new ParticleSystem.MinMaxGradient(
                 side == CaptureGroupSide.A ? HintBlue : HintRed);
 
@@ -468,11 +472,14 @@ namespace Platformer
             var shape = _particles.shape;
             shape.enabled = true;
             shape.shapeType = ParticleSystemShapeType.Box;
-            shape.scale = new Vector3(0.02f, 3f, 0.1f);
+            shape.scale = new Vector3(
+                0.02f,
+                Mathf.Max(0.01f, (Pair != null ? Pair.PortalHeight : 3f) - hintParticleHeightInset),
+                0.1f);
 
             var velocity = _particles.velocityOverLifetime;
             velocity.enabled = true;
-            velocity.space = ParticleSystemSimulationSpace.World;
+            velocity.space = ParticleSystemSimulationSpace.Local;
             velocity.x = FacingSign * hintParticleSpeed * 0.25f;
             velocity.y = 0f;
             velocity.z = 0f;
@@ -491,13 +498,15 @@ namespace Platformer
             colorOverLifetime.color = gradient;
 
             var renderer = _particles.GetComponent<ParticleSystemRenderer>();
-            renderer.material = ParticleMaterial;
-            renderer.renderMode = ParticleSystemRenderMode.Billboard;
-            renderer.sortingLayerName = output != null ? output.sortingLayerName : "Default";
-            renderer.sortingOrder = output != null ? output.sortingOrder + 2 : 22;
-            renderer.maskInteraction = SpriteMaskInteraction.None;
+            if (renderer != null)
+            {
+                renderer.material = ParticleMaterial;
+                renderer.renderMode = ParticleSystemRenderMode.Billboard;
+                renderer.sortingLayerName = PortalLightBandLayer;
+                renderer.maskInteraction = SpriteMaskInteraction.None;
+            }
 
-            _particles.Play();
+            _particles.Play(true);
         }
 
         static Material ParticleMaterial
@@ -519,28 +528,13 @@ namespace Platformer
             }
         }
 
-        /// <summary>更新光带的位置、高度、facing 方向渐变和粒子发射区域。</summary>
+        /// <summary>只更新光带材质参数；静态光带和粒子的相对位置/层级完全不改。</summary>
         void UpdateHint()
         {
             if (_hint == null) return;
 
             // 视觉中心引用可能被动态替换，这里重新取一次，避免使用旧的缓存。
             _viewAnchor = ViewAnchor;
-
-            // 线高比门洞略高，两端会从 Portal View 的遮罩外露出来。
-            float height = (Pair != null ? Pair.PortalHeight : 3f) + hintExtraHeight;
-            Vector3 scale = new Vector3(hintBeamLength, height, 1f);
-            if (_hint.transform.localScale != scale)
-                _hint.transform.localScale = scale;
-
-            Vector3 line = _viewAnchor.position;
-            line.x -= FacingSign * hintBackOffset;
-            line.z = transform.position.z;
-
-            // 光带从细线沿 facing 方向铺开，细线是 u=0 的那一侧。
-            Vector3 beamPosition = line + new Vector3(FacingSign * hintBeamLength * 0.5f, 0f, 0f);
-            if (_hint.transform.position != beamPosition)
-                _hint.transform.position = beamPosition;
 
             if (_beamMaterial != null)
             {
@@ -557,14 +551,6 @@ namespace Platformer
 
             if (_particles != null)
             {
-                if (_particles.transform.position != line)
-                    _particles.transform.position = line;
-
-                var shape = _particles.shape;
-                float emitterHeight = Mathf.Max(0.01f,
-                    (Pair != null ? Pair.PortalHeight : 3f) - hintParticleHeightInset);
-                shape.scale = new Vector3(0.02f, emitterHeight, 0.1f);
-
                 var velocity = _particles.velocityOverLifetime;
                 velocity.x = FacingSign * hintParticleSpeed * 0.25f;
             }
@@ -573,8 +559,6 @@ namespace Platformer
         void OnDestroy()
         {
             if (_halfSprite != null) Destroy(_halfSprite);
-            if (_hint != null) Destroy(_hint.gameObject);
-            if (_particles != null) Destroy(_particles.gameObject);
             if (_beamMaterial != null) Destroy(_beamMaterial);
         }
 
