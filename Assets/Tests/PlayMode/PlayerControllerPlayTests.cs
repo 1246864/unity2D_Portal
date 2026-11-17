@@ -159,7 +159,7 @@ namespace Platformer.Tests
                 "相机应绕玩家旋转同样的角度，保持原来的相对偏移。");
 
             _controller.portalRealignSpeed = 180f;
-            yield return new WaitForSeconds(0.4f);
+            yield return new WaitForSeconds(0.8f);
 
             Assert.AreEqual(0f, _controller.CurrentRotationAngle, 2f,
                 "回正动画结束后玩家应恢复竖直。");

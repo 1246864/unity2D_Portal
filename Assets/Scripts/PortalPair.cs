@@ -200,10 +200,21 @@ namespace Platformer
             var partner = source.partner;
             if (partner == null) return;
 
-            // 哪扇门发起传送，哪扇门就重播一次自己的开门动画；另一扇门不动。
+            // 传送时先打断所有门正在执行的开门动画，避免上一次动画的进度/遮罩状态
+            // 带到下一次传送。随后只让本次规则选中的门重新从 0 开始执行。
+            StopAllOpenAnimations();
+
+            // 哪扇门发起传送，哪扇门就重播一次自己的开门动画；另一扇门保持打开。
             source.PlayOpenAnimation();
 
             Teleport(source, partner);
+        }
+
+        /// <summary>停止所有门的开门动画，并让它们保持完全打开。</summary>
+        void StopAllOpenAnimations()
+        {
+            if (_groupA != null) _groupA.StopOpenAnimation();
+            if (_groupB != null) _groupB.StopOpenAnimation();
         }
 
         /// <summary>强制两扇门的捕获相机各拍一次，然后重新做半屏裁剪成像。</summary>
@@ -245,6 +256,19 @@ namespace Platformer
                              (Vector3)(exitDirection * front) +
                              (Vector3)(partnerTangent * tangentOffset);
 
+            // 传送前记录相机在玩家显示空间中的全部相对变换（位置 + 旋转）。
+            Camera followCamera = source.capture != null ? source.capture.sourceCamera : null;
+            if (followCamera == null) followCamera = Camera.main;
+
+            Transform playerVisual = controller.VisualRoot != null
+                ? controller.VisualRoot
+                : player;
+
+            // 完整相对空间：位置、旋转、缩放都包含在矩阵里。
+            Matrix4x4 cameraRelative = followCamera != null
+                ? playerVisual.worldToLocalMatrix * followCamera.transform.localToWorldMatrix
+                : Matrix4x4.identity;
+
 
             // 出口旋转 = 出口门角度 - 入口门角度。
             // 玩家进门时是竖直的，所以不需要再叠玩家角度。
@@ -261,6 +285,25 @@ namespace Platformer
 
             if (preserveVelocity && rb != null)
                 rb.velocity = velocity;
+
+            // 玩家已经完成瞬移和旋转；现在把相机强制放回它的相对位置/相对旋转。
+            if (followCamera != null)
+            {
+                CameraFollow2D cameraFollow = followCamera.GetComponent<CameraFollow2D>();
+                if (cameraFollow != null)
+                {
+                    cameraFollow.TeleportRelative(playerVisual, cameraRelative);
+                }
+                else
+                {
+                    Matrix4x4 world =
+                        playerVisual.localToWorldMatrix * cameraRelative;
+                    CameraFollow2D.Decompose2D(
+                        world, out Vector3 position, out Quaternion rotation, out Vector3 scale);
+                    followCamera.transform.SetPositionAndRotation(position, rotation);
+                    followCamera.transform.localScale = scale;
+                }
+            }
 
 
             // 一对门共享一个冷却，避免刚落地就被另一扇门立刻传回去。

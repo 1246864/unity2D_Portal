@@ -185,11 +185,11 @@ namespace Platformer.Tests
             }
             yield return new WaitForFixedUpdate();
 
-            // 把玩家放到 45 度瓦片坡道（x = 10..12）左侧一点的位置。
-            controller.Teleport(new Vector2(9f, 0.75f));
+            // 当前地形是一段向右下降的 45° 坡道（x≈9..11），从右侧向左走上去。
+            controller.Teleport(new Vector2(12f, 0.75f));
             yield return new WaitForFixedUpdate();
 
-            controller.SetMoveInput(1f);
+            controller.SetMoveInput(-1f);
             float peakY = player.transform.position.y;
             for (int i = 0; i < 120; i++)
             {

@@ -318,6 +318,18 @@ namespace Platformer
         }
 
         /// <summary>
+        /// 立即停止当前开门动画，并把门保持在完全打开状态。
+        /// 传送时先对所有门调用，再重新选择需要重播动画的门。
+        /// </summary>
+        public void StopOpenAnimation()
+        {
+            _isOpening = false;
+            _openElapsed = 0f;
+            _openProgress = 1f;
+            ApplyMaskOffsets(1f);
+        }
+
+        /// <summary>
         /// 播放一次开门动画：上下遮罩偏移在 openDuration 内从 0 增长到 PortalPair 配置的偏移。
         /// 可通过 openCurve 调整节奏；时长为 0 时直接完全打开。
         /// </summary>
