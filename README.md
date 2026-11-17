@@ -2,7 +2,7 @@
 
 一个可运行的 2D 横版平台跳跃 + 双门传送门原型。关卡由 1×1 Tilemap 搭建，角色支持 6 格跳高、45° 斜坡、土狼时间和跳跃缓冲；场景中的 `Portal A` / `Portal B` 支持任意角度旋转、玩家显示/物理分离、地形动态开洞和相机相对映射。
 
-> 当前验证：**23/23 PlayMode 通过**（最近一次：`Logs/TestResults_cleanup.xml`，25.93 秒）。
+> 当前验证：**23/23 PlayMode 通过**（最近一次：`Logs/TestResults_vector.xml`，27.27 秒）。
 > 详细架构、场景数据与已知问题见 **[PROJECT.md](PROJECT.md)**，实现细节见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**。
 
 ## 快速开始
@@ -31,7 +31,10 @@
   - B 位于 world `(10.68, 3.68)`，**旋转 45°**，朝右；
   - 门洞高度 4（`maskTopOffset=2` / `maskBottomOffset=-2`），开门动画 0.6 秒；
   - 门内薄碰撞箱、中心碰撞点、冷却、速度坐标变换；
-  - 玩家出传送门后只旋转显示节点，胶囊保持竖直，并按参数回正。
+  - 玩家出传送门后只旋转显示节点，胶囊保持竖直，并按参数回正；
+  - 捕获矩形支持两种模式，统一在 **`Portal Pair` 的 `PortalPair` Inspector** 中配置，由它下发给 A/B 两个捕获相机：
+    - `useDynamicSize = false`（默认）：固定 `captureWidth × captureHeight`，默认 **50×50**（当前场景静态备用值 50×35）；
+    - `useDynamicSize = true`：跟随主相机视野，宽度 = 主相机宽度 × `cameraSizeMultiplier.x`，高度 = 主相机高度 × `cameraSizeMultiplier.y`；默认 `(1.2, 2)`，当前场景为 `(1.2, 2.2)`。
 - **地形开洞**：门激活时沿门背面切掉一块地形碰撞（`carveWidth=0.8`、`carveFrontMargin=0.1`），视觉瓦片不变；剩余碰撞用运行时 `PolygonCollider2D` 补回。
 - **门位置提示**：场景静态 `Portal Hint` 光带 + `Portal Hint Particles`，使用 `Portal light band` 排序层；运行时只赋材质/参数。
 - **描边**：`TilemapOutline` 在运行时按四邻域生成独立 `Outline` Tilemap，不写入场景。
@@ -42,7 +45,7 @@
 Main Camera
 Portal Pair
 ├─ Portal A                  CaptureDisplayGroup(A)，facing Left
-│  ├─ Portal Camera          正交，运行时 orthoSize = 主相机 × 1.2
+│  ├─ Portal Camera          正交，静态 captureWidth×Height（默认 50×50）/ 动态宽×1.2、高×2
 │  ├─ Portal Capture         RegionSnapshotCamera
 │  ├─ Portal Mask            SpriteMask 上下两块
 │  ├─ Portal View Center

@@ -237,6 +237,24 @@ namespace Platformer.Tests
                 Assert.Ignore("Rendering is disabled in this run; snapshot image check skipped.");
             }
 
+            var pair = Object.FindObjectOfType<PortalPair>();
+            Assert.IsNotNull(pair, "场景缺少 PortalPair。");
+
+            // 尺寸参数统一在 PortalPair 上配置，由它下发给 A/B 两个捕获相机。
+            pair.useDynamicSize = false;
+            pair.captureWidth = 50f;
+            pair.captureHeight = 35f;
+            pair.cameraSizeMultiplier = new Vector2(1.2f, 2f);
+            pair.PushViewSettingsToGroups();
+            yield return null;
+            yield return null;
+
+            // 验证下发后的静态尺寸不跟随主相机。
+            Assert.AreEqual(pair.captureHeight, snapshot.captureHeight, 0.001f,
+                "PortalPair 的静态高度应下发到捕获相机。");
+            Assert.AreEqual(pair.captureWidth, snapshot.captureWidth, 0.001f,
+                "PortalPair 的静态宽度应下发到捕获相机。");
+
             // 1. 画面来自捕获相机。批处理 PlayMode 不会渲染相机，所以像素内容
             //    改由预览渲染来验证；这里只要求输出精灵存在，且尺寸由捕获相机决定。
             Texture2D texture = snapshot.output.sprite.texture;
@@ -250,14 +268,17 @@ namespace Platformer.Tests
             Assert.AreEqual(capturePosition, snapshot.captureCamera.transform.position,
                 "Capture camera must keep its own position, not follow the player camera.");
 
-            // 3. 尺寸是主视野的 1.2 倍。
-            Assert.AreEqual(snapshot.sourceCamera.orthographicSize * 1.2f,
+            // 3. 静态尺寸由 PortalPair 的 captureWidth/captureHeight 下发，不跟随主相机。
+            Assert.AreEqual(snapshot.captureHeight * 0.5f,
                 snapshot.captureCamera.orthographicSize, 0.01f,
-                "Capture camera should cover 1.2x the main view.");
+                "Capture camera size must come from captureHeight.");
+            Assert.AreEqual(snapshot.captureWidth,
+                snapshot.captureCamera.aspect * snapshot.captureHeight, 0.01f,
+                "Capture camera aspect must come from captureWidth/captureHeight.");
 
             // 4. 两个轴都是 1:1，以捕获相机真正覆盖的范围为准。
-            float capturedHeight = snapshot.captureCamera.orthographicSize * 2f;
-            float capturedWidth = capturedHeight * (texture.width / (float)texture.height);
+            float capturedHeight = snapshot.captureHeight;
+            float capturedWidth = snapshot.captureWidth;
             Assert.AreEqual(capturedHeight, snapshot.output.sprite.bounds.size.y, 0.001f,
                 "Snapshot height must equal the captured world height.");
             // 宽度是一半，再加上两半为遮住接缝而留出的少量重叠。
@@ -287,26 +308,64 @@ namespace Platformer.Tests
                 texture.height / snapshot.output.sprite.bounds.size.y, 0.5f,
                 "Canvas should keep the configured texel density.");
 
-            // 6. 主视野变大时，捕获范围和画布一起变大。
+            // 6. 主视野变化时，固定捕获矩形和画布不应变化。
             float originalOrtho = snapshot.sourceCamera.orthographicSize;
             int textureHeightBefore = texture.height;
+            float captureSizeBefore = snapshot.captureCamera.orthographicSize;
             snapshot.sourceCamera.orthographicSize = originalOrtho * 2f;
             yield return null;
             yield return null;
-            Assert.AreEqual(originalOrtho * 2f * 1.2f, snapshot.captureCamera.orthographicSize, 0.01f,
-                "Capture camera must grow with the main view.");
-            Assert.Greater(snapshot.output.sprite.texture.height, textureHeightBefore,
-                "Canvas must grow with the captured area.");
+            Assert.AreEqual(captureSizeBefore, snapshot.captureCamera.orthographicSize, 0.01f,
+                "Capture camera must not follow the main view.");
+            Assert.AreEqual(textureHeightBefore, snapshot.output.sprite.texture.height,
+                "Canvas must not grow with the main view.");
             snapshot.sourceCamera.orthographicSize = originalOrtho;
             yield return null;
             yield return null;
 
-            // 7. 玩家绘制在快照输出之上。
+            // 7. 切到动态模式：宽/高分别 = 主相机视野宽/高 × X/Y 倍率。
+            pair.useDynamicSize = true;
+            pair.cameraSizeMultiplier = new Vector2(1.2f, 2f);
+            pair.PushViewSettingsToGroups();
+            yield return null;
+            yield return null;
+
+            Assert.IsTrue(snapshot.useDynamicSize, "动态模式应下发到捕获相机。");
+            Assert.AreEqual(1.2f, snapshot.cameraSizeMultiplier.x, 0.001f,
+                "动态宽度倍率应下发到捕获相机。");
+            Assert.AreEqual(2f, snapshot.cameraSizeMultiplier.y, 0.001f,
+                "动态高度倍率应下发到捕获相机。");
+
+            float sourceHeight = snapshot.sourceCamera.orthographicSize * 2f;
+            float sourceWidth = sourceHeight * snapshot.sourceCamera.aspect;
+            float dynamicHeight = sourceHeight * 2f;
+            float dynamicWidth = sourceWidth * 1.2f;
+
+            Assert.AreEqual(dynamicHeight, snapshot.captureCamera.orthographicSize * 2f, 0.02f,
+                "Dynamic capture height must be main camera height × Y multiplier.");
+            Assert.AreEqual(dynamicWidth, snapshot.captureCamera.aspect * dynamicHeight, 0.02f,
+                "Dynamic capture width must be main camera width × X multiplier.");
+            Assert.AreEqual(dynamicHeight, snapshot.output.sprite.bounds.size.y, 0.01f,
+                "Dynamic snapshot sprite must match the captured world height.");
+            Assert.AreEqual(Mathf.RoundToInt(dynamicHeight * snapshot.pixelsPerUnit),
+                snapshot.output.sprite.texture.height,
+                "Dynamic canvas height must use the fixed pixel density.");
+            Assert.AreEqual(Mathf.RoundToInt(dynamicWidth * snapshot.pixelsPerUnit),
+                snapshot.output.sprite.texture.width,
+                "Dynamic canvas width must use the fixed pixel density.");
+
+            // 还原静态模式，避免影响后续断言。
+            pair.useDynamicSize = false;
+            pair.PushViewSettingsToGroups();
+            yield return null;
+            yield return null;
+
+            // 8. 玩家绘制在快照输出之上。
             var playerRenderer = Object.FindObjectOfType<PlayerController2D>().GetComponent<SpriteRenderer>();
             Assert.Greater(playerRenderer.sortingOrder, snapshot.output.sortingOrder,
                 "Player must be drawn above the snapshot output.");
 
-            // 8. 捕获相机排除自己的输出层，不再递归。
+            // 9. 捕获相机排除自己的输出层，不再递归。
             int outputLayerBit = 1 << snapshot.output.gameObject.layer;
             Assert.AreEqual(0, snapshot.captureCamera.cullingMask & outputLayerBit,
                 "Capture camera must exclude the Portal View layer to avoid recursion.");

@@ -38,6 +38,19 @@ namespace Platformer
         [Tooltip("下遮罩相对门中心的 Y 偏移（世界单位）；两扇门共用")]
         public float maskBottomOffset = -1.5f;
 
+        [Header("传送门画面尺寸")]
+        [Tooltip("关闭：使用固定 captureWidth × captureHeight；开启：使用主相机视野 × cameraSizeMultiplier")]
+        public bool useDynamicSize = false;
+
+        [Tooltip("动态模式：X = 宽度相对主相机宽度的倍率，Y = 高度相对主相机高度的倍率")]
+        public Vector2 cameraSizeMultiplier = new Vector2(1.2f, 2f);
+
+        [Tooltip("静态模式：捕获矩形宽度（世界单位）")]
+        [Min(0.01f)] public float captureWidth = 50f;
+
+        [Tooltip("静态模式：捕获矩形高度（世界单位）")]
+        [Min(0.01f)] public float captureHeight = 50f;
+
         [Header("地形开洞")]
         [Tooltip("传送门激活时，把门洞矩形覆盖到的地形格改为无碰撞，再重建 CompositeCollider2D")]
         public bool carveTerrain = true;
@@ -79,6 +92,7 @@ namespace Platformer
             EnsureGates();
             EnsureTerrainCarver();
             PushPlayerToGroups();
+            PushViewSettingsToGroups();
             IgnorePlayerBodyCollision();
         }
 
@@ -89,6 +103,7 @@ namespace Platformer
             EnsureGates();
             EnsureTerrainCarver();
             PushPlayerToGroups();
+            PushViewSettingsToGroups();
             IgnorePlayerBodyCollision();
         }
 
@@ -104,6 +119,9 @@ namespace Platformer
 
             if (_cooldown > 0f)
                 _cooldown -= Time.deltaTime;
+
+            // 画面尺寸由 PortalPair 统一管理；运行时改 Inspector 也会立即下发。
+            PushViewSettingsToGroups();
 
             // 允许在 Inspector/运行时改开关与宽度。
             if (carveTerrain)
@@ -143,6 +161,30 @@ namespace Platformer
                 if (group == null) continue;
                 group.SetPlayer(player != null ? player.gameObject : null);
             }
+        }
+
+        /// <summary>
+        /// 把画面尺寸配置下发给 A/B 两端的 RegionSnapshotCamera。
+        /// 尺寸只在本组件上配置，两个捕获相机共用同一组值。
+        /// </summary>
+        public void PushViewSettingsToGroups()
+        {
+            ApplyViewSettings(_groupA);
+            ApplyViewSettings(_groupB);
+        }
+
+        void ApplyViewSettings(CaptureDisplayGroup group)
+        {
+            if (group == null) return;
+            RegionSnapshotCamera snapshot = group.capture;
+            if (snapshot == null) return;
+
+            snapshot.useDynamicSize = useDynamicSize;
+            snapshot.cameraSizeMultiplier = new Vector2(
+                Mathf.Max(0.01f, cameraSizeMultiplier.x),
+                Mathf.Max(0.01f, cameraSizeMultiplier.y));
+            snapshot.captureWidth = Mathf.Max(0.01f, captureWidth);
+            snapshot.captureHeight = Mathf.Max(0.01f, captureHeight);
         }
 
         /// <summary>

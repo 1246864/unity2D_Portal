@@ -1,7 +1,7 @@
 # 开发文档 — 2D 平台跳跃 / 传送门
 
-> 当前 HEAD：`83e95e7`（2026-11-17）
-> 最近验证：23/23 PlayMode 通过（`Logs/TestResults_cleanup.xml`，25.93 秒）
+> 当前开发版：捕获范围静态/动态双模式（基于 `83e95e7`）
+> 最近验证：23/23 PlayMode 通过（`Logs/TestResults_vector.xml`，27.27 秒）
 > 项目总览见 **[../PROJECT.md](../PROJECT.md)**，快速开始见 **[../README.md](../README.md)**。
 
 ---
@@ -50,6 +50,8 @@ CaptureDisplayGroup
 TilemapOutline
   └─ 读取 Terrain，运行时生成 Outline Tilemap
 ```
+
+捕获矩形由 **`PortalPair` 统一配置**：`useDynamicSize` 关闭时使用固定 `captureWidth` / `captureHeight`（默认 50×50）；开启时宽度 = 主相机宽度 × `cameraSizeMultiplier.x`、高度 = 主相机高度 × `cameraSizeMultiplier.y`（默认 `(1.2, 2)`）。`PortalPair.PushViewSettingsToGroups()` 每帧把值下发给 A/B 两个 `RegionSnapshotCamera`，后者的尺寸字段在 Inspector 中隐藏。50×50 在 40 PPU 下对应 2000×2000 纹理。
 
 ---
 
@@ -209,7 +211,7 @@ world = newPlayerVisual.localToWorldMatrix * cameraRelative
 ```text
 Awake
   PlayerController2D → EnsureVisualRoot / Center Point
-  PortalPair → CacheGroups / EnsureGates / EnsureTerrainCarver / PushPlayer
+  PortalPair → CacheGroups / EnsureGates / EnsureTerrainCarver / PushPlayer / PushViewSettings
   CaptureDisplayGroup → ResolvePartner / WireUp / 遮罩 / EnsureHint
 
 Start
@@ -219,7 +221,7 @@ Start
 Update
   PlayerController2D：输入 / 回正
   CaptureDisplayGroup：颜色 / 可见性
-  PortalPair：玩家切换 / 冷却 / carve 参数同步
+  PortalPair：玩家切换 / 冷却 / 尺寸下发 / carve 参数同步
 
 LateUpdate
   RegionSnapshotCamera：Capture
@@ -262,7 +264,7 @@ Unity.exe -batchmode -projectPath <项目> `
 | `PortalTeleportTests` | 8 |
 | `PortalTerrainCarverTests` | 3 |
 
-最近结果：23/23，0 failed，25.93 秒。
+最近结果：23/23，0 failed，27.27 秒。
 
 测试注意事项：
 

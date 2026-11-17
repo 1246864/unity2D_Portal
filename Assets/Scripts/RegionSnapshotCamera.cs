@@ -7,9 +7,10 @@ namespace Platformer
     /// <summary>
     /// 把一台专用相机的画面显示成精灵。
     ///
-    /// 捕获范围是主相机视野的 <see cref="viewScale"/> 倍。主视野变大时，捕获范围
-    /// 随之变大，渲染纹理（输出画布）也等比放大，因此输出精灵始终与拍摄到的世界
-    /// 保持 1:1：缩放为 1 时，画面覆盖多大，精灵就有多大。
+    /// 捕获范围支持两种模式：
+    /// - 静态：使用 <see cref="captureWidth"/> × <see cref="captureHeight"/>，不随窗口变化；
+    /// - 动态：使用主相机视野宽/高分别乘 <see cref="cameraSizeMultiplier"/> 的 X/Y，随窗口/主相机变化。
+    /// 输出精灵始终与拍摄区域保持 1:1：缩放为 1 时，画面覆盖多大，精灵就有多大。
     ///
     /// 传送门端会由 <see cref="CaptureDisplayGroup"/> 把输出精灵所在的 Snapshot 层
     /// 从捕获相机中排除，因此快照不会拍到自己的输出、不会递归；普通快照相机如果
@@ -18,11 +19,15 @@ namespace Platformer
     public class RegionSnapshotCamera : MonoBehaviour
     {
         [Header("来源")]
-        [Tooltip("主相机：只参考它的视野大小，不参考位置")]
+        [Tooltip("主相机引用：动态模式读取它的视野；静态模式仍由传送门控制器用作跟随相机")]
         public Camera sourceCamera;
 
-        [Tooltip("捕获范围相对主相机视野的倍数")]
-        public float viewScale = 1.2f;
+        // 尺寸参数由 PortalPair 统一配置并下发；这里保留 public 供运行时使用，
+        // 不在 RegionSnapshotCamera 的 Inspector 中重复显示。
+        [HideInInspector] public bool useDynamicSize = false;
+        [HideInInspector] public Vector2 cameraSizeMultiplier = new Vector2(1.2f, 2f);
+        [HideInInspector] public float captureWidth = 50f;
+        [HideInInspector] public float captureHeight = 50f;
 
         [Header("捕获相机")]
         [Tooltip("真正执行渲染的相机（正交）")]
@@ -44,12 +49,12 @@ namespace Platformer
         RenderTexture _renderTexture;
         Texture2D _texture;
         Sprite _sprite;
+        float _spriteWorldWidth;
         float _spriteWorldHeight;
         float _timer;
         bool _renderingAvailable;
-
-        /// <summary>快照覆盖的世界高度。</summary>
-        float CapturedWorldHeight => sourceCamera.orthographicSize * 2f * viewScale;
+        bool _warnedTextureClamp;
+        bool _warnedMissingSource;
 
         void Start()
         {
@@ -105,18 +110,66 @@ namespace Platformer
 
         bool EnsureResources()
         {
-            if (sourceCamera == null || captureCamera == null || output == null) return false;
+            if (captureCamera == null || output == null) return false;
 
-            // 捕获相机保持自己的视角；只有尺寸跟随主相机。
-            captureCamera.orthographicSize = sourceCamera.orthographicSize * viewScale;
+            float worldWidth;
+            float worldHeight;
 
-            float worldHeight = CapturedWorldHeight;
-            float aspect = sourceCamera.aspect > 0f ? sourceCamera.aspect : 16f / 9f;
-            int height = Mathf.Clamp(Mathf.RoundToInt(worldHeight * pixelsPerUnit), 16, maxTextureSize);
-            int width = Mathf.Clamp(Mathf.RoundToInt(worldHeight * aspect * pixelsPerUnit), 16, maxTextureSize);
+            if (useDynamicSize && sourceCamera != null)
+            {
+                // 动态模式：宽、高分别跟随主相机视野的宽/高，并分别乘 X/Y 倍率。
+                float cameraHeight = sourceCamera.orthographicSize * 2f;
+                float aspect = sourceCamera.aspect > 0f ? sourceCamera.aspect : 16f / 9f;
+                float cameraWidth = cameraHeight * aspect;
 
-            // 视野变化时重建画布，保持像素密度和 1:1 的世界尺寸不变。
+                worldWidth = Mathf.Max(0.01f,
+                    cameraWidth * Mathf.Max(0.01f, cameraSizeMultiplier.x));
+                worldHeight = Mathf.Max(0.01f,
+                    cameraHeight * Mathf.Max(0.01f, cameraSizeMultiplier.y));
+            }
+            else
+            {
+                if (useDynamicSize && sourceCamera == null && !_warnedMissingSource)
+                {
+                    _warnedMissingSource = true;
+                    Debug.LogWarning(
+                        "[RegionSnapshotCamera] useDynamicSize 已开启，但 sourceCamera 为空，已回退到静态尺寸。",
+                        this);
+                }
+
+                // 静态模式：使用 PortalPair 下发的 captureWidth/captureHeight。
+                worldWidth = Mathf.Max(0.01f, captureWidth);
+                worldHeight = Mathf.Max(0.01f, captureHeight);
+            }
+
+            captureCamera.orthographicSize = worldHeight * 0.5f;
+            captureCamera.aspect = worldWidth / worldHeight;
+
+            int desiredWidth = Mathf.RoundToInt(worldWidth * pixelsPerUnit);
+            int desiredHeight = Mathf.RoundToInt(worldHeight * pixelsPerUnit);
+            int width = Mathf.Clamp(desiredWidth, 16, maxTextureSize);
+            int height = Mathf.Clamp(desiredHeight, 16, maxTextureSize);
+
+            if (width != desiredWidth || height != desiredHeight)
+            {
+                if (!_warnedTextureClamp)
+                {
+                    _warnedTextureClamp = true;
+                    Debug.LogWarning(
+                        $"[RegionSnapshotCamera] 捕获尺寸 {worldWidth}×{worldHeight} 在 {pixelsPerUnit} PPU 下" +
+                        $"需要 {desiredWidth}×{desiredHeight} 纹理，超过 maxTextureSize={maxTextureSize}，" +
+                        "纹理分辨率被限制，像素密度会降低。",
+                        this);
+                }
+            }
+            else
+            {
+                _warnedTextureClamp = false;
+            }
+
+            // 尺寸/像素密度变化时重建画布；固定尺寸下只会创建一次。
             if (_texture == null || _texture.width != width || _texture.height != height ||
+                !Mathf.Approximately(_spriteWorldWidth, worldWidth) ||
                 !Mathf.Approximately(_spriteWorldHeight, worldHeight))
             {
                 ReleaseTargets();
@@ -133,6 +186,7 @@ namespace Platformer
                     new Vector2(0.5f, 0.5f), pixelsPerWorldUnit);
                 _sprite.name = "Region Snapshot Sprite";
                 output.sprite = _sprite;
+                _spriteWorldWidth = worldWidth;
                 _spriteWorldHeight = worldHeight;
             }
 

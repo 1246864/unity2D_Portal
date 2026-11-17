@@ -1,7 +1,7 @@
 # 2D 传送门（unity2D_Portal）— 项目总览
 
-> 当前 HEAD：`83e95e7`（2026-11-17）
-> 当前测试：**23/23 PlayMode 通过**（`Logs/TestResults_cleanup.xml`，25.93 秒）
+> 当前开发版：捕获范围静态/动态双模式（基于 `83e95e7`）
+> 当前测试：**23/23 PlayMode 通过**（`Logs/TestResults_vector.xml`，27.27 秒）
 > 本文档描述当前实际状态；历史更新报告已合并到本文与 `docs/DEVELOPMENT.md`。
 
 ---
@@ -101,8 +101,10 @@ Player                      Player 预制体实例，位置 (-9, 0.75)
   └─ Player Visual          运行时，显示精灵 + 传送门旋转
 
 Portal Pair                 PortalPair，world (3,3)
+                            画面尺寸配置：useDynamicSize=true、captureWidth=50、captureHeight=35、
+                            cameraSizeMultiplier=(1.2, 2.2)（统一下发给 A/B）
 ├─ Portal A                 CaptureDisplayGroup(A)，facing Left
-│  ├─ Portal Camera         local z=-10，运行时 orthoSize=9.6
+│  ├─ Portal Camera         local z=-10；静态时 orthoSize=captureHeight/2（17.5），动态时=主相机 ortho×2.2
 │  ├─ Portal Capture        RegionSnapshotCamera
 │  ├─ Portal Mask
 │  │  ├─ View Mask Top      scale(1,-1)
@@ -136,6 +138,7 @@ Portal Pair                 PortalPair，world (3,3)
 | Portal B | world `(10.68, 3.68)`，**旋转 45°**，facing Right |
 | PortalHeight | **4**（`maskTopOffset=2` / `maskBottomOffset=-2`） |
 | 开门动画 | `openDuration=0.6` |
+| 捕获范围 | 静态备用 **50 × 35**；当前动态宽 **×1.2** / 高 **×2.2** |
 | 地形开洞 | `carveTerrain=true`，`carveWidth=0.8`，`carveFrontMargin=0.1` |
 | 光带 | `hintExtraHeight=0.3` → scene scale y=4.3；长度 0.45 |
 | 玩家 | 高度 1.5，跳跃 6，速度 9，中心碰撞点 0.08 |
@@ -173,7 +176,7 @@ Portal Pair                 PortalPair，world (3,3)
 
 | 组件 | 挂载位置 | 职责 |
 |---|---|---|
-| `PortalPair` | `Portal Pair` | 玩家引用、门薄碰撞箱、碰撞转发、传送、冷却、相机相对映射、地形开洞接入 |
+| `PortalPair` | `Portal Pair` | 玩家引用、门薄碰撞箱、碰撞转发、传送、冷却、相机相对映射、地形开洞接入、画面尺寸配置与下发 |
 | `CaptureDisplayGroup` | `Portal A/B` | 配对/交叉连线、遮罩、半屏裁剪、颜色/可见性、静态光带驱动、碰撞转发 |
 | `RegionSnapshotCamera` | `Portal Capture` | 相机 → RenderTexture → Texture2D → Sprite |
 | `PortalTerrainCarver` | `Portal Pair`（运行时补） | 按门洞矩形切割 Tilemap 碰撞并恢复 |
@@ -214,8 +217,11 @@ partner.capture.output = output;
 
 捕获参数：
 
-- 捕获范围 = 主相机视野 × `viewScale(1.2)`；
-- 输出 PPU 40，纹理按捕获世界高度计算；
+- 捕获尺寸有两种模式，**统一在 `PortalPair` 上配置**，由 `PushViewSettingsToGroups()` 下发给 A/B 两个 `RegionSnapshotCamera`；`RegionSnapshotCamera` 的尺寸字段在 Inspector 中隐藏：
+  - 静态（默认，`false`）：`captureWidth × captureHeight`，默认 **50 × 50**（当前场景静态备用 **50 × 35**），不随窗口/主相机变化；
+  - 动态（`true`）：宽度 = 主相机宽度 × `cameraSizeMultiplier.x`，高度 = 主相机高度 × `cameraSizeMultiplier.y`；默认 **(1.2, 2)**，当前场景 **useDynamicSize=true、(1.2, 2.2)**；
+- 捕获相机 orthographicSize = 捕获世界高度 / 2；aspect = 捕获世界宽度 / 高度；
+- 输出 PPU 40；静态 50×50 对应 2000×2000 纹理；尺寸超过 `maxTextureSize` 时会警告并限制纹理分辨率；
 - `captureInterval=0`（每帧捕获）；
 - Portal Camera 的 `cullingMask` 排除 Portal View 所在 Snapshot(8) 层，避免递归；
 - 主相机仍渲染 Snapshot 层。
@@ -389,7 +395,7 @@ cameraRelative = playerVisual.worldToLocalMatrix * camera.localToWorldMatrix
 Awake
   PlayerController2D：缓存、创建 Center Point、创建/解析 Player Visual
   PortalPair：CacheGroups → EnsureGates → EnsureTerrainCarver →
-              PushPlayerToGroups → 玩家胶囊 excludeLayers
+              PushPlayerToGroups → PushViewSettingsToGroups → 玩家胶囊 excludeLayers
   CaptureDisplayGroup：ResolvePartner → WireUp → 遮罩/玩家/视觉中心 →
                        EnsureHint（静态对象取引用 + 材质）
 
@@ -434,7 +440,7 @@ Start
 
 ## 11. 测试（23/23）
 
-最近结果：`Logs/TestResults_cleanup.xml`，23 total / 23 passed / 0 failed，25.93 秒。
+最近结果：`Logs/TestResults_vector.xml`，23 total / 23 passed / 0 failed，27.27 秒。
 
 | 文件 | 用例数 | 覆盖 |
 |---|---:|---|
@@ -452,7 +458,7 @@ Start
 3. **静态光带/粒子不跟随运行时尺寸变化**：`PortalHeight` 改变不会重设光带 scale/粒子 shape；`hintBackOffset` 只影响旧的 `HintLinePosition` 属性。
 4. **`Portal view` 排序层未使用**：当前 Portal View 仍在 Portal A/B 层。
 5. **地形开洞是运行时碰撞**：残余 `PolygonCollider2D` 不是烘焙资产；若改用静态碰撞/烘焙需要同步改造。
-6. **每帧捕获开销**：两台 Portal Camera 每帧 `Render + ReadPixels`；`captureCamera.enabled=true` 时 URP 还可能自动渲染一次。
+6. **每帧捕获开销**：两台 Portal Camera 每帧 `Render + ReadPixels`；静态 50×50 默认 2000×2000 纹理，动态模式则随主相机/窗口变化。`captureCamera.enabled=true` 时 URP 还可能自动渲染一次。
 7. **`PortalHintBeam` 构建风险**：Shader 只通过运行时 `Shader.Find` 使用，没有材质资产引用；Player 构建可能被剥离。
 8. **`carveTerrain` 运行时开关**：从 `false` 改回 `true` 时，如果 `PortalTerrainCarver` 已存在且宽度未变，`PortalPair.Update` 不会重新启用组件。
 
@@ -460,7 +466,8 @@ Start
 
 ## 13. Git / 维护
 
-- `main`：`83e95e7 fix(portal): 连续传送时重置相机与开门动画`
+- 最近功能提交：`83e95e7 fix(portal): 连续传送时重置相机与开门动画`
+- 当前改动：`PortalPair` 统一管理捕获尺寸（`useDynamicSize`、`cameraSizeMultiplier`、`captureWidth/Height`），并下发给两个 `RegionSnapshotCamera`
 - `backup/capture-v1`：未合并的旧对象复制实验
 - `feature/portal-every-frame` / `test`：旧分支，指向 `156a16b`
 - 提交前请确认：

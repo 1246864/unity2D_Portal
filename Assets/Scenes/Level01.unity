@@ -208,6 +208,8 @@ MonoBehaviour:
   target: {fileID: 868375321}
   offset: {x: 0, y: 1}
   smoothTime: 0.12
+  rotationSmoothTime: 0.15
+  realignRotationSmoothTime: 0.25
   useLookAhead: 1
   lookAheadDistance: 1.5
   lookAheadSpeedReference: 9
@@ -535,7 +537,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   sourceCamera: {fileID: 30762811}
-  viewScale: 1.2
+  useDynamicSize: 0
+  cameraSizeMultiplier: {x: 1.2, y: 2}
+  captureWidth: 50
+  captureHeight: 35
   captureCamera: {fileID: 1086007094}
   pixelsPerUnit: 40
   maxTextureSize: 2048
@@ -754,7 +759,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   sourceCamera: {fileID: 30762811}
-  viewScale: 1.2
+  useDynamicSize: 0
+  cameraSizeMultiplier: {x: 1.2, y: 2}
+  captureWidth: 50
+  captureHeight: 35
   captureCamera: {fileID: 235447639}
   pixelsPerUnit: 40
   maxTextureSize: 2048
@@ -875,6 +883,10 @@ MonoBehaviour:
   exitMargin: 0.03
   maskTopOffset: 2
   maskBottomOffset: -2
+  useDynamicSize: 1
+  cameraSizeMultiplier: {x: 1.2, y: 2.2}
+  captureWidth: 50
+  captureHeight: 35
   carveTerrain: 1
   carveWidth: 0.8
   carveFrontMargin: 0.1
