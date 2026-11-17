@@ -165,8 +165,7 @@ namespace Platformer
         {
             get
             {
-                Vector3 line = ViewAnchor.position;
-                line.x -= FacingSign * hintBackOffset;
+                Vector3 line = ViewAnchor.position + (Vector3)BackDirection * hintBackOffset;
                 line.z = transform.position.z;
                 return line;
             }
@@ -435,61 +434,32 @@ namespace Platformer
 
         void ChangeFacing()
         {
-            // 立刻把光带方向/粒子方向同步到新朝向，而不是等下一帧 LateUpdate。
+            // 本门只拥有自己的视觉节点；涉及对方输出的部分由 PortalPair 统一协调。
+            PortalPair pair = Pair;
+            if (pair != null) pair.ApplyFacingState(this);
+            else ApplyLocalFacingState();
+        }
+
+        internal void ApplyLocalFacingState()
+        {
             UpdateHint();
 
-            if (side == CaptureGroupSide.A)
-            {
-                if (facing == PortalFacing.Right)
-                {
-                    Debug.Log("[CaptureDisplayGroup] A 门朝向右", this);
-                    maskTop.transform.localScale = new Vector3(-1f, 1f, 1f);
-                    maskBottom.transform.localScale = new Vector3(-1f, 1f, 1f);
-                    viewCenter.localScale = new Vector3(-1f, -1f, 1f);
-                    output.flipY = true;
-                    PartnerOutput.flipX = true;
-                    SetPartnerCameraHalf(PortalViewHalf.Right);
-                }
-                else if(facing == PortalFacing.Left)
-                {
-                    Debug.Log("[CaptureDisplayGroup] A 门朝向左", this);
-                    maskTop.transform.localScale = new Vector3(1f, -1f, 1f);
-                    maskBottom.transform.localScale = new Vector3(1f, -1f, 1f);
-                    viewCenter.localScale = new Vector3(1f, 1f, 1f);
-                    output.flipY = false;
-                    PartnerOutput.flipX = false;
-                    SetPartnerCameraHalf(PortalViewHalf.Left);
+            // 初始化引用尚未连接时保持安全状态；Start 会在解析完成后再次应用。
+            if (maskTop == null || maskBottom == null || viewCenter == null || output == null)
+                return;
 
-                }
-            }
-            else if(side == CaptureGroupSide.B)
-            {
-                if (facing == PortalFacing.Right)
-                {
-                    Debug.Log("[CaptureDisplayGroup] B 门朝向右", this);
-                    maskTop.transform.localScale = new Vector3(1f, 1f, 1f);
-                    maskBottom.transform.localScale = new Vector3(1f, 1f, 1f);
-                    viewCenter.localScale = new Vector3(1f, -1f, 1f);
-                    output.flipY = true;
-                    PartnerOutput.flipX = false;
-                    SetPartnerCameraHalf(PortalViewHalf.Right);
+            bool facesLeft = FacesLeft;
+            float maskX = side == CaptureGroupSide.A && !facesLeft ? -1f : 1f;
+            float maskY = facesLeft ? -1f : 1f;
+            maskTop.localScale = new Vector3(maskX, maskY, 1f);
+            maskBottom.localScale = new Vector3(maskX, maskY, 1f);
 
-                }
-                else if (facing == PortalFacing.Left)
-                {
-                    Debug.Log("[CaptureDisplayGroup] B 门朝向左", this);
-                    maskTop.transform.localScale = new Vector3(1f, -1f, 1f);
-                    maskBottom.transform.localScale = new Vector3(1f, -1f, 1f);
-                    viewCenter.localScale = new Vector3(-1f, -1f, 1f);
-                    output.flipY = true;
-                    PartnerOutput.flipX = false;
-                    PartnerOutputObject.transform.parent.localScale = new Vector3(-1f, 1f, 1f);
-                    SetPartnerCameraHalf(PortalViewHalf.Left);
-
-
-                }
-            }
-
+            float viewX = side == CaptureGroupSide.A
+                ? (facesLeft ? 1f : -1f)
+                : (facesLeft ? -1f : 1f);
+            float viewY = side == CaptureGroupSide.A && facesLeft ? 1f : -1f;
+            viewCenter.localScale = new Vector3(viewX, viewY, 1f);
+            output.flipY = side == CaptureGroupSide.B || !facesLeft;
         }
 
         /// <summary>
@@ -611,10 +581,14 @@ namespace Platformer
             Shader beamShader = Shader.Find("Hidden/Platformer/PortalHintBeam");
             if (beamShader != null)
             {
-                _beamMaterial = new Material(beamShader)
+                // Awake/Start 和重复初始化共用同一份运行时材质，避免丢失旧引用。
+                if (_beamMaterial == null)
                 {
-                    hideFlags = HideFlags.DontSave
-                };
+                    _beamMaterial = new Material(beamShader)
+                    {
+                        hideFlags = HideFlags.DontSave
+                    };
+                }
                 _beamMaterial.SetColor("_Color", side == CaptureGroupSide.A ? HintBlue : HintRed);
                 _beamMaterial.SetFloat("_Direction", FacingSign);
                 _beamMaterial.SetFloat("_CoreWidth", hintCoreWidth);

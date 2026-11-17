@@ -45,6 +45,9 @@ namespace Platformer
         Tile[] _edgeTiles;
         Tile[] _slopeTiles;
         readonly List<Object> _owned = new List<Object>();
+        Color _builtColor;
+        int _builtLineWidth;
+        bool _hasBuiltTileParameters;
 
         void Awake()
         {
@@ -55,11 +58,6 @@ namespace Platformer
         {
             _terrain = GetComponent<Tilemap>();
             EnsureOutlineLayer();
-            Build();
-        }
-
-        void Start()
-        {
             Build();
         }
 
@@ -80,16 +78,25 @@ namespace Platformer
             if (_terrain == null) _terrain = GetComponent<Tilemap>();
             if (_terrain == null) return;
 
+            if (_hasBuiltTileParameters &&
+                (_builtColor != outlineColor || _builtLineWidth != lineWidth))
+            {
+                DestroyOwned();
+            }
+
             EnsureOutlineLayer();
             EnsureTiles();
+            _builtColor = outlineColor;
+            _builtLineWidth = lineWidth;
+            _hasBuiltTileParameters = true;
             if (_outline == null) return;
 
             _outline.ClearAllTiles();
 
             BoundsInt bounds = _terrain.cellBounds;
-            for (int y = bounds.yMin; y <= bounds.yMax; y++)
+            for (int y = bounds.yMin; y < bounds.yMax; y++)
             {
-                for (int x = bounds.xMin; x <= bounds.xMax; x++)
+                for (int x = bounds.xMin; x < bounds.xMax; x++)
                 {
                     var cell = new Vector3Int(x, y, 0);
                     if (!_terrain.HasTile(cell)) continue;
@@ -139,21 +146,22 @@ namespace Platformer
 
         void EnsureOutlineLayer()
         {
-            if (_outline != null) return;
+            if (_outline == null)
+            {
+                Transform parent = transform.parent;
+                if (parent == null) return;
 
-            Transform parent = transform.parent;
-            if (parent == null) return;
+                Transform existing = parent.Find("Outline");
+                GameObject go = existing != null ? existing.gameObject : new GameObject("Outline");
+                go.hideFlags = HideFlags.DontSave;
+                go.transform.SetParent(parent, false);
 
-            Transform existing = parent.Find("Outline");
-            GameObject go = existing != null ? existing.gameObject : new GameObject("Outline");
-            go.hideFlags = HideFlags.DontSave;
-            go.transform.SetParent(parent, false);
+                _outline = go.GetComponent<Tilemap>();
+                if (_outline == null) _outline = go.AddComponent<Tilemap>();
+            }
 
-            _outline = go.GetComponent<Tilemap>();
-            if (_outline == null) _outline = go.AddComponent<Tilemap>();
-
-            var renderer = go.GetComponent<TilemapRenderer>();
-            if (renderer == null) renderer = go.AddComponent<TilemapRenderer>();
+            var renderer = _outline.GetComponent<TilemapRenderer>();
+            if (renderer == null) renderer = _outline.gameObject.AddComponent<TilemapRenderer>();
             renderer.sortingLayerName = sortingLayerName;
             renderer.sortingOrder = sortingOrder;
         }
@@ -226,11 +234,16 @@ namespace Platformer
             var pixels = new Color32[TextureSize * TextureSize];
             Color32 color = outlineColor;
 
+            int width = Mathf.Clamp(lineWidth, 1, TextureSize / 2);
             for (int i = 0; i < TextureSize; i++)
             {
                 int x = i;
                 int y = diagonalA ? i : TextureSize - 1 - i;
-                pixels[y * TextureSize + x] = color;
+                for (int offset = 0; offset < width; offset++)
+                {
+                    int lineY = Mathf.Clamp(y + offset, 0, TextureSize - 1);
+                    pixels[lineY * TextureSize + x] = color;
+                }
             }
 
             return CreateSprite(pixels);
@@ -265,6 +278,7 @@ namespace Platformer
             _owned.Clear();
             _edgeTiles = null;
             _slopeTiles = null;
+            _hasBuiltTileParameters = false;
         }
 
         static void DestroyRuntimeObject(Object obj)

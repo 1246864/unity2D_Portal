@@ -472,6 +472,55 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Facing_Repeated_Switches_Preserve_Partner_View_Center()
+        {
+            FindGroups(out var a, out var b);
+            var pair = Object.FindObjectOfType<PortalPair>();
+
+            Assert.IsNotNull(a);
+            Assert.IsNotNull(b);
+            Assert.IsNotNull(pair);
+            Assert.IsNotNull(a.viewCenter);
+            Assert.IsNotNull(b.viewCenter);
+
+            PortalFacing originalFacing = a.Facing;
+            PortalFacing oppositeFacing = originalFacing == PortalFacing.Left
+                ? PortalFacing.Right
+                : PortalFacing.Left;
+            Vector3 originalScale = a.viewCenter.localScale;
+            Vector3 partnerScale = b.viewCenter.localScale;
+
+            try
+            {
+                for (int i = 0; i < 2; i++)
+                {
+                    a.Facing = oppositeFacing;
+                    pair.ApplyFacingState(a);
+                    yield return null;
+
+                    Assert.AreEqual(partnerScale, b.viewCenter.localScale,
+                        "A 换向只能改 B 的输出，不能改 B 的 View Center 父节点。");
+
+                    a.Facing = originalFacing;
+                    pair.ApplyFacingState(a);
+                    yield return null;
+
+                    Assert.AreEqual(originalScale, a.viewCenter.localScale,
+                        "重复换向后再回到原朝向，视觉状态应与初始状态一致。");
+                    Assert.AreEqual(partnerScale, b.viewCenter.localScale,
+                        "重复换向不应在 partner 的 View Center 上累积缩放。");
+                }
+            }
+            finally
+            {
+                a.Facing = originalFacing;
+                pair.ApplyFacingState(a);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator Portal_View_Hides_When_Player_Is_Behind()
         {
             FindGroups(out var a, out _);

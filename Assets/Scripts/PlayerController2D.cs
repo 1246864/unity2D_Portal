@@ -357,7 +357,8 @@ namespace Platformer
         {
             if (_rb.velocity.y < 0f && fallGravityMultiplier > 1f)
             {
-                float extra = Physics2D.gravity.y * (fallGravityMultiplier - 1f) * Time.fixedDeltaTime;
+                float extra = Physics2D.gravity.y * _rb.gravityScale *
+                              (fallGravityMultiplier - 1f) * Time.fixedDeltaTime;
                 _rb.velocity += new Vector2(0f, extra);
             }
         }
@@ -381,11 +382,17 @@ namespace Platformer
         /// <summary>回到出生点并停止移动。</summary>
         public void Respawn()
         {
-            _rb.velocity = Vector2.zero;
-            transform.position = _spawnPoint;
+            TeleportCore(_spawnPoint);
             _isJumping = false;
+            _jumpBufferCounter = 0f;
+            _coyoteCounter = 0f;
+            _groundNormal = Vector2.up;
+            IsGrounded = false;
+            VelocityBeforePhysics = Vector2.zero;
             _isRealigning = false;
+            _realignElapsed = 0f;
             ApplyRotation(0f);
+            // 持续水平输入属于当前操作状态，重生时保留；跳跃缓冲和土狼时间不跨生命周期。
         }
 
         /// <summary>把刚体瞬移到指定位置并停止，同时恢复竖直。</summary>

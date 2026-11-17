@@ -37,6 +37,16 @@ namespace Platformer.Tests
             return null;
         }
 
+        static int CountResidualColliders(GameObject terrainGo)
+        {
+            int count = 0;
+            foreach (var collider in terrainGo.GetComponentsInChildren<PolygonCollider2D>(true))
+            {
+                if (collider.name.StartsWith("Carved Collider ")) count++;
+            }
+            return count;
+        }
+
         [UnityTest]
         public IEnumerator Portal_Carves_Terrain_And_Restores_When_Deactivated()
         {
@@ -117,6 +127,50 @@ namespace Platformer.Tests
                 "门重新启用后，矩形内部的 Ground 碰撞应该重新被剔除。");
             Assert.IsNotNull(Physics2D.OverlapPoint(outside, groundMask),
                 "门重新启用后，矩形外部的 Ground 碰撞应该保持。");
+
+            // 残余碰撞必须继承地形物理材质，否则开洞边缘的摩擦/弹性会突然变化。
+            foreach (var polygon in terrainGo.GetComponentsInChildren<PolygonCollider2D>(true))
+            {
+                if (!polygon.name.StartsWith("Carved Collider ")) continue;
+                Assert.AreSame(tilemapCollider.sharedMaterial, polygon.sharedMaterial,
+                    "残余 PolygonCollider2D 应继承 TilemapCollider2D 的物理材质。");
+            }
+            Assert.Greater(CountResidualColliders(terrainGo), 0,
+                "该墙位应至少生成一个残余 PolygonCollider2D。");
+
+            // 全局开关也必须可逆：false 恢复旧洞，true 按当前门状态重切。
+            pair.carveTerrain = false;
+            yield return new WaitForFixedUpdate();
+            yield return null;
+
+            Assert.IsFalse(carver.enabled, "carveTerrain=false 应禁用 carver。");
+            Assert.AreEqual(0, carver.CarvedCellCount, "关闭开洞后不应保留已切格记录。");
+            Assert.AreEqual(0, CountResidualColliders(terrainGo),
+                "关闭开洞后应销毁全部残余碰撞对象。");
+            Assert.IsNotNull(Physics2D.OverlapPoint(inside, groundMask),
+                "carveTerrain=false 应恢复门洞内部碰撞。");
+
+            pair.carveTerrain = true;
+            yield return new WaitForFixedUpdate();
+            yield return null;
+
+            Assert.IsTrue(carver.enabled, "carveTerrain=true 应重新启用 carver。");
+            Assert.GreaterOrEqual(carver.CarvedCellCount, 1,
+                "重新开启后应按当前门位置重新开洞。");
+            Assert.IsNull(Physics2D.OverlapPoint(inside, groundMask),
+                "carveTerrain 重新开启后应重新移除门洞内部碰撞。");
+            Assert.IsNotNull(Physics2D.OverlapPoint(outside, groundMask),
+                "重新开启后仍应保留门洞外部碰撞。");
+
+            pair.carveTerrain = false;
+            yield return new WaitForFixedUpdate();
+            yield return null;
+
+            Assert.AreEqual(0, carver.CarvedCellCount);
+            Assert.AreEqual(0, CountResidualColliders(terrainGo),
+                "第二次关闭后同样不能残留旧洞。");
+            Assert.IsNotNull(Physics2D.OverlapPoint(inside, groundMask),
+                "第二次关闭后门洞内部碰撞仍应完整恢复。");
         }
 
         [UnityTest]

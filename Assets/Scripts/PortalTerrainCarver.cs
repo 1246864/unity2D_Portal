@@ -266,6 +266,7 @@ namespace Platformer
                     residual.transform.localScale = Vector3.one;
 
                     var polygon = residual.AddComponent<PolygonCollider2D>();
+                    polygon.sharedMaterial = terrainCollider.sharedMaterial;
                     polygon.pathCount = remaining.Count;
                     for (int i = 0; i < remaining.Count; i++)
                     {

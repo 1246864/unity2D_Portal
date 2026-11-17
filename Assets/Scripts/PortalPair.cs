@@ -17,6 +17,9 @@ namespace Platformer
         [Tooltip("眼睛相对玩家中心点的高度（世界单位）")]
         public float playerEyeOffset = 0.4f;
 
+        [Tooltip("负责当前玩家画面镜像的组件；留空时优先从主相机解析")]
+        public PlayerCameraMirror cameraMirror;
+
         [Header("传送")]
         [Tooltip("传送冷却（秒），一对门共享，避免连续帧反复触发")]
         [Min(0f)] public float teleportCooldown = 0.25f;
@@ -75,6 +78,8 @@ namespace Platformer
         float _cooldown;
         bool _forceCapture;
         Transform _lastPlayer;
+        CapsuleCollider2D _ignoredPlayerBody;
+        int _originalBodyExcludeLayers;
 
         /// <summary>门碰撞箱所在层（复用 Snapshot 层，玩家身体胶囊会排除该层）。</summary>
         const int GateLayer = 8;
@@ -106,6 +111,19 @@ namespace Platformer
             PushPlayerToGroups();
             PushViewSettingsToGroups();
             IgnorePlayerBodyCollision();
+            ApplyFacingState(_groupA);
+            ApplyFacingState(_groupB);
+        }
+
+        void OnEnable()
+        {
+            // 重新启用后重新绑定玩家碰撞过滤；禁用时会恢复原始位。
+            _lastPlayer = null;
+        }
+
+        void OnDisable()
+        {
+            RestorePlayerBodyCollision();
         }
 
         void Update()
@@ -124,22 +142,8 @@ namespace Platformer
             // 画面尺寸由 PortalPair 统一管理；运行时改 Inspector 也会立即下发。
             PushViewSettingsToGroups();
 
-            // 允许在 Inspector/运行时改开关与宽度。
-            if (carveTerrain)
-            {
-                if (_terrainCarver == null) EnsureTerrainCarver();
-                else if (!Mathf.Approximately(_terrainCarver.carveWidth, Mathf.Max(0.01f, carveWidth)) ||
-                         !Mathf.Approximately(_terrainCarver.carveFrontMargin, Mathf.Max(0f, carveFrontMargin)))
-                {
-                    _terrainCarver.carveWidth = Mathf.Max(0.01f, carveWidth);
-                    _terrainCarver.carveFrontMargin = Mathf.Max(0f, carveFrontMargin);
-                    _terrainCarver.RefreshNow();
-                }
-            }
-            else if (_terrainCarver != null && _terrainCarver.enabled)
-            {
-                _terrainCarver.enabled = false;
-            }
+            // 开关、参数和组件 enabled 状态在同一个幂等入口同步。
+            SyncTerrainCarver();
         }
 
         void LateUpdate()
@@ -188,6 +192,22 @@ namespace Platformer
             snapshot.captureHeight = Mathf.Max(0.01f, captureHeight);
         }
 
+        /// <summary>统一应用一扇门的本地视觉状态及它对对方输出的控制。</summary>
+        public void ApplyFacingState(CaptureDisplayGroup source)
+        {
+            if (source == null) return;
+
+            source.ApplyLocalFacingState();
+            if (source.partner == null) source.ResolvePartner();
+
+            CaptureDisplayGroup target = source.partner;
+            if (target == null || target.output == null) return;
+
+            // 保留既有 A/B 视觉映射，但不再从 B 门写 A 门的父节点缩放。
+            target.output.flipX = source.side == CaptureGroupSide.A && !source.FacesLeft;
+            source.SetPartnerCameraHalf(source.FacesLeft ? PortalViewHalf.Left : PortalViewHalf.Right);
+        }
+
         /// <summary>
         /// CaptureDisplayGroup 在 OnEnable/OnDisable 时调用：门激活期间在关卡地形上
         /// 按门洞矩形开洞，门停用后恢复。传送碰撞箱本身不在这里处理。
@@ -226,6 +246,36 @@ namespace Platformer
                 _terrainCarver.SetPortal(_groupA, _groupA.isActiveAndEnabled);
             if (_groupB != null)
                 _terrainCarver.SetPortal(_groupB, _groupB.isActiveAndEnabled);
+        }
+
+        void SyncTerrainCarver()
+        {
+            if (!carveTerrain)
+            {
+                if (_terrainCarver != null && _terrainCarver.enabled)
+                    _terrainCarver.enabled = false;
+                return;
+            }
+
+            if (_terrainCarver == null)
+            {
+                EnsureTerrainCarver();
+                return;
+            }
+
+            float width = Mathf.Max(0.01f, carveWidth);
+            float frontMargin = Mathf.Max(0f, carveFrontMargin);
+            bool parametersChanged =
+                !Mathf.Approximately(_terrainCarver.carveWidth, width) ||
+                !Mathf.Approximately(_terrainCarver.carveFrontMargin, frontMargin);
+
+            _terrainCarver.carveWidth = width;
+            _terrainCarver.carveFrontMargin = frontMargin;
+
+            if (!_terrainCarver.enabled)
+                _terrainCarver.enabled = true; // OnEnable 会恢复旧洞并按当前门状态重切。
+            else if (parametersChanged)
+                _terrainCarver.RefreshNow();
         }
 
         /// <summary>
@@ -272,6 +322,9 @@ namespace Platformer
 
         void ToggleCameraMirrorAndInput()
         {
+            if (_cameraMirror == null) _cameraMirror = cameraMirror;
+            if (_cameraMirror == null && Camera.main != null)
+                _cameraMirror = Camera.main.GetComponent<PlayerCameraMirror>();
             if (_cameraMirror == null)
                 _cameraMirror = FindObjectOfType<PlayerCameraMirror>();
 
@@ -324,11 +377,11 @@ namespace Platformer
                 : Matrix4x4.identity;
 
 
-            // 出口旋转 = 出口门角度 - 入口门角度。
-            // 玩家进门时是竖直的，所以不需要再叠玩家角度。
+            // 门间角度差叠加到玩家当前显示角；回正未完成时连续传送也不会跳回绝对角。
             float sourceAngle = Vector2.SignedAngle(Vector2.up, source.transform.up);
             float partnerAngle = Vector2.SignedAngle(Vector2.up, partner.transform.up);
-            float exitAngle = Mathf.DeltaAngle(0f, partnerAngle - sourceAngle);
+            float portalDelta = Mathf.DeltaAngle(sourceAngle, partnerAngle);
+            float exitAngle = Mathf.DeltaAngle(0f, controller.CurrentRotationAngle + portalDelta);
 
             // 进门前的速度/受力结果也按传送门坐标系一起变换：
             // 法线分量沿出口正面反向，切线分量保留。
@@ -470,12 +523,29 @@ namespace Platformer
         /// </summary>
         void IgnorePlayerBodyCollision()
         {
+            RestorePlayerBodyCollision();
             if (player == null) return;
 
             var body = player.GetComponent<CapsuleCollider2D>();
             if (body == null) return;
 
+            _ignoredPlayerBody = body;
+            _originalBodyExcludeLayers = body.excludeLayers;
             body.excludeLayers |= 1 << GateLayer;
+        }
+
+        void RestorePlayerBodyCollision()
+        {
+            if (_ignoredPlayerBody == null) return;
+
+            int gateMask = 1 << GateLayer;
+            int layers = _ignoredPlayerBody.excludeLayers;
+            if ((_originalBodyExcludeLayers & gateMask) != 0) layers |= gateMask;
+            else layers &= ~gateMask;
+
+            // 只恢复本系统负责的位，保留其他系统运行期间所做的层过滤修改。
+            _ignoredPlayerBody.excludeLayers = layers;
+            _ignoredPlayerBody = null;
         }
 
         void OnDrawGizmosSelected()
