@@ -1,256 +1,117 @@
-# 2D 平台跳跃模板（Unity 2022.3.61f1c1 / URP 2D）
+# 2D 平台跳跃 + 传送门（Unity 2022.3.61f1c1 / URP 2D）
 
-> 完整项目说明、场景树、排序层与传送门系统请见 **[PROJECT.md](PROJECT.md)**。
+一个可运行的 2D 横版平台跳跃 + 双门传送门原型。关卡由 1×1 Tilemap 搭建，角色支持 6 格跳高、45° 斜坡、土狼时间和跳跃缓冲；场景中的 `Portal A` / `Portal B` 支持任意角度旋转、玩家显示/物理分离、地形动态开洞和相机相对映射。
 
-一个可直接运行、方便二次修改的 2D 平台跳跃最小模板。
+> 当前验证：**23/23 PlayMode 通过**（最近一次：`Logs/TestResults_cleanup.xml`，25.93 秒）。
+> 详细架构、场景数据与已知问题见 **[PROJECT.md](PROJECT.md)**，实现细节见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**。
 
-地图由 **Tilemap** 构建：一个 Grid、一个 Tilemap、一套合并碰撞体，**全部以 1×1 瓦片为单位**逐格绘制。地面、墙、台阶、平台**全部同一种颜色**，配合瓦片规则的描边层，任意相邻地形都会自动合并成一条外轮廓。
+## 快速开始
 
-![整关俯瞰](Preview.png)
-![游戏视角](Preview_Gameplay.png)
+1. Unity Hub → Open → 选择本目录。
+2. 使用 **Unity 2022.3.61f1c1** 打开。
+3. 打开场景 `Assets/Scenes/Level01.unity`（或菜单 `Platformer > Open Level 01`）。
+4. 点 Play。
 
-## 已实测验证（PlayMode 自动化测试 9/9 通过）
-
-| 测试 | 结果 |
-|---|---|
-| 跳跃高度 | **5.999 格**（目标 6 格，误差 +0.001） |
-| 相机跟随误差 | **0.000** 单位（1.5 秒内收敛） |
-| 45° 斜坡爬升 | 成功（峰值 2.76） |
-| Tilemap 关卡集成 | 通过（135 格瓦片，玩家站立在合并碰撞体上，y=0.75） |
-| 瓦片斜坡爬升 | 通过（玩家沿 1×1 斜坡瓦片走上 2 格高台） |
-| 相机快照 | 通过（捕获范围 = 主相机视野 1.2 倍，图像包含场景内容） |
-| 水平移动、站立检测、坠落重生 | 通过 |
-
-## 地图构建方式
-
-| 资产 | 说明 |
-|---|---|
-| `Assets/Tiles/TerrainTile.asset` | 普通地形瓦片（`#E0E0E0` 超浅灰），1×1 |
-| `Assets/Tiles/DarkTerrainTile.asset` | 深灰瓦片（`#454C5C`），与普通瓦片不融合、深灰之间融合 |
-| `Assets/Tiles/SlopeUpRight / UpLeft / DownRight / DownLeft` | 1×1 的 45° 斜坡瓦片，4 个方向，普通色 |
-| `Assets/Tiles/Slope*Dark` | 同上 4 个方向的深灰版本 |
-
-共 **10 个 Tile 资产**：2 个方块 × 2 种颜色 + 4 个方向 × 2 种颜色。
-
-场景层级：
-
-```
-Level
-├── Grid
-│   └── Terrain      Tilemap + TilemapRenderer + TilemapCollider2D
-│                    + CompositeCollider2D + Rigidbody2D(Static)
-├── Player
-├── Main Camera
-└── Global Light 2D
-```
-
-- 栅格：统一 **1×1 瓦片**，逐格绘制（不再有 2×2 / 2×1 / 1×2 的方块尺寸变体）
-- 碰撞：`TilemapCollider2D`（`Used By Composite`）+ `CompositeCollider2D`，整张地形合并成**一个多边形碰撞体**，不会卡在瓦片接缝上
-- 斜坡瓦片使用**精确三角形物理形状**（由导入脚本写入 Sprite 的 Custom Physics Shape），碰撞面与视觉完全重合
-- 物理材质：TilemapCollider2D 与 CompositeCollider2D 都使用 `TerrainPhysicsMaterial`
-- 所有瓦片共用一张 32×32 的纯白贴图，颜色由 Tile 资产决定
-
-### 手动绘制地图
-
-调色板已经准备好了：`Assets/Palettes/TerrainPalette.prefab`，包含全部 10 个瓦片。
-
-1. 菜单 `Window > 2D > Tile Palette` 打开调色板窗口
-2. 在窗口左上角的下拉框里选择 **TerrainPalette**
-3. 选中场景中的 `Grid/Terrain` 对象，用画笔 / 矩形工具逐格绘制；斜坡瓦片有 4 个方向，可直接拼任意坡道
-
-## 描边系统
-
-描边分两层：**每个瓦片自带的内描边** + **按邻居规则生成的瓦片描边层**。
-
-### 1. 瓦片内描边（烘焙在贴图里）
-
-- 瓦片贴图本身带一圈 1px 的边，颜色是满亮度的 **0.929 倍**
-- Tile 颜色和贴图相乘，所以每个瓦片的边自动等于它自己的颜色降一档：
-  `#E0E0E0 → #D0D0D0`、`#454C5C → #404750`
-- 因此每个方块都有独立的边，连成一片时也能看清每格
-- 想调暗边强度，改 `Tools/generate_placeholders.py` 里的 `RIM`（237/255 ≈ 0.929）
-
-### 2. 瓦片规则描边层（Tilemap Outline）
-
-由 `Assets/Scripts/TilemapOutline.cs`（挂在地形 `Terrain` 上）在运行时生成一层独立的 `Outline` Tilemap：
-
-- 逐格枚举**上下左右四个邻居**：
-  - 地形格：邻格为空 → 在该侧画 1px 内描边；
-  - 深灰格邻接普通地形 → 在深灰一侧画 1px 交界线（另一侧不重复画，避免线宽翻倍）；
-  - 斜坡格：铺对应方向的斜线描边瓦片；
-- 只在实心地形格内部描边，空格不画外圈，描边总宽度与原来的 1px 屏幕描边接近；
-- 描边层排序层 `Default`、order `1`，位于地形之上、传送门画面与玩家之下；
-- 已移除 URP Renderer Feature / `ScreenOutline` shader / 材质，玩家和传送门画面不再有外描边。
-
-可调项：
-
-| 内容 | 位置 |
-|---|---|
-| 描边颜色 | `Terrain` 上 `TilemapOutline` → Outline Color（默认 `(0.70,0.79,0.92)`） |
-| 线宽（像素） | `TilemapOutline` → Line Width（默认 **1**） |
-| 描边层排序 | `TilemapOutline` → Sorting Layer / Sorting Order |
-| 瓦片内描边强度 | `Tools/generate_placeholders.py` → `RIM` |
-| 地形颜色 | `Assets/Tiles/TerrainTile.asset` / `DarkTerrainTile.asset` → Color |
-
-> 描边层在 **Play 时生成**（运行时对象，不写入场景）；修改地形后重新进入 Play 即可刷新。
-> 瓦片描边是贴图效果，粗细随镜头缩放；不再依赖相机纯色背景。
-
-## 传送门端（Portal A / Portal B）
-
-场景里有两个传送门端（`Portal A` / `Portal B`），同属一个 `Portal Pair` 父节点，每端打包一套相机快照系统：
-
-```
-Portal A                          Portal B
-├─ Portal Camera                 ├─ Portal Camera
-├─ Portal Capture                ├─ Portal Capture
-├─ Portal Mask                   ├─ Portal Mask
-└─ Portal View Center            └─ Portal View Center
-   └─ Portal View                  └─ Portal View
-```
-
-- 门/碰撞箱仍在 `Portal A/B` 根节点；`Portal View Center` 只负责画面（Portal View）的视觉定位
-- `Portal A` 的 View Center 在 local z=-10、View 在 local z=+10（世界 z=0）；`Portal B` 两者都在 0
-- 两个组的 `partner` **互相引用**（`CaptureDisplayGroup`）
-- **交叉输出**：A 的相机画面画到 B 的 `Portal View`，B 的相机画面画到 A 的 `Portal View`
-- 进入哪扇门，哪扇门就重播一次自己的开门动画（从 A 进 → A 播，从 B 进 → B 播），另一扇不播
-- 组内流程：相机 → RenderTexture → Texture2D.ReadPixels → Sprite
-
-| 项目 | 说明 |
-|---|---|
-| 捕获范围 | 主相机视野的 **1.2 倍**（`viewScale`）；主相机视野变大时捕获范围同步变大 |
-| 捕获相机 | 每组自带一台正交相机，**独立视角**（位置自己决定、不跟随主相机），只有尺寸跟随主相机 |
-| 刷新间隔 | `captureInterval` 默认 **0（每帧渲染）**；分辨率（PPU 40、1.2 倍视野）保持不变 |
-| 输出 | 严格 **1:1**：输出精灵不做缩放，与拍摄区域完全同尺寸；画布（贴图）随捕获范围等比放大，像素密度不变 |
-| 递归 | **不递归**：传送门相机排除 `Portal View` 所在的 **Snapshot** 层，输出精灵不会被拍进画面 |
-| 背景 | 捕获相机使用与主相机相同的纯色背景；贴图 RGB24、输出不透明，门洞外的部分由遮罩裁掉 |
-| 无头模式 | 没有图形设备时自动禁用，避免 `Camera.Render()` 在 `-nographics` 下卡死 |
-| 玩家层级 | 玩家 SpriteRenderer 排序为 **100**，始终绘制在快照输出（20）之上 |
-| 另一扇门透明度 | 玩家靠近某扇门时，另一扇门按 `otherViewFadeDistance`（默认 3）线性变透明，距离 0 时 alpha=0，达到阈值时恢复 1 |
-| 门位置光带 | 门背面一块沿 facing 渐隐的光带（`PortalHintBeam` shader）：粗核心、两端高亮、竖向流光 + UV 两轴持续滚动的噪音失真、整体 0.5 透明度，呼吸频率 0.5 Hz（2 秒一个周期）、alpha 0.2~1.0；高度 = 门洞 + 0.3，A 蓝 / B 红；在 Portal View 之下（中间被盖住），Default 层可被传送门相机捕获；粒子有效 11.25/s、池 256 |
-
-> 输出的是**真实图像**（Texture2D），不是对象复制。
-> 预览渲染时会先 `WireUp()` 再连续捕获几次，确保两张输出都是最新画面。
-
-## 物理材质
-
-| 资产 | 使用者 | 默认值 |
-|---|---|---|
-| `Assets/Settings/TerrainPhysicsMaterial.physicsMaterial2D` | **所有障碍物**：TilemapCollider2D、CompositeCollider2D | friction **0.6** / bounciness **0** |
-| `Assets/Settings/PlayerPhysicsMaterial.physicsMaterial2D` | 玩家胶囊碰撞体 | friction **1.0** / bounciness **0** |
-
-- 所有障碍物**共用同一个材质资产**：在 Inspector 里改一次，全部地形立即生效
-- 选中资产即可单独调 `Friction`（摩擦）和 `Bounciness`（弹性）
-- 重建关卡不会覆盖你在 Inspector 里调过的值：资产已存在时只复用、不重置
-
-## 开发文档
-
-完整的开发历程、架构说明、关键设计与已知限制见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**。
-
-## 打开方式
-
-1. Unity Hub → Open → 选择本目录（`unity2Dcsm`）
-2. 用 **Unity 2022.3.61f1c1** 打开
-3. 打开场景 `Assets/Scenes/Level01.unity`（或菜单 `Platformer > Open Level 01`）
-4. 点 Play
+> ⚠️ 当前场景包含大量手动/运行时功能（旋转门、静态光带、地形开洞参数），**不要执行** `Platformer > Rebuild Level + Prefabs`：构建脚本仍停留在旧版关卡，会覆盖当前场景。
 
 ## 操作
 
 | 操作 | 按键 |
 |---|---|
 | 左右移动 | `A` / `D` 或 `←` / `→` |
-| 跳跃 | `空格`（按住跳更高，松开立刻截断上升） |
+| 跳跃 | `空格`（按住更高，松开截断上升） |
 
-## 关卡内容
+## 当前内容
 
-- 地面为 **2 格厚**的整块板，中间有 **4 格宽的坑**
-- 一段 **45° 斜坡**（2 个斜坡瓦片拼成），接上 2 格高的台阶
-- 台阶每级固定 **2 格高**（2 格 → 4 格）
-- 两块悬浮平台（分别在 4 格、8 格高度）
-- 细节演示：薄板 + 立柱（全部由 1×1 瓦片拼出）
-- 高台顶部有一组**深灰瓦片**（4×2 格），演示同色合并、异色分离
-- 主角是 **1.5 格高的胶囊体**，最大跳跃高度 **6 格**
-- 相机平滑跟随，带移动方向前瞻
+- **地形**：233 个 1×1 瓦片，bounds `x=-16..23`、`y=-4..11`；普通 `TerrainTile`、深灰 `DarkTerrainTile`、右上/左上斜坡瓦片。
+- **角色**：胶囊 0.72×1.5，最大跳跃高度 **6 格**（实测 5.999），支持斜坡、土狼时间、跳跃缓冲、坠落重生。
+- **相机**：主相机正交 **8**；位置/角度分别平滑跟随，传送时用相对矩阵保持画面连续。
+- **传送门**：
+  - A 位于 world `(5.78, 2.04)`，未旋转，朝左；
+  - B 位于 world `(10.68, 3.68)`，**旋转 45°**，朝右；
+  - 门洞高度 4（`maskTopOffset=2` / `maskBottomOffset=-2`），开门动画 0.6 秒；
+  - 门内薄碰撞箱、中心碰撞点、冷却、速度坐标变换；
+  - 玩家出传送门后只旋转显示节点，胶囊保持竖直，并按参数回正。
+- **地形开洞**：门激活时沿门背面切掉一块地形碰撞（`carveWidth=0.8`、`carveFrontMargin=0.1`），视觉瓦片不变；剩余碰撞用运行时 `PolygonCollider2D` 补回。
+- **门位置提示**：场景静态 `Portal Hint` 光带 + `Portal Hint Particles`，使用 `Portal light band` 排序层；运行时只赋材质/参数。
+- **描边**：`TilemapOutline` 在运行时按四邻域生成独立 `Outline` Tilemap，不写入场景。
 
-## 数值设计
+## 传送门一览
 
-- 1 格 = 1 世界单位，PPU = 32（32px = 1 格）
-- 重力 `Physics2D.gravity.y = -40`（见 `ProjectSettings/Physics2DSettings.asset` 或构建脚本）
-- 跳跃初速度由公式 `v = √(2·g·h)` 在起跳瞬间计算，并加半帧重力补偿
-  → **改重力不会改变跳跃高度**，改 `jumpHeight` 才会
-
-## 可调参数（Player 预制体 / 场景中的 Player）
-
-| 字段 | 默认值 | 说明 |
-|---|---|---|
-| `jumpHeight` | 6 | 最大跳跃高度（格） |
-| `playerHeight` | 1.5 | 角色高度（格），用于地面检测与 Gizmo |
-| `moveSpeed` | 9 | 最大水平速度 |
-| `groundAcceleration` / `groundDeceleration` | 115 / 150 | 地面加减速 |
-| `airAcceleration` / `airDeceleration` | 70 / 45 | 空中加减速 |
-| `coyoteTime` | 0.1 | 离开平台后的宽容起跳时间 |
-| `jumpBufferTime` | 0.12 | 落地前预输入跳跃 |
-| `fallGravityMultiplier` | 1.6 | 下落额外重力，手感更干脆 |
-| `jumpCutMultiplier` | 0.45 | 松开跳跃键时保留的上升速度 |
-| `groundMask` | Ground 层 | 哪些层算地面 |
-
-相机：`Main Camera` 上的 `CameraFollow2D`（`smoothTime`、`offset`、`lookAheadDistance` 可调）。
-
-## 目录结构
-
+```text
+Main Camera
+Portal Pair
+├─ Portal A                  CaptureDisplayGroup(A)，facing Left
+│  ├─ Portal Camera          正交，运行时 orthoSize = 主相机 × 1.2
+│  ├─ Portal Capture         RegionSnapshotCamera
+│  ├─ Portal Mask            SpriteMask 上下两块
+│  ├─ Portal View Center
+│  │  └─ Portal View         SpriteRenderer，A 层/order 20
+│  ├─ Portal Hint            静态光带
+│  └─ Portal Hint Particles  静态粒子
+└─ Portal B                  CaptureDisplayGroup(B)，facing Right，旋转 45°
+   └─ （同上结构）
 ```
+
+- A 的相机画面画到 B 的 `Portal View`，B 的相机画面画到 A 的 `Portal View`；
+- Portal View 的 Snapshot(8) 层从传送门相机 `cullingMask` 排除，避免递归；
+- A 保留右半、B 保留左半，中线留 1px；
+- 遮罩节点按开门进度上下移动，并转向玩家眼睛。
+
+## 地形与描边
+
+- `Grid` 下单个 `Terrain` Tilemap；`TilemapCollider2D`（Used By Composite）+ `CompositeCollider2D` 合并碰撞。
+- 普通色 `#E0E0E0`，深灰 `#454C5C`；10 个 Tile 资产（2 个方块：普通/深灰 + 8 个斜坡：4 方向 × 2 色）。
+- `TilemapOutline`：实心格按四邻域画 1px 内描边；深灰与普通地形交界只在深灰侧画；斜坡铺设斜线；描边层 Default/order 1。
+- 瓦片贴图自带 1px、亮度 0.929 的内描边。
+
+## 测试
+
+命令行：
+
+```powershell
+Unity.exe -batchmode -projectPath <项目> `
+  -runTests -testPlatform PlayMode `
+  -testResults Logs\TestResults.xml `
+  -logFile Logs\playtests.log
+```
+
+当前 **23 个 PlayMode 用例**：
+
+- 角色物理：站立、6 格跳、水平移动、45° 斜坡、坠落重生；
+- 相机：跟随、出传送门旋转/回正；
+- Tilemap：合并碰撞站立、描边层、斜坡爬升、快照结构；
+- 传送门：门洞高度、开门动画、重新启用后传送、出口位置/旋转、速度、另一门淡出、光带、背面隐藏；
+- 地形开洞：切割/恢复、开口方向实时旋转、门移动后跟随。
+
+## 目录
+
+```text
 Assets/
-  Art/Placeholders/     tile1x1.png / slope_up_right.png / slope_up_left.png / slope_down_right.png / slope_down_left.png / player_capsule.png
-  Editor/               ProjectBuilder.cs（一键重建关卡与资产）
-  Palettes/             TerrainPalette.prefab
-  Prefabs/              Player.prefab
-  Scenes/Level01.unity  主场景
+  Editor/
+    ProjectBuilder.cs            旧版重建工具（已落后，勿运行）
+    PlayerController2DEditor.cs  中文玩家 Inspector
+  Prefabs/Player.prefab
+  Scenes/Level01.unity
   Scripts/
     PlayerController2D.cs
     CameraFollow2D.cs
     CaptureDisplayGroup.cs
     PortalPair.cs
+    PortalTerrainCarver.cs
     RegionSnapshotCamera.cs
-    TilemapOutline.cs     瓦片规则描边层
-  Settings/             URP 管线资源 + 物理材质
-  Shaders/              PortalHintBeam.shader（门位置光带）
-  Tiles/                TerrainTile.asset / DarkTerrainTile.asset
-  Tests/PlayMode/       角色物理、相机、Tilemap 关卡、描边、传送门与光带的自动化测试
-Tools/generate_placeholders.py   占位图生成脚本
-docs/DEVELOPMENT.md              开发文档
+    TilemapOutline.cs
+  Shaders/PortalHintBeam.shader
+  Tests/PlayMode/
+  Tiles/  Palettes/  Settings/  Art/Placeholders/
+docs/DEVELOPMENT.md
+PROJECT.md
 ```
 
-## 重建关卡
+## 重要限制
 
-改了关卡布局或瓦片后，执行菜单：
-
-```
-Platformer > Rebuild Level + Prefabs
-```
-
-或命令行：
-
-```
-Unity.exe -batchmode -projectPath <项目路径> -executeMethod Platformer.EditorTools.ProjectBuilder.BuildAll -quit
-```
-
-> 重建会重新生成整个 `Level01` 场景；如果在场景里手绘过瓦片，请先另存场景或改用 Tile Palette 直接编辑。
-
-## 运行自动化测试
-
-Unity 菜单 `Window > General > Test Runner` → PlayMode → Run All。
-
-命令行：
-
-```
-Unity.exe -batchmode -projectPath <项目路径> -runTests -testPlatform PlayMode -testResults TestResults.xml -logFile Logs/playtests.log
-```
-
-测试覆盖：站立检测、6 格跳高、水平移动、相机跟随、坠落重生、45° 斜坡爬坡、Tilemap 关卡站立、瓦片斜坡爬升。
-
-## 后续可扩展
-
-- 用 Tile Palette 直接绘制关卡，或加 Rule Tile 自动拼接边缘
-- 给不同区域加不同颜色的 Tile 变体（同色合并、异色分离的规则自动生效）
-- 加 Animator 做跑步/跳跃动画
-- 加 `PhysicsMaterial2D` 调整摩擦，或做墙跳、冲刺、可破坏方块
-- 相机可加 `Cinemachine` 做更复杂的运镜
+1. `ProjectBuilder` 未跟进当前场景：不要运行 `Rebuild Level + Prefabs`。
+2. 光带/粒子是场景静态对象；运行时改 `PortalHeight` 不会改变它们的大小，`ProjectBuilder` 也不会创建它们。
+3. `Portal View` 的 SpriteMask 裁剪在运行时截图中曾出现“整块画面叠加”的异常；测试只校验遮罩节点/排序，不校验像素。
+4. `Portal view` 排序层已加入 TagManager，但当前场景未使用。
+5. 地形开洞依赖运行时 `PolygonCollider2D`，不是烘焙碰撞；后续若改为静态碰撞需要同步改造。

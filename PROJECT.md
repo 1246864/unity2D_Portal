@@ -1,100 +1,144 @@
 # 2D 传送门（unity2D_Portal）— 项目总览
 
-> 本文档记录这个项目的完整设计、当前状态、数据结构与实现细节，供后续开发（尤其是传送逻辑）参考。
-> 项目由 `unity2Dcsm` 全量迁移而来，git 历史、资源 GUID、场景层级均保持原样。
+> 当前 HEAD：`83e95e7`（2026-11-17）
+> 当前测试：**23/23 PlayMode 通过**（`Logs/TestResults_cleanup.xml`，25.93 秒）
+> 本文档描述当前实际状态；历史更新报告已合并到本文与 `docs/DEVELOPMENT.md`。
 
 ---
 
 ## 1. 这是什么
 
-一个 **2D 横版平台跳跃 + 传送门机制** 的 Unity 模板/原型。
+一个 **2D 横版平台跳跃 + 双门传送门** 的 Unity 原型：
 
-- 关卡由 1×1 瓦片（Tilemap）搭建，含 45° 斜坡
-- 角色可以跑、跳（跳跃高度精确 6 格）、上下坡
-- 场景里有一对**传送门 A / B**：
-  - 每一端的画面由一台**独立相机**拍摄，实时显示成精灵
-  - 两端的画面**交叉输出**（A 的画面画在 B 上，B 的画在 A 上）
-  - 门面用 `SpriteMask` 裁切，遮罩始终**朝向玩家眼睛**
-  - **不递归**：传送门相机排除输出精灵所在的 **Snapshot** 层，主相机照常显示门内画面
-- 传送已实现：门内有极薄碰撞箱（高度 = 门洞高度），玩家中心的碰撞点撞到即传送到另一扇门 `facing` 外侧一点点；传送当帧强制双门重拍；玩家在门背面时该门画面隐藏（详见 `docs/UPDATE_2026-11-14.md`）
+- 1×1 Tilemap 关卡，含 45° 斜坡、深灰地形、台阶和悬浮平台；
+- 胶囊角色，6 格跳高、土狼时间、跳跃缓冲、可变跳高、坠落重生；
+- 一对可**任意角度旋转**的传送门：
+  - 每端一台独立正交相机，实时拍摄画面并显示为 Sprite；
+  - A/B 交叉输出；
+  - `SpriteMask` 裁出门洞，遮罩始终朝向玩家眼睛；
+  - 传送门相机排除 Portal View 所在层，避免递归；
+- 传送：
+  - 门内极薄 `BoxCollider2D` + 玩家中心 `CircleCollider2D`；
+  - 出口按出口门的法线/切线坐标系计算，支持旋转门；
+  - 速度按入口/出口门坐标系变换；
+  - 传送后两门强制重拍，发起门重播开门动画；
+- 玩家显示与物理分离：
+  - 物理根节点保留 Rigidbody2D / CapsuleCollider2D / Center Point；
+  - 运行时创建 `Player Visual` 子节点，只旋转显示，胶囊保持竖直；
+- 动态地形开洞：
+  - 门激活时按门洞矩形对 Tilemap 碰撞做非整格布尔切割；
+  - 视觉 Tile 不变，剩余碰撞用运行时 `PolygonCollider2D` 补回；
+- 门位置光带 + 粒子，已静态化到场景。
+
+项目从 `unity2Dcsm` 迁移而来，git 历史和 `.meta` GUID 保留。
 
 ---
 
 ## 2. 技术栈
 
-| 项目 | 版本 / 值 |
+| 项目 | 值 |
 |---|---|
 | Unity | **2022.3.61f1c1** |
 | 渲染 | URP **14.0.12**，2D Renderer |
 | 色彩空间 | Linear |
 | 输入 | 旧版 Input Manager（`Horizontal` / `Jump`） |
 | 测试 | Unity Test Framework 1.1.33（PlayMode） |
-| 物理 | Physics2D，瓦片使用 CompositeCollider2D |
+| 物理 | Physics2D，重力 `(0, -40)`，Tilemap + CompositeCollider2D |
+| 单位 | 1 格 = 1 世界单位；PPU = 32 |
 
 ---
 
 ## 3. 目录结构
 
-```
+```text
 unity2D_Portal/
 ├─ Assets/
-│  ├─ Art/Placeholders/     占位贴图（tile1x1、4 个斜坡、玩家胶囊、mask_white）
-│  ├─ Editor/ProjectBuilder.cs   一键构建关卡/预制体/传送门（约 800 行）
+│  ├─ Art/Placeholders/      占位贴图（tile1x1、4 个斜坡、玩家胶囊、mask_white）
+│  ├─ Editor/
+│  │  ├─ ProjectBuilder.cs       旧版一键构建（未跟进当前场景，勿运行）
+│  │  └─ PlayerController2DEditor.cs  中文玩家 Inspector
 │  ├─ Palettes/TerrainPalette.prefab
 │  ├─ Prefabs/Player.prefab
 │  ├─ Scenes/Level01.unity       主场景
 │  ├─ Scripts/
 │  │  ├─ PlayerController2D.cs
 │  │  ├─ CameraFollow2D.cs
-│  │  ├─ CaptureDisplayGroup.cs  传送门端（A/B）
-│  │  ├─ PortalPair.cs           传送门对总控
-│  │  ├─ RegionSnapshotCamera.cs 相机捕获 → 贴图 → 精灵
-│  │  └─ TilemapOutline.cs       瓦片规则描边层
-│  ├─ Settings/                  URP、Renderer2D、物理材质
-│  ├─ Shaders/PortalHintBeam.shader  门位置光带（渐变/流光/两端高亮）
-│  ├─ Tests/PlayMode/            18 个自动化测试
-│  └─ Tiles/                     2 个基础瓦片 + 8 个斜坡瓦片
-├─ docs/DEVELOPMENT.md          分阶段开发记录
+│  │  ├─ CaptureDisplayGroup.cs
+│  │  ├─ PortalPair.cs
+│  │  ├─ PortalTerrainCarver.cs
+│  │  ├─ RegionSnapshotCamera.cs
+│  │  └─ TilemapOutline.cs
+│  ├─ Settings/                 URP、Renderer2D、物理材质
+│  ├─ Shaders/PortalHintBeam.shader
+│  ├─ Tests/PlayMode/           4 个测试文件，23 个用例
+│  └─ Tiles/                    10 个 Tile 资产
+├─ docs/DEVELOPMENT.md
 ├─ Tools/generate_placeholders.py
 ├─ Preview.png / Preview_Gameplay.png
-└─ PROJECT.md                   ← 本文档
+├─ PROJECT.md
+└─ README.md
 ```
 
 ---
 
 ## 4. 场景树（Level01，当前实际数据）
 
-```
-Main Camera                 (CameraFollow2D，正交 5.625)
-Global Light 2D             (Light2D, Global)
-Grid
-└─ Terrain                  (Tilemap + TilemapCollider2D + CompositeCollider2D)
-Player                      (预制体实例，Player 排序层，order 100)
+```text
+Main Camera                 Camera(正交 8) + CameraFollow2D + URP CameraData + AudioListener
+Global Light 2D             Light2D(Global)
+Level
+└─ Grid                     Grid(1×1)
+   └─ Terrain               Tilemap(233 格) + TilemapRenderer(order 0)
+                            + TilemapOutline + Rigidbody2D(Static)
+                            + CompositeCollider2D + TilemapCollider2D
+                            layer = Ground(6)
+Player                      Player 预制体实例，位置 (-9, 0.75)
+                            SpriteRenderer(Player 层/order 100，根节点运行时禁用)
+                            + Rigidbody2D(Dynamic, Continuous, Interpolate)
+                            + CapsuleCollider2D(0.72×1.5)
+                            + PlayerController2D
+  ├─ Center Point           运行时，CircleCollider2D(r=0.08)
+  └─ Player Visual          运行时，显示精灵 + 传送门旋转
 
-Portal Pair                 (3, 3)  ← PortalPair (player 已指向 Player)
-├─ Portal A                 local (0.83, -1.46)  → world (3.83, 1.54)
-│  ├─ Portal Camera         (正交，z = -10，viewScale 1.2)
-│  ├─ Portal Capture        (RegionSnapshotCamera，驱动相机→贴图)
-│  ├─ Portal View Center     (视觉中心，local z = -10；View 的父节点)
-│  │  └─ Portal View         (SpriteRenderer，order 20，VisibleOutsideMask；local z = +10)
-│  └─ Portal Mask           (遮罩容器)
-│     ├─ View Mask Top      (scale (1, -1))
-│     │  └─ Mask            SpriteMask，local (0, 50)，scale (200, 100)
-│     └─ View Mask Bottom   (scale (1, -1))
-│        └─ Mask            SpriteMask，local (0, -50)，scale (200, 100)
-└─ Portal B                 local (-14.89, -1.48) → world (-11.89, 1.52)
+Portal Pair                 PortalPair，world (3,3)
+├─ Portal A                 CaptureDisplayGroup(A)，facing Left
+│  ├─ Portal Camera         local z=-10，运行时 orthoSize=9.6
+│  ├─ Portal Capture        RegionSnapshotCamera
+│  ├─ Portal Mask
+│  │  ├─ View Mask Top      scale(1,-1)
+│  │  │  └─ Mask            SpriteMask，local(0,50)，scale(200,100)
+│  │  └─ View Mask Bottom   scale(1,-1)
+│  │     └─ Mask            SpriteMask，local(0,-50)，scale(200,100)
+│  ├─ Portal View Center    local z=-10
+│  │  └─ Portal View        SpriteRenderer，layer 8，Portal A/order 20，
+│  │                        VisibleOutsideMask，local z=+10
+│  ├─ Portal Hint           静态光带，Portal light band/order 0，scale(0.45,4.3)
+│  └─ Portal Hint Particles 静态粒子，Portal light band/order 1
+└─ Portal B                 CaptureDisplayGroup(B)，facing Right，旋转 45°
    ├─ Portal Camera
    ├─ Portal Capture
-   ├─ Portal View Center     (视觉中心，local z = 0)
-   │  └─ Portal View         (SpriteRenderer，order 20，VisibleOutsideMask)
-   └─ Portal Mask
-      ├─ View Mask Top      (scale (1, 1))
-      │  └─ Mask            SpriteMask，local (0, 50)，scale (200, 100)
-      └─ View Mask Bottom   (scale (1, 1))
-         └─ Mask            SpriteMask，local (0, -50)，scale (200, 100)
+   ├─ Portal Mask（同上）
+   ├─ Portal View Center    local z=0
+   │  └─ Portal View        layer 8，Portal B/order 20
+   ├─ Portal Hint
+   └─ Portal Hint Particles
 ```
 
-> ⚠️ 手动调整场景后，**不要**再执行 `Platformer > Rebuild Level + Prefabs`——该命令会用脚本从零重建 `Level01`，覆盖所有手动修改。
+运行时在 `Grid` 下生成 `Outline` Tilemap（Default/order 1），并在 `Portal Pair` 上补 `PortalTerrainCarver`。
+
+### 当前关键数值
+
+| 项目 | 值 |
+|---|---|
+| 地形格子 | **233**（bounds x `-16..23`、y `-4..11`，尺寸 40×16） |
+| 主相机 | 正交 **8**，位置 `(-9, 1.95, -10)` |
+| Portal A | world `(5.78, 2.04)`，旋转 0°，facing Left |
+| Portal B | world `(10.68, 3.68)`，**旋转 45°**，facing Right |
+| PortalHeight | **4**（`maskTopOffset=2` / `maskBottomOffset=-2`） |
+| 开门动画 | `openDuration=0.6` |
+| 地形开洞 | `carveTerrain=true`，`carveWidth=0.8`，`carveFrontMargin=0.1` |
+| 光带 | `hintExtraHeight=0.3` → scene scale y=4.3；长度 0.45 |
+| 玩家 | 高度 1.5，跳跃 6，速度 9，中心碰撞点 0.08 |
 
 ---
 
@@ -102,22 +146,24 @@ Portal Pair                 (3, 3)  ← PortalPair (player 已指向 Player)
 
 **排序层（TagManager）**
 
-| 排序层 | ID | 用途 |
-|---|---|---|
-| Default | 0 | 地形、瓦片 |
-| Portal A | 916715397 | Portal A 的画面 + 它的遮罩 |
-| Portal B | 513430870 | Portal B 的画面 + 它的遮罩 |
-| **Player** | 3198412009 | 玩家，最上层 |
-
-**关键点**：Unity 的 `SpriteMask` 是**全局按排序层生效**的。A 的遮罩之所以只影响 A 的画面，是因为 A 的 `Portal View` 与两块 `SpriteMask` 都在 **Portal A** 层，且遮罩的 `front/backSortingLayerID` 都设成了该层；B 同理。**这是遮罩隔离的核心，不要随意改动。**
+| 排序层 | uniqueID | 用途 |
+|---|---:|---|
+| Default | 0 | 地形、描边、默认对象 |
+| **Portal light band** | 3700759211 | `Portal Hint` + `Portal Hint Particles` |
+| Portal view | 4127090001 | 预留，当前未使用 |
+| Portal A | 916715397 | A 的 Portal View + 遮罩自定义范围 |
+| Portal B | 513430870 | B 的 Portal View + 遮罩自定义范围 |
+| Player | 3198412009 | 玩家显示节点 |
 
 **物理层**
 
 | 层 | 索引 | 用途 |
 |---|---|---|
-| Ground | 6 | 地形、瓦片碰撞 |
+| Ground | 6 | 地形、残余开洞碰撞 |
 | Player | 7 | 玩家 |
-| Snapshot | 8 | 传送门相关对象 |
+| Snapshot | 8 | 门薄碰撞箱、Portal View |
+
+传送门薄碰撞箱放在 Snapshot(8)；玩家身体胶囊 `excludeLayers` 排除 8，只让中心点参与门碰撞。
 
 ---
 
@@ -127,166 +173,298 @@ Portal Pair                 (3, 3)  ← PortalPair (player 已指向 Player)
 
 | 组件 | 挂载位置 | 职责 |
 |---|---|---|
-| `PortalPair` | `Portal Pair` | **传送业务总控**：玩家引用/眼高、薄碰撞箱、碰撞触发、位移/速度/相机、冷却、传送后双门成像刷新 |
-| `CaptureDisplayGroup` | `Portal A` / `Portal B` | 每端的显示逻辑：配对、交叉连线、遮罩驱动、画面裁剪、背面隐藏，并把门碰撞转发给 `PortalPair` |
+| `PortalPair` | `Portal Pair` | 玩家引用、门薄碰撞箱、碰撞转发、传送、冷却、相机相对映射、地形开洞接入 |
+| `CaptureDisplayGroup` | `Portal A/B` | 配对/交叉连线、遮罩、半屏裁剪、颜色/可见性、静态光带驱动、碰撞转发 |
 | `RegionSnapshotCamera` | `Portal Capture` | 相机 → RenderTexture → Texture2D → Sprite |
+| `PortalTerrainCarver` | `Portal Pair`（运行时补） | 按门洞矩形切割 Tilemap 碰撞并恢复 |
 
-### 6.2 交叉输出
-
-```
-Portal A 的 Portal Capture  →  渲染 A 的相机  →  画到 B 的 Portal View
-Portal B 的 Portal Capture  →  渲染 B 的相机  →  画到 A 的 Portal View
-```
-
-`CaptureDisplayGroup.WireUp()` 在 `Awake` 中完成：`capture.output = partner.output`。
-配对是**自动**的：同父节点下找 `side` 不同的那一组。
-
-### 6.3 画面裁剪（中线）
-
-`ApplyHalfCrop()` 每帧检查画面精灵，把捕获纹理裁成一半：
-
-| 门 | 保留 | 位移 |
-|---|---|---|
-| A | 右半 | 右移 `W/4` |
-| B | 左半 | 左移 `W/4` |
-
-`centerGapPixels`（默认 1）让两半在中线各让出一点，避免半屏拼接把共用像素列放大成亮线。
-
-### 6.4 遮罩
-
-每端两组 `View Mask Top/Bottom`，由 `UpdateMasks()` 每帧驱动：
+### 6.2 开口方向
 
 ```csharp
-maskTop.localPosition    = new Vector3(0f, pair.maskTopOffset, 0f);     // 默认 +1.5
-maskBottom.localPosition = new Vector3(0f, pair.maskBottomOffset, 0f);  // 默认 -1.5
-// 对准玩家眼睛后再旋转 90°
-float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
-mask.rotation = Quaternion.Euler(0f, 0f, angle);
+public Vector2 OpeningDirection
+{
+    get
+    {
+        Vector3 local = Quaternion.Euler(0f, 0f, FacingSign * -90f) * Vector3.up;
+        Vector3 world = transform.TransformDirection(local);
+        return world.normalized;
+    }
+}
+
+public Vector2 BackDirection => -OpeningDirection;
 ```
 
-- 两个偏移配在 `PortalPair` 上，**一对门共用**，所以两扇门的门洞高度始终一致；
-- 遮罩只在**本门排序层**内生效（A 不影响 B）；
-- `PortalHeight = |maskTopOffset - maskBottomOffset|`：`PortalPair` 与 `CaptureDisplayGroup` 都暴露这个只读属性，后者直接委托给前者；
-- 开门动画：`CaptureDisplayGroup.PlayOpenAnimation()`（`OnEnable` 时自动调用，禁用后重新启用也会重播），在 `openDuration` 内把上下偏移从 **0** 增长到 `PortalPair` 配置值，节奏由 `openCurve` 控制；只驱动遮罩视觉，碰撞箱仍按完整门洞高度。传送时**发起传送的那扇门**额外重播一次自己的开门动画（从 A 进 → A 播，从 B 进 → B 播），另一扇门不重播。
-- 另一扇门透明度：`CaptureDisplayGroup.otherViewFadeDistance`（默认 **3**，与颜色距离公式同一世界单位）。玩家离某扇门越近，另一扇门的 alpha 越低：距离 0 → 0，达到阈值 → 1；本门自己不变透明。实现里缓存本门/对方门的视觉中心，每帧只做两次局部位移和一次颜色赋值。
-- 门位置光带：`CaptureDisplayGroup` 在门的背面（`-facing` 偏移 `hintBackOffset`）生成一块沿 facing 方向铺开的光带（`hintBeamLength` 默认 0.45），靠门一侧是加粗的细线核心；高度 = `PortalPair.PortalHeight + hintExtraHeight`（默认 +0.3，两端从门洞遮罩外露出一点）。`PortalHintBeam` shader：靠门侧粗核心、沿 facing 渐隐到透明、两端高亮、竖向流光叠加噪音失真（`hintNoiseStrength`），噪音掩码在 UV 两轴持续滚动（`hintNoiseSpeed` 0.9）、整体透明度 **0.5**，呼吸频率 **0.5 Hz（2 秒一个周期，`_BreathFrequency`）**、alpha 在 **0.2~1.0** 之间变化；A 蓝 / B 红。光带排序在 Portal View 之下（order-1），主相机里中间被输出盖住，但 Default 层仍开放给传送门相机；粒子从细线沿 facing 发射同色粒子（有效 11.25/s，发射区域比门洞小 0.1，池 256），排序在输出之上。
-- 动态同步：`FacesLeft` / `FacingSign` 始终由 `facing` 实时派生；`HintLinePosition` 实时由视觉中心、朝向和偏移计算；`Pair` 在父级变化时重新解析；`_viewAnchor` / `_partnerViewAnchor` 每帧刷新，视觉中心或对方门被换掉时不会继续使用旧缓存。
+- A 朝左未旋转：`(-1, 0)`；
+- B 朝右旋转 45°：`(0.707, 0.707)`；
+- 门整体旋转时，开口方向、背面判断、开洞方向、出口和速度全部实时跟随。
 
-### 6.5 不递归（排除输出层）
+### 6.3 成像与交叉输出
 
-传送门相机在 `CaptureDisplayGroup.Start`（以及 `ProjectBuilder`）里把 `Portal View` 所在的 **Snapshot(8)** 层从 `cullingMask` 排除；主相机仍渲染该层。因此捕获相机不会拍到自己的输出，两门互拍不会形成无限嵌套，门洞里是对方相机的**一次**成像。
+```text
+A 的 Portal Capture → 渲染 A 的相机 → 画到 B 的 Portal View
+B 的 Portal Capture → 渲染 B 的相机 → 画到 A 的 Portal View
+```
 
-### 6.6 朝向
+`CaptureDisplayGroup.Awake` 中：
 
-`CaptureDisplayGroup.facing`（`PortalFacing.Left / Right`）：
-- 当前场景：A = **Left**，B = **Right**（两门面对面）
-- 辅助：`FacesLeft`、`FacingSign`（-1 / +1）
-- 开口方向 = `Quaternion.Euler(0, 0, FacingSign * -90) * Vector3.up`，即朝右 `(1,0)`、朝左 `(-1,0)`
+```csharp
+capture.output = partner.output;
+partner.capture.output = output;
+```
 
-传送用它决定：出口落在该门 `facing` 一侧；两门同向时水平速度取反、相背时保持；玩家与开口方向夹角 ≥ 90° 时隐藏该门画面。
+捕获参数：
 
-### 6.7 传送（PortalPair）
+- 捕获范围 = 主相机视野 × `viewScale(1.2)`；
+- 输出 PPU 40，纹理按捕获世界高度计算；
+- `captureInterval=0`（每帧捕获）；
+- Portal Camera 的 `cullingMask` 排除 Portal View 所在 Snapshot(8) 层，避免递归；
+- 主相机仍渲染 Snapshot 层。
 
-传送业务集中在 `PortalPair`，`CaptureDisplayGroup` 只负责画面并把碰撞转发过来。
+### 6.4 半屏裁剪
 
-- **碰撞箱**：`PortalPair` 在 `Portal A/B` 根节点上运行时创建 `BoxCollider2D`，`size = (gateThickness, PortalHeight)`、非 Trigger，高度随遮罩偏移同步；
-- **触发**：玩家中心的 `CircleCollider2D`（`PlayerController2D.centerPointRadius`，默认 0.08）撞到箱子；门箱放在 **Snapshot 层**，身体胶囊用 `excludeLayers` 排除该层（不用 `Physics2D.IgnoreCollision`——它在碰撞箱重新启用后会被重置，导致重新开门时被当成墙）；
-- **位移**：`target = partner 中轴 ± (gateThickness/2 + centerPointRadius + exitMargin)`，垂直保留相对高度；
-- **速度**：两门同向时水平速度取反，相背时保持；
-- **相机**：传送前记录与玩家的相对位置，传送后瞬间搬到"新玩家 + 同一相对位置"；
-- **冷却**：一对门共享 `teleportCooldown`；
-- **刷新**：传送后同一帧 `LateUpdate` 强制两门捕获相机各拍一次并重新半屏成像。
+`ApplyHalfCrop()`：
+
+- A 保留右半，B 保留左半；
+- 中线留 `centerGapPixels=1`；
+- 用完整纹理的一半重建 Sprite，X 偏移 `±(W/4 + gap/2)`；
+- 在 `Portal View` 初始 localPosition 上叠加，只改 X，不覆盖 `Portal View Center` 的 Z 偏移。
+
+### 6.5 遮罩
+
+每端两块 `View Mask Top/Bottom`：
+
+- 随开门进度，Y 偏移从 0 到 `PortalPair` 配置值；
+- 每帧转向玩家眼睛；
+- SpriteMask 的自定义范围指向本门的 Portal A/B 层；
+- Portal View 的 `maskInteraction = VisibleOutsideMask`。
+
+> 已知问题：运行时主相机截图中曾出现 Portal View 以整块着色画面叠加、未被裁成门洞的现象。当前测试只校验遮罩节点、排序和高度，不校验像素；视觉验收时需要单独确认。
+
+### 6.6 静态光带/粒子
+
+- `CaptureDisplayGroup.hintRenderer` / `hintParticles` 是场景引用；
+- 运行时 `EnsureHint()` 只赋 Sprite/材质，不创建对象；
+- `UpdateHint()` 只更新 shader 参数（方向、宽度、流光、呼吸、噪音）和粒子方向；
+- 光带/粒子的位置、缩放由场景 Transform 决定；
+- 排序层统一为 `Portal light band`，光带 order 0，粒子 order 1；
+- A 蓝、B 红；`Hidden/Platformer/PortalHintBeam` 加法混合。
+
+### 6.7 传送
+
+`PortalPair.Teleport`：
+
+```text
+front = gateThickness/2 + centerPointRadius + exitMargin
+
+tangentOffset = dot(playerPos - sourcePos, source.up)
+
+target = partnerPos
+       + partner.OpeningDirection * front
+       + partner.up * tangentOffset
+```
+
+出口旋转：
+
+```text
+exitAngle = DeltaAngle(0, partnerAngle - sourceAngle)
+```
+
+速度：
+
+```text
+normalSpeed  = dot(velocity, source.OpeningDirection)
+tangentSpeed = dot(velocity, source.up)
+outVelocity  = partner.OpeningDirection * (-normalSpeed)
+             + partner.up * tangentSpeed
+```
+
+其他行为：
+
+- 冷却 0.25 秒，一对门共享；
+- 传送前 `StopAllOpenAnimations()`，再让发起门 `PlayOpenAnimation()`；
+- 传送后本帧强制双门 `CaptureNow()` + `ApplyHalfCrop()`；
+- 相机相对矩阵由 `PortalPair` 记录，`CameraFollow2D.TeleportRelative()` 延迟到 LateUpdate 应用。
+
+### 6.8 玩家显示与回正
+
+`PlayerController2D`：
+
+- 物理根节点：Rigidbody2D、CapsuleCollider2D、Center Point；
+- 显示节点：`PlayerVisual`（运行时创建），复制 SpriteRenderer 属性并禁用根节点渲染；
+- `TeleportWithPortalRotation(position, exitAngle)` 只旋转显示节点；
+- 回正参数：
+  - `portalRealignSpeed=80`
+  - `portalRealignCurve=EaseInOut`
+  - `portalRealignFallSpeedForMaxBoost=12`
+  - `portalRealignMaxFallSpeedMultiplier=3`
+  - `portalRealignGroundedSpeedMultiplier=6`
+- 回正在 `Update` 中推进；触地/下坠加速；结束后显示角度归 0。
+
+### 6.9 相机
+
+`CameraFollow2D` 当前实现：
+
+- 位置：目标玩家根节点 + 旋转后的 `offset + lookAhead`，SmoothDamp；
+- 角度：从 `PlayerVisual` 的 Z 角平滑跟随；
+- 普通状态用 `rotationSmoothTime`，回正期间用更迟钝的 `realignRotationSmoothTime`；
+- 传送时 `PortalPair` 记录：
+
+```text
+cameraRelative = playerVisual.worldToLocalMatrix * camera.localToWorldMatrix
+```
+
+- `CameraFollow2D.TeleportRelative()` 在 LateUpdate 用新的 `playerVisual.localToWorldMatrix * cameraRelative` 映射相机；
+- `Decompose2D` 提取位置/Z 旋转/缩放；
+- 前瞻按 `PlayerVisual.right` 投影；回正期间禁用前瞻。
+
+> 这取代了旧版“只维护玩家显示空间 `_localOffset`”的方案；旧文档中的描述已不再适用。
+
+### 6.10 地形开洞
+
+`PortalTerrainCarver` 由 `PortalPair` 运行时 `AddComponent`：
+
+- 矩形起点：门中心；
+- 长度方向：`BackDirection`，长度 `carveWidth`；
+- 高度：`PortalHeight`，居中；
+- 向门面方向额外扩展 `carveFrontMargin`；
+- 对每个被覆盖的 Tilemap 格子：
+  - 取 Tile Sprite 的物理形状；
+  - 与所有门的矩形做布尔差；
+  - 有实际面积变化时：`Tile.ColliderType = None`，从 TilemapCollider2D 移除；
+  - 剩余碎片生成子物体 `PolygonCollider2D`（Ground 层）；
+- `ProcessTilemapChanges()` → `CompositeCollider2D.GenerateGeometry()` → `Physics2D.SyncTransforms()`；
+- 门停用、移动、场景卸载时恢复 ColliderType、销毁残余碰撞、重重建；
+- 不调用 `Sprite.OverridePhysicsShape` 或 `Tilemap.RefreshAllTiles()`。
 
 ---
 
-## 7. 角色（PlayerController2D）
+## 7. 地形与描边
+
+- 1 个 `Grid`、1 个 `Terrain` Tilemap；全部 1×1 瓦片。
+- 10 个 Tile 资产：`TerrainTile`、`DarkTerrainTile`、4 方向斜坡 × 2 色。
+- 当前场景使用：Terrain 162 格、Dark 66 格、SlopeUpRight 2 格、SlopeUpLeft 3 格。
+- `TilemapCollider2D`（Used By Composite）+ `CompositeCollider2D`；物理材质 `TerrainPhysicsMaterial`（friction 0.6）。
+- 斜坡使用精确三角物理形状。
+- `TilemapOutline` 运行时生成 `Outline` Tilemap：
+  - 实心格四邻域：邻空或异色 → 1px 内描边；
+  - 深灰邻普通地形：只在深灰侧画交界线；
+  - 斜坡格铺斜线；
+  - Default/order 1，不写入场景。
+
+---
+
+## 8. 角色与相机参数
+
+### Player
 
 | 参数 | 值 |
-|---|---|
+|---|---:|
 | 移动速度 | 9 |
-| 地面加速 / 减速 | 115 / 150 |
-| 空中加速 / 减速 | 70 / 45 |
-| 跳跃高度 | **6 格** |
-| 角色高度 | 1.5 格 |
-| Coyote 时间 / 跳跃缓冲 | 0.1 / 0.12 |
+| 地面加/减速 | 115 / 150 |
+| 空中加/减速 | 70 / 45 |
+| 跳跃高度 | 6 |
+| 角色高度 | 1.5 |
+| 土狼时间 / 跳跃缓冲 | 0.1 / 0.12 |
 | 下落重力倍率 | 1.6 |
-| 松键跳跃削减 | 0.45 |
-| 地面层 | Ground (6) |
-| 中心碰撞点半径 | 0.08（传送门检测用） |
+| 最大下落速度 | 30 |
+| 松键截断 | 0.45 |
+| 中心碰撞点半径 | 0.08 |
 
-特性：斜坡行走（按地面法线处理）、土狼时间、跳跃缓冲、坠落重生。
+### Camera
 
-## 8. 相机（CameraFollow2D）
+| 参数 | 值 |
+|---|---:|
+| 正交尺寸 | 8 |
+| 跟随偏移 | (0, 1) |
+| 位置平滑 | 0.12 |
+| 旋转平滑 | 0.15 |
+| 回正旋转平滑 | 0.25 |
+| 前瞻距离 / 参考速度 | 1.5 / 9 |
 
-正交 5.625、跟随偏移 (0, 1)、平滑 0.12、前瞻 1.5（参考速度 9）。
+---
 
-## 9. 地形与瓦片
+## 9. 运行时顺序
 
-- `Grid` + 单个 `Terrain` Tilemap，1×1 瓦片
-- 两种颜色：普通 **#E0E0E0**、深灰 **#454C5C**
-- 4 方向 45° 斜坡瓦片（普通 + 深灰，共 8 个），碰撞形状为精确三角形
-- 每个瓦片贴图自带 1px、亮度 0.929 的内描边（染色后即"暗一档"）
-- 地形碰撞用 `CompositeCollider2D` 合并，物理材质 `TerrainPhysicsMaterial`
+```text
+Awake
+  PlayerController2D：缓存、创建 Center Point、创建/解析 Player Visual
+  PortalPair：CacheGroups → EnsureGates → EnsureTerrainCarver →
+              PushPlayerToGroups → 玩家胶囊 excludeLayers
+  CaptureDisplayGroup：ResolvePartner → WireUp → 遮罩/玩家/视觉中心 →
+                       EnsureHint（静态对象取引用 + 材质）
 
-## 10. 描边系统
+Start
+  RegionSnapshotCamera：分配 RT/Texture/Sprite，启用 Portal Camera，Capture()
+  CaptureDisplayGroup：记录 Portal View 初始位置，排除输出层
 
-- **瓦片内描边**：贴图烘焙，`#E0E0E0 → #D0D0D0`
-- **瓦片规则外描边**：`TilemapOutline`（挂在 `Terrain` 上）在运行时创建独立的 `Outline` Tilemap；按四邻域枚举：地形格邻空画 1px 内描边，深灰格邻接普通地形时在深灰侧画交界线，斜坡格铺斜线；空格不画外圈；颜色 `(0.70, 0.79, 0.92)`，线宽 1px
-- 描边层排序 `Default` / order `1`，在地形之上、传送门画面与玩家之下
-- 已移除 `ScreenOutlineFeature`、`ScreenOutline.shader`、`ScreenOutline.mat`；玩家和传送门画面不再有外描边
-
-## 11. 构建脚本（ProjectBuilder）
-
-菜单（`Platformer`）：
-
-| 菜单 | 作用 |
-|---|---|
-| `Rebuild Level + Prefabs` | **重建整个场景**（会覆盖手动修改） |
-| `Rebuild + Render Preview` | 重建 + 出预览图 |
-| `Render Preview Image` | 只渲染预览，不改场景 |
-| `Validate Level` | 校验瓦片数、材质、描边组件 |
-| `Open Level 01` | 打开主场景 |
-
-命令行：
-
-```
-Unity.exe -batchmode -projectPath <项目> -executeMethod Platformer.EditorTools.ProjectBuilder.BuildAll -quit
-Unity.exe -batchmode -projectPath <项目> -runTests -testPlatform PlayMode -testResults Logs\TestResults.xml
+每帧
+  RegionSnapshotCamera.LateUpdate：Capture（每帧）
+  CaptureDisplayGroup.Update：颜色/可见性
+  CaptureDisplayGroup.LateUpdate：开门动画 → 半屏裁剪 → 遮罩 → 光带参数
+  PortalPair.LateUpdate：门洞高度同步；强制刷新
+  CameraFollow2D.LateUpdate：位置/角度跟随；传送帧应用相对矩阵
+  PortalTerrainCarver.LateUpdate：门移动/旋转时重切开洞
 ```
 
-## 12. 测试（19 个 PlayMode 用例：18 通过 + 1 跳过快照）
+物理步中：玩家中心点撞门 → `CaptureDisplayGroup.OnCollisionEnter/Stay` → `PortalPair.OnGateHit` → 停止所有开门动画 → 发起门重播 → `Teleport`。
 
-| 测试 | 校验内容 |
-|---|---|
-| `Player_Stands_On_Ground` | 站立在地形上，y=0.75 |
-| `Jump_Reaches_Six_Cell_Height` | 跳跃高度 ≈ 6 格 |
-| `Horizontal_Movement_Works` | 水平移动 |
-| `Walks_Up_45_Degree_Slope` | 45° 斜坡行走 |
-| `Player_Climbs_Tilemap_Ramp` | 瓦片斜坡爬升 |
-| `Falls_Below_Limit_Respawn` | 坠落重生 |
-| `Camera_Follows_Player` | 相机跟随收敛 |
-| `Tilemap_Level_Has_Grounded_Player` | 关卡瓦片数与玩家站立 |
-| `Tilemap_Has_Outline_Layer` | 瓦片规则描边层存在且有瓦片 |
-| `Snapshot_Camera_Captures_Own_View` | 捕获相机独立、1.2 倍尺寸、1:1、画布随视野、A/B 半屏、交叉连线 |
-| `Portal_Gates_Match_Portal_Height` | 门碰撞箱高度与 PortalPair 门洞高度一致 |
-| `Player_Teleports_Through_Portal` | 走进门传送到对侧门正面 |
-| `Player_Still_Teleports_After_Portal_Reenable` | 重新启用门后仍能传送（碰撞箱不被当墙） |
-| `Portal_Opens_From_Zero_To_Pair_Height` | 开门动画从 0 增长到配置高度 |
-| `Portal_View_Hides_When_Player_Is_Behind` | 玩家在门背面时隐藏画面 |
-| `Portal_View_Keeps_Offset_Under_View_Center` | 半屏裁剪保留 Portal View 的 Z 偏移 |
-| `Other_Portal_Fades_When_Player_Is_Near` | 靠近一扇门时另一扇门按距离变透明 |
-| `Portal_Hint_Beam_Matches_Height_And_Sorting` | 光带高度/排序/材质/朝向/呼吸/噪音/粒子 |
-| `Portal_Hint_Properties_Follow_Runtime_Changes` | 动态移动视觉中心/改变朝向后属性与光带同步 |
+---
 
-## 13. 已知限制 / 下一步
+## 10. 编辑器工具
 
-1. 传送已实现（碰撞箱 + 玩家中心碰撞点 + 连续碰撞），细节见 `docs/UPDATE_2026-11-14.md`；门背面的碰撞箱仍然有效，只是画面隐藏。
-2. 遮罩尺寸（`Mask` 子物体 `scale (200,100)`、偏移 `±50`）是当前调好的视觉参数，改动会影响门洞大小与朝向。
-3. 瓦片描边只按四邻域枚举：斜坡外侧不额外描边、斜角内凹处按四邻域近似；描边层在 Play 时生成，不写入场景。
-4. 场景手动修改后**不要**跑 `Rebuild Level + Prefabs`。
+| 菜单 | 作用 | 状态 |
+|---|---|---|
+| `Platformer/Rebuild Level + Prefabs` | 从零重建场景/预制体 | **已落后，勿运行** |
+| `Platformer/Rebuild + Render Preview` | 重建 + 预览 | 同上 |
+| `Platformer/Open Level 01` | 打开主场景 | 可用 |
+| `Platformer/Validate Level` | 校验相机/玩家/Tilemap/材质 | 可用 |
+| `Platformer/Render Preview Image` | 只渲染预览 | 可用，但编辑模式不跑 Awake，光带/粒子不出现 |
 
-## 14. 迁移记录
+`ProjectBuilder` 仍使用旧版：
+- 主相机 5.625；
+- Portal A/B 旧位置；
+- PortalHeight 3、openDuration 0.3；
+- 不创建静态光带/粒子；
+- 不设置 carve 参数；
+- 不创建 `Portal light band` / `Portal view` 排序层。
 
-- 源目录：`unity2Dcsm` → 目标：`unity2D_Portal`
-- 保留：git 历史、所有 `.meta`（GUID 不变）、场景层级、排序层、预制体引用
-- 迁移后验证：工程可导入、编译无错、9/9 PlayMode 测试通过
+因此当前场景只能手动维护，不能 Rebuild。
+
+---
+
+## 11. 测试（23/23）
+
+最近结果：`Logs/TestResults_cleanup.xml`，23 total / 23 passed / 0 failed，25.93 秒。
+
+| 文件 | 用例数 | 覆盖 |
+|---|---:|---|
+| `PlayerControllerPlayTests.cs` | 7 | 站立、跳高、移动、相机、坠落、斜坡、出传送门旋转/回正 |
+| `LevelTilemapTests.cs` | 5 | 关卡站立、描边、Portal View 偏移、斜坡、快照结构 |
+| `PortalTeleportTests.cs` | 8 | 门洞/碰撞箱、开门动画、重新启用、传送、淡出、光带、背面隐藏 |
+| `PortalTerrainCarverTests.cs` | 3 | 开洞/恢复、开口方向、门移动跟随 |
+
+---
+
+## 12. 已知限制 / 风险
+
+1. **不要运行 `Rebuild Level + Prefabs`**：`ProjectBuilder` 未跟进当前场景，会覆盖旋转门、静态光带、开洞参数和新地形。
+2. **遮罩裁剪未完全验证**：运行时截图曾显示 Portal View 以大块着色画面叠加；测试只校验结构，不校验像素。
+3. **静态光带/粒子不跟随运行时尺寸变化**：`PortalHeight` 改变不会重设光带 scale/粒子 shape；`hintBackOffset` 只影响旧的 `HintLinePosition` 属性。
+4. **`Portal view` 排序层未使用**：当前 Portal View 仍在 Portal A/B 层。
+5. **地形开洞是运行时碰撞**：残余 `PolygonCollider2D` 不是烘焙资产；若改用静态碰撞/烘焙需要同步改造。
+6. **每帧捕获开销**：两台 Portal Camera 每帧 `Render + ReadPixels`；`captureCamera.enabled=true` 时 URP 还可能自动渲染一次。
+7. **`PortalHintBeam` 构建风险**：Shader 只通过运行时 `Shader.Find` 使用，没有材质资产引用；Player 构建可能被剥离。
+8. **`carveTerrain` 运行时开关**：从 `false` 改回 `true` 时，如果 `PortalTerrainCarver` 已存在且宽度未变，`PortalPair.Update` 不会重新启用组件。
+
+---
+
+## 13. Git / 维护
+
+- `main`：`83e95e7 fix(portal): 连续传送时重置相机与开门动画`
+- `backup/capture-v1`：未合并的旧对象复制实验
+- `feature/portal-every-frame` / `test`：旧分支，指向 `156a16b`
+- 提交前请确认：
+  - 没有修改场景中的静态光带/粒子的 Transform；
+  - 没有运行 Rebuild；
+  - 传送门 A/B 的 `facing`、旋转、PortalHeight、carve 参数与场景一致；
+  - PlayMode 23 个用例通过。

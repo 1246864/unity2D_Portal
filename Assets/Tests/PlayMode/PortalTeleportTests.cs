@@ -72,15 +72,16 @@ namespace Platformer.Tests
             Assert.AreEqual(pair.PortalHeight, gateB.size.y, 0.001f, "B 的碰撞箱高度应等于门洞高度。");
 
             // 改 PortalPair 上的一对偏移，两扇门的门洞高度与碰撞箱应一起变化。
-            pair.maskTopOffset = 2f;
-            pair.maskBottomOffset = -2f;
+            // 场景当前是 ±2（高度 4），这里改成 ±3（高度 6），避免用相同值做无效断言。
+            pair.maskTopOffset = 3f;
+            pair.maskBottomOffset = -3f;
             yield return null;
             yield return null;
 
-            Assert.AreEqual(4f, a.PortalHeight, 0.001f, "改偏移后 A 的高度应变为 4。");
-            Assert.AreEqual(4f, b.PortalHeight, 0.001f, "改偏移后 B 的高度应变为 4。");
-            Assert.AreEqual(4f, gateA.size.y, 0.001f, "A 的碰撞箱高度应更新为 4。");
-            Assert.AreEqual(4f, gateB.size.y, 0.001f, "B 的碰撞箱高度应更新为 4。");
+            Assert.AreEqual(6f, a.PortalHeight, 0.001f, "改偏移后 A 的高度应变为 6。");
+            Assert.AreEqual(6f, b.PortalHeight, 0.001f, "改偏移后 B 的高度应变为 6。");
+            Assert.AreEqual(6f, gateA.size.y, 0.001f, "A 的碰撞箱高度应更新为 6。");
+            Assert.AreEqual(6f, gateB.size.y, 0.001f, "B 的碰撞箱高度应更新为 6。");
         }
 
         [UnityTest]
@@ -139,7 +140,7 @@ namespace Platformer.Tests
             yield return new WaitForFixedUpdate();
             yield return new WaitForFixedUpdate();
 
-            // A 在场景中被旋转过，不适合用水平行走进入；用未旋转的 B 做入口。
+            // 用 B 门做入口：起点放在 B 的开口方向外侧，向门内移动。
             Vector3 start = (Vector3)b.transform.position
                             + (Vector3)b.OpeningDirection * 1.2f;
             controller.Teleport(start);
@@ -155,7 +156,7 @@ namespace Platformer.Tests
                 yield return new WaitForFixedUpdate();
                 elapsed += Time.fixedDeltaTime;
 
-                // 出口是 A；A 被旋转/抬高，不能用单一 X 判断，改用距离。
+                // 出口是 A；两门存在相对旋转和高度差，不能用单一 X 判断，改用距离。
                 if (Vector2.Distance(player.transform.position, a.transform.position) < 2f)
                 {
                     teleported = true;
@@ -191,7 +192,7 @@ namespace Platformer.Tests
             int aOpenCount = a.OpenAnimationCount;
             int bOpenCount = b.OpenAnimationCount;
 
-            // 用未旋转的 B 做入口：玩家水平走进 B，出口是旋转后的 A。
+            // 用 B 门做入口：B 当前旋转 45°，起点沿其开口方向外侧，出口是 A。
             Vector3 start = (Vector3)b.transform.position
                             + (Vector3)b.OpeningDirection * 1.2f;
             controller.Teleport(start);
@@ -416,13 +417,14 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
-        public IEnumerator Portal_Hint_Properties_Follow_Runtime_Changes()
+        public IEnumerator Portal_Hint_Stays_Static_While_Material_Follows_Facing()
         {
             FindGroups(out var a, out _);
 
             Assert.IsNotNull(a);
             Assert.IsNotNull(a.viewCenter, "A 应有视觉中心。");
             Assert.IsNotNull(a.HintRenderer, "A 应有门位置光带。");
+            Assert.IsNotNull(a.HintParticles, "A 应有门位置粒子。");
 
             Transform center = a.viewCenter;
             Vector3 originalCenter = center.localPosition;
@@ -433,13 +435,8 @@ namespace Platformer.Tests
             Vector3 originalHintScale = a.HintRenderer.transform.lossyScale;
             Vector3 originalParticlePosition = a.HintParticles.transform.position;
 
-            // 移动视觉中心：光带是静态对象，位置/层级不能动，只有材质方向等运行时属性可变。
+            // 光带/粒子是场景静态对象；移动视觉中心不应移动它们。
             center.localPosition = originalCenter + new Vector3(0.5f, 0f, 0f);
-
-            float expectedLineX = center.position.x - a.FacingSign * a.hintBackOffset;
-            Assert.AreEqual(expectedLineX, a.HintLinePosition.x, 0.01f,
-                "HintLinePosition 应实时反映视觉中心的新位置。");
-
             yield return null;
 
             Assert.AreEqual(originalHintPosition, a.HintRenderer.transform.position,

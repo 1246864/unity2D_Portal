@@ -69,8 +69,9 @@ namespace Platformer.Tests
 
             Vector2 portal = groupA.transform.position;
             Vector2 back = groupA.BackDirection; // A 朝左，背向是 +X
-            Vector2 inside = portal + back * 0.2f;   // 矩形内部：0 < 0.2 < 0.5
-            Vector2 outside = portal + back * 0.8f;  // 矩形外部：0.8 > 0.5，仍在墙格内
+            Vector2 inside = portal + back * 0.2f;
+            // 矩形长度取当前 PortalPair 的 carveWidth（场景为 0.8），再多留一点作为外部点。
+            Vector2 outside = portal + back * (pair.carveWidth + 0.15f);
 
             var gateCell = new Vector3Int(
                 Mathf.FloorToInt(portal.x),
@@ -85,7 +86,7 @@ namespace Platformer.Tests
             Assert.IsNotNull(Physics2D.OverlapPoint(outside, groundMask),
                 "开门前，矩形外部的点应该能检测到 Ground 碰撞。");
 
-            // 激活 A：carver 应该只切掉背向 0.5 长的矩形。
+            // 激活 A：carver 应该只切掉背向 carveWidth 长的矩形。
             groupA.gameObject.SetActive(true);
             yield return new WaitForFixedUpdate();
             yield return null;
