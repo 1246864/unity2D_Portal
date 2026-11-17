@@ -2,7 +2,7 @@
 
 一个可运行的 2D 横版平台跳跃 + 双门传送门原型。关卡由 1×1 Tilemap 搭建，角色支持 6 格跳高、45° 斜坡、土狼时间和跳跃缓冲；场景中的 `Portal A` / `Portal B` 支持任意角度旋转、玩家显示/物理分离、地形动态开洞和相机相对映射。
 
-> 当前验证：**23/23 PlayMode 通过**（最近一次：`Logs/TestResults_vector.xml`，27.27 秒）。
+> 当前验证：**23/23 PlayMode 通过**（最近一次：`Logs/TestResults_scene.xml`，26.21 秒）。
 > 详细架构、场景数据与已知问题见 **[PROJECT.md](PROJECT.md)**，实现细节见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**。
 
 ## 快速开始
@@ -59,7 +59,11 @@ Portal Pair
 - A 的相机画面画到 B 的 `Portal View`，B 的相机画面画到 A 的 `Portal View`；
 - Portal View 的 Snapshot(8) 层从传送门相机 `cullingMask` 排除，避免递归；
 - A 保留右半、B 保留左半，中线留 1px；
-- 遮罩节点按开门进度上下移动，并转向玩家眼睛。
+- 遮罩节点按开门进度上下移动，并转向玩家眼睛；
+- `CaptureDisplayGroup` 在 `Awake/Start` 自动查找本组的 `Portal View Center`、`Portal View`、`View Mask Top/Bottom`，也可通过右键菜单“重新查找 Portal View 结构”手动刷新；
+- `OutputHalf` / `SetOutputHalf()` 只改本门输出；
+- 要控制“另一扇门使用我的相机的哪半张纹理”，用 `SetPartnerCameraHalf()` / `PartnerOutputHalf`（只改 partner，不改自己）；
+- 本门换输出半屏会自动对齐 Portal View 的 X；从另一扇门控制 partner 时，partner 首次裁切仍自动对齐，已有半屏后只替换纹理、不改对方 X。
 
 ## 地形与描边
 

@@ -16,6 +16,13 @@ namespace Platformer
         [InspectorName("朝右")] Right
     }
 
+    /// <summary>Portal View 当前显示的半屏纹理。</summary>
+    public enum PortalViewHalf
+    {
+        [InspectorName("左半")] Left,
+        [InspectorName("右半")] Right
+    }
+
     /// <summary>
     /// 一个捕获显示组：把快照相机、Portal View Center（视觉中心）、输出精灵和捕获控制器打包在同一个组节点下。
     ///
@@ -35,10 +42,10 @@ namespace Platformer
         [Header("内部引用")]
         [Tooltip("本组的捕获控制器")]
         public RegionSnapshotCamera capture;
-        [Tooltip("本组的画面精灵（会被对方那组画上画面）")]
+        [Tooltip("本组的画面精灵（会被对方那组画上画面）；启动时自动查找 Portal View")]
         public SpriteRenderer output;
 
-        [Tooltip("传送门画面的父节点（视觉中心）；留空时自动取输出精灵的父节点")]
+        [Tooltip("传送门画面的父节点（视觉中心）；启动时自动查找 Portal View Center")]
         public Transform viewCenter;
 
         [Tooltip("本门显示精灵所在的游戏对象（开始时自动获取）")]
@@ -129,9 +136,9 @@ namespace Platformer
         bool _hasLastFacing;
 
         [Header("遮罩")]
-        [Tooltip("上遮罩节点（自动查找 View Mask Top）")]
+        [Tooltip("上遮罩节点；启动时自动查找 View Mask Top")]
         public Transform maskTop;
-        [Tooltip("下遮罩节点（自动查找 View Mask Bottom）")]
+        [Tooltip("下遮罩节点；启动时自动查找 View Mask Bottom")]
         public Transform maskBottom;
 
         [Header("开门动画")]
@@ -205,12 +212,108 @@ namespace Platformer
         /// <summary>玩家的 Transform（未下发玩家时为 null）。</summary>
         public Transform PlayerTransform => player != null ? player.transform : null;
 
+        /// <summary>
+        /// 本门 Portal View 显示对方相机纹理的哪一半。
+        /// 默认 A 门右半、B 门左半；可在运行时直接修改。
+        /// </summary>
+        public PortalViewHalf OutputHalf
+        {
+            get
+            {
+                if (!_outputHalfInitialized)
+                    return side == CaptureGroupSide.A ? PortalViewHalf.Right : PortalViewHalf.Left;
+                return _outputHalf;
+            }
+            set
+            {
+                _outputHalf = value;
+                _outputHalfInitialized = true;
+
+                // 本门直接改半屏：按新半屏自动对齐 Portal View 的 X。
+                ApplyHalfCrop(true, false);
+            }
+        }
+
+        /// <summary>
+        /// 直接设置本门输出使用的半屏纹理。
+        /// </summary>
+        public void SetOutputHalf(PortalViewHalf half)
+        {
+            OutputHalf = half;
+        }
+
+        /// <summary>
+        /// 只替换输出半屏纹理，不移动 Portal View 的 X。
+        /// 供 partner 控制 API 使用；本门直接改半屏请用 OutputHalf/SetOutputHalf。
+        /// </summary>
+        public void SetOutputHalfPreservingX(PortalViewHalf half)
+        {
+            _outputHalf = half;
+            _outputHalfInitialized = true;
+
+            // 还没有裁过半屏时先正常对齐；已经裁过才保留当前 X。
+            bool alreadyCropped = output != null && _halfSprite != null && output.sprite == _halfSprite;
+            ApplyHalfCrop(true, alreadyCropped);
+        }
+
+        /// <summary>另一扇门（partner）的输出 SpriteRenderer；partner 未解析或没有输出时为 null。</summary>
+        public SpriteRenderer PartnerOutput => partner != null ? partner.output : null;
+
+        /// <summary>另一扇门（partner）的输出 GameObject；没有输出时为 null。</summary>
+        public GameObject PartnerOutputObject => PartnerOutput != null ? PartnerOutput.gameObject : null;
+
+        /// <summary>
+        /// 另一扇门（partner）当前输出使用的半屏纹理。
+        /// 在 A 上设置它，就是控制 B 的 Portal View 使用 A 相机的哪半张纹理。
+        /// </summary>
+        public PortalViewHalf PartnerOutputHalf
+        {
+            get
+            {
+                if (partner != null) return partner.OutputHalf;
+                if (_pendingPartnerHalf.HasValue) return _pendingPartnerHalf.Value;
+                return side == CaptureGroupSide.A ? PortalViewHalf.Left : PortalViewHalf.Right;
+            }
+            set
+            {
+                SetPartnerOutputHalf(value);
+            }
+        }
+
+        /// <summary>
+        /// 直接控制另一扇门（partner）的输出使用哪一半纹理。
+        /// 例如在 A 的 ChangeFacing 中调用 SetPartnerOutputHalf(...) 修改 B 的输出。
+        /// 如果调用时 partner 尚未解析，会先缓存，等 ResolvePartner 后自动应用。
+        /// </summary>
+        public void SetPartnerOutputHalf(PortalViewHalf half)
+        {
+            _pendingPartnerHalf = half;
+            if (partner != null)
+            {
+                partner.SetOutputHalfPreservingX(half);
+                _pendingPartnerHalf = null;
+            }
+        }
+
+        /// <summary>
+        /// 明确的语义别名：只修改 partner 的输出，不修改自己。
+        /// 在 A 上调用 SetPartnerCameraHalf(Right)，表示让 B 使用 A 相机的右半张纹理。
+        /// </summary>
+        public void SetPartnerCameraHalf(PortalViewHalf half)
+        {
+            SetPartnerOutputHalf(half);
+        }
+
         /// <summary>门的视觉中心：优先用 Portal View Center，否则退回组根节点。</summary>
         Transform ViewAnchor => viewCenter != null
             ? viewCenter
             : (output != null && output.transform.parent != null ? output.transform.parent : transform);
 
+        Sprite _fullSprite;
         Sprite _halfSprite;
+        PortalViewHalf _outputHalf;
+        bool _outputHalfInitialized;
+        PortalViewHalf? _pendingPartnerHalf;
         PortalPair _pair;
         Transform _viewAnchor;
         Transform _partnerViewAnchor;
@@ -237,11 +340,20 @@ namespace Platformer
             _lastFacing = facing;
             _hasLastFacing = true;
 
+            // 先解析本组自己的 View 结构，WireUp 需要 output 已就位。
+            ResolveViewRig();
+
+            // 在任何半屏裁切/partner 调用之前记录 Portal View 的原始局部位置。
+            if (output != null)
+            {
+                _viewBaseLocalPosition = output.transform.localPosition;
+                _hasViewBase = true;
+            }
+
             ResolvePartner();
             WireUp();
 
             _pair = GetComponentInParent<PortalPair>();
-            ResolveMaskRig();
             CachePlayer();
             CacheViewAnchors();
             EnsureHint();
@@ -269,6 +381,9 @@ namespace Platformer
 
         void Start()
         {
+            // 启动时再解析一次，兼容运行时动态创建/重命名的子对象。
+            ResolveViewRig();
+
             // 获取本门显示精灵所在的游戏对象，并记住它在视觉中心下的初始局部位置。
             // ApplyHalfCrop 只在此基础上叠加 X 偏移，不能把 Portal View Center 的 Z 偏移覆盖掉。
             if (output != null)
@@ -278,8 +393,11 @@ namespace Platformer
                 if (viewCenter == null)
                     viewCenter = output.transform.parent;
 
-                _viewBaseLocalPosition = output.transform.localPosition;
-                _hasViewBase = true;
+                if (!_hasViewBase)
+                {
+                    _viewBaseLocalPosition = output.transform.localPosition;
+                    _hasViewBase = true;
+                }
 
                 // 传送门相机排除 Portal View 所在层，避免把自己的输出拍进画面形成递归。
                 if (capture != null && capture.captureCamera != null && output.gameObject.layer != 0)
@@ -287,6 +405,10 @@ namespace Platformer
             }
 
             ChangeFacing();
+
+            // 启动时强制按最终尺寸对齐一次，避免首帧拿到半屏后不再重建。
+            ApplyHalfCrop(true, false);
+
             CachePlayer();
             CacheViewAnchors();
             EnsureHint();
@@ -315,6 +437,58 @@ namespace Platformer
         {
             // 立刻把光带方向/粒子方向同步到新朝向，而不是等下一帧 LateUpdate。
             UpdateHint();
+
+            if (side == CaptureGroupSide.A)
+            {
+                if (facing == PortalFacing.Right)
+                {
+                    Debug.Log("[CaptureDisplayGroup] A 门朝向右", this);
+                    maskTop.transform.localScale = new Vector3(-1f, 1f, 1f);
+                    maskBottom.transform.localScale = new Vector3(-1f, 1f, 1f);
+                    viewCenter.localScale = new Vector3(-1f, -1f, 1f);
+                    output.flipY = true;
+                    PartnerOutput.flipX = true;
+                    SetPartnerCameraHalf(PortalViewHalf.Right);
+                }
+                else if(facing == PortalFacing.Left)
+                {
+                    Debug.Log("[CaptureDisplayGroup] A 门朝向左", this);
+                    maskTop.transform.localScale = new Vector3(1f, -1f, 1f);
+                    maskBottom.transform.localScale = new Vector3(1f, -1f, 1f);
+                    viewCenter.localScale = new Vector3(1f, 1f, 1f);
+                    output.flipY = false;
+                    PartnerOutput.flipX = false;
+                    SetPartnerCameraHalf(PortalViewHalf.Left);
+
+                }
+            }
+            else if(side == CaptureGroupSide.B)
+            {
+                if (facing == PortalFacing.Right)
+                {
+                    Debug.Log("[CaptureDisplayGroup] B 门朝向右", this);
+                    maskTop.transform.localScale = new Vector3(1f, 1f, 1f);
+                    maskBottom.transform.localScale = new Vector3(1f, 1f, 1f);
+                    viewCenter.localScale = new Vector3(1f, -1f, 1f);
+                    output.flipY = true;
+                    PartnerOutput.flipX = false;
+                    SetPartnerCameraHalf(PortalViewHalf.Right);
+
+                }
+                else if (facing == PortalFacing.Left)
+                {
+                    Debug.Log("[CaptureDisplayGroup] B 门朝向左", this);
+                    maskTop.transform.localScale = new Vector3(1f, -1f, 1f);
+                    maskBottom.transform.localScale = new Vector3(1f, -1f, 1f);
+                    viewCenter.localScale = new Vector3(-1f, -1f, 1f);
+                    output.flipY = true;
+                    PartnerOutput.flipX = true;
+                    SetPartnerCameraHalf(PortalViewHalf.Left);
+
+
+                }
+            }
+
         }
 
         /// <summary>
@@ -706,6 +880,13 @@ namespace Platformer
                 partner = candidate;
                 break;
             }
+
+            // ChangeFacing/OnValidate 可能早于 partner 解析；把之前缓存的控制指令补发。
+            if (partner != null && _pendingPartnerHalf.HasValue)
+            {
+                partner.SetOutputHalfPreservingX(_pendingPartnerHalf.Value);
+                _pendingPartnerHalf = null;
+            }
         }
 
         /// <summary>双向连线：每组的相机都画到另一组的输出上。</summary>
@@ -718,15 +899,74 @@ namespace Platformer
             partner.capture.output = output;
         }
 
-        /// <summary>找到本组下面创建的遮罩节点。</summary>
+        /// <summary>
+        /// 启动时自动解析本组自己的 View 结构：
+        /// Portal View Center → Portal View → Portal Mask/View Mask Top/Bottom。
+        /// 也可以在 Inspector 右键菜单里手动重新查找。
+        /// </summary>
+        [ContextMenu("重新查找 Portal View 结构")]
+        public void ResolveViewRig()
+        {
+            Transform foundCenter = FindDescendant(transform, "Portal View Center");
+            if (foundCenter != null) viewCenter = foundCenter;
+
+            Transform viewRoot = viewCenter != null ? viewCenter : transform;
+            Transform foundView = FindDescendant(viewRoot, "Portal View");
+            if (foundView == null && viewRoot != transform)
+                foundView = FindDescendant(transform, "Portal View");
+
+            if (foundView != null)
+            {
+                viewObject = foundView.gameObject;
+                SpriteRenderer foundRenderer = foundView.GetComponent<SpriteRenderer>();
+                if (foundRenderer != null) output = foundRenderer;
+            }
+            else if (output != null)
+            {
+                viewObject = output.gameObject;
+            }
+
+            if (viewCenter == null && output != null)
+                viewCenter = output.transform.parent;
+
+            Transform maskRoot = FindDescendant(transform, "Portal Mask");
+            if (maskRoot == null) maskRoot = transform;
+
+            Transform foundTop = FindDescendant(maskRoot, "View Mask Top");
+            Transform foundBottom = FindDescendant(maskRoot, "View Mask Bottom");
+            if (foundTop == null && maskRoot != transform)
+                foundTop = FindDescendant(transform, "View Mask Top");
+            if (foundBottom == null && maskRoot != transform)
+                foundBottom = FindDescendant(transform, "View Mask Bottom");
+
+            if (foundTop != null) maskTop = foundTop;
+            if (foundBottom != null) maskBottom = foundBottom;
+
+            if (viewCenter == null)
+                Debug.LogWarning($"[CaptureDisplayGroup] {name} 未找到 Portal View Center。", this);
+            if (output == null)
+                Debug.LogWarning($"[CaptureDisplayGroup] {name} 未找到 Portal View（SpriteRenderer）。", this);
+            if (maskTop == null || maskBottom == null)
+                Debug.LogWarning($"[CaptureDisplayGroup] {name} 缺少 View Mask Top/Bottom。", this);
+        }
+
+        static Transform FindDescendant(Transform root, string childName)
+        {
+            if (root == null) return null;
+
+            Transform[] all = root.GetComponentsInChildren<Transform>(true);
+            foreach (Transform item in all)
+            {
+                if (item != root && item.name == childName)
+                    return item;
+            }
+            return null;
+        }
+
+        /// <summary>兼容旧调用：解析遮罩节点（现在会同时解析整个 View 结构）。</summary>
         public void ResolveMaskRig()
         {
-            if (maskTop != null && maskBottom != null) return;
-
-            Transform maskRoot = transform.Find("Portal Mask");
-            if (maskRoot == null) maskRoot = transform;
-            if (maskTop == null) maskTop = maskRoot.Find("View Mask Top");
-            if (maskBottom == null) maskBottom = maskRoot.Find("View Mask Bottom");
+            ResolveViewRig();
         }
 
         /// <summary>
@@ -778,17 +1018,34 @@ namespace Platformer
         /// </summary>
         public void ApplyHalfCrop()
         {
+            ApplyHalfCrop(false, false);
+        }
+
+        void ApplyHalfCrop(bool force, bool preserveX)
+        {
             if (output == null) return;
 
-            Sprite full = output.sprite;
-            if (full == null || full == _halfSprite) return;
+            // 保留完整的捕获 Sprite：切到另一半时不能以已经裁过的半屏为源。
+            Sprite current = output.sprite;
+            if (current != null && current != _halfSprite)
+                _fullSprite = current;
+
+            Sprite full = _fullSprite != null ? _fullSprite : current;
+            if (full == null) return;
+
+            if (!force && output.sprite == _halfSprite)
+                return;
 
             float fullWidth = full.bounds.size.x;
             float pixelsPerUnit = full.pixelsPerUnit;
 
-            // A 保留右半，B 保留左半。两半都在中线处留出一点缝隙：
-            // 共用的像素列会在交叉显示时被放大成一条明显的接缝。
-            bool rightHalf = side == CaptureGroupSide.A;
+            // 资源重建的瞬间可能拿到零尺寸 Sprite；此时不要用它把 X 摆到 0。
+            if (fullWidth <= 0.0001f || pixelsPerUnit <= 0.0001f)
+                return;
+
+            // 默认 A 保留右半、B 保留左半；可通过 OutputHalf 直接切换。
+            // 两半都在中线处留出一点缝隙，避免交叉显示时出现亮线。
+            bool rightHalf = OutputHalf == PortalViewHalf.Right;
             float halfPixels = full.rect.width * 0.5f;
             float gapPixels = Mathf.Clamp(centerGapPixels, 0f, halfPixels * 0.5f);
 
@@ -814,8 +1071,12 @@ namespace Platformer
                 _hasViewBase = true;
             }
 
-            // 在 Portal View 的初始局部位置（可能带有 Portal View Center 的 Z 偏移）上叠加半屏 X 偏移。
-            output.transform.localPosition = _viewBaseLocalPosition + new Vector3(offset, 0f, 0f);
+            // 换输出半屏时保留当前 X，只改纹理；尺寸变化/正常刷新才重新摆位。
+            if (!preserveX)
+            {
+                // 在 Portal View 的初始局部位置（可能带有 Portal View Center 的 Z 偏移）上叠加半屏 X 偏移。
+                output.transform.localPosition = _viewBaseLocalPosition + new Vector3(offset, 0f, 0f);
+            }
         }
     }
 }

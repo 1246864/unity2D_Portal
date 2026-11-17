@@ -118,11 +118,25 @@ namespace Platformer.Tests
 
             foreach (var group in new[] { groupA, groupB })
             {
+                // 清空引用后重新解析，验证启动时的自动查找逻辑。
+                group.viewCenter = null;
+                group.output = null;
+                group.maskTop = null;
+                group.maskBottom = null;
+                group.ResolveViewRig();
+
                 Assert.IsNotNull(group.viewCenter, $"{group.side} 应解析到 Portal View Center。");
                 Assert.AreEqual("Portal View Center", group.viewCenter.name,
                     $"{group.side} 的视觉中心应为 Portal View Center。");
+                Assert.IsNotNull(group.output, $"{group.side} 应解析到 Portal View。");
+                Assert.AreEqual("Portal View", group.output.name,
+                    $"{group.side} 的显示精灵应名为 Portal View。");
                 Assert.AreEqual(group.viewCenter, group.output.transform.parent,
                     "Portal View 应是 Portal View Center 的直接子节点。");
+                Assert.IsNotNull(group.maskTop, $"{group.side} 应解析到 View Mask Top。");
+                Assert.IsNotNull(group.maskBottom, $"{group.side} 应解析到 View Mask Bottom。");
+                Assert.AreEqual("View Mask Top", group.maskTop.name);
+                Assert.AreEqual("View Mask Bottom", group.maskBottom.name);
 
                 int outputLayer = group.output.gameObject.layer;
                 Assert.AreNotEqual(0, outputLayer, "Portal View 应在专用层（Snapshot）。");
@@ -153,6 +167,48 @@ namespace Platformer.Tests
                 Object.Destroy(sprite);
                 Object.Destroy(texture);
             }
+
+            // 默认 A 右半、B 左半，并验证可以从另一扇门直接改写输出半屏。
+            Assert.AreEqual(PortalViewHalf.Right, groupA.OutputHalf);
+            Assert.AreEqual(PortalViewHalf.Left, groupB.OutputHalf);
+
+            var apiTexture = new Texture2D(64, 32, TextureFormat.RGBA32, false);
+            var apiSprite = Sprite.Create(apiTexture, new Rect(0, 0, 64, 32),
+                new Vector2(0.5f, 0.5f), 40f);
+            groupB.output.sprite = apiSprite;
+            groupB.ApplyHalfCrop();
+            float xBeforeSelfSwitch = groupB.output.transform.localPosition.x;
+
+            // 本门直接换半屏：X 应按新半屏自动对齐。
+            groupB.OutputHalf = PortalViewHalf.Right;
+            float xAfterSelfSwitch = groupB.output.transform.localPosition.x;
+            Assert.AreEqual(PortalViewHalf.Right, groupB.OutputHalf);
+            Assert.Greater(xAfterSelfSwitch, xBeforeSelfSwitch,
+                "本门换半屏时 Portal View 的 X 应自动对齐到右半位置。");
+
+            // 从另一扇门控制 B：只换纹理，保持 B 当前的 X。
+            groupA.SetPartnerOutputHalf(PortalViewHalf.Left);
+            Assert.AreEqual(PortalViewHalf.Left, groupB.OutputHalf,
+                "A 应能直接控制 partner B 的输出半屏。");
+            Assert.AreEqual(PortalViewHalf.Left, groupA.PartnerOutputHalf,
+                "PartnerOutputHalf 应反映 B 的实际输出半屏。");
+            Assert.AreEqual(PortalViewHalf.Right, groupA.OutputHalf,
+                "修改 partner 的输出不应修改 A 自己的输出。");
+            Assert.AreEqual(xAfterSelfSwitch, groupB.output.transform.localPosition.x, 0.001f,
+                "通过 partner 换半屏时不应修改 Portal View 的 X。");
+
+            groupA.SetPartnerCameraHalf(PortalViewHalf.Right);
+            Assert.AreEqual(PortalViewHalf.Right, groupB.OutputHalf,
+                "SetPartnerCameraHalf 应只改变 B 的输出。");
+            Assert.AreEqual(PortalViewHalf.Right, groupA.OutputHalf,
+                "SetPartnerCameraHalf 不应改变 A 自己的输出。");
+            Assert.AreEqual(xAfterSelfSwitch, groupB.output.transform.localPosition.x, 0.001f,
+                "SetPartnerCameraHalf 换半屏时不应修改 Portal View 的 X。");
+
+            Object.Destroy(groupB.output.sprite);
+            groupB.output.sprite = null;
+            Object.Destroy(apiSprite);
+            Object.Destroy(apiTexture);
         }
 
         [UnityTest]
@@ -288,8 +344,13 @@ namespace Platformer.Tests
             // A 保留右半，B 保留左半。
             Assert.Greater(groupA.output.transform.localPosition.x, 0f, "Group A should show the right half.");
             Assert.Less(groupB.output.transform.localPosition.x, 0f, "Group B should show the left half.");
-            Assert.AreEqual(Vector3.one, snapshot.output.transform.lossyScale,
-                "Snapshot output must not be scaled.");
+            Vector3 outputScale = snapshot.output.transform.lossyScale;
+            Assert.AreEqual(1f, Mathf.Abs(outputScale.x), 0.001f,
+                "Snapshot output X scale must remain 1.");
+            Assert.AreEqual(1f, Mathf.Abs(outputScale.y), 0.001f,
+                "Snapshot output Y scale must remain 1 (flip is represented by its sign).");
+            Assert.AreEqual(1f, Mathf.Abs(outputScale.z), 0.001f,
+                "Snapshot output Z scale must remain 1.");
 
             // 新的 Portal View Center 层级：半屏 X 偏移不能覆盖 Portal View 自己的 Z 偏移。
             Assert.AreEqual(0f, groupA.output.transform.position.z, 0.01f,

@@ -1,7 +1,7 @@
 # 2D 传送门（unity2D_Portal）— 项目总览
 
 > 当前开发版：捕获范围静态/动态双模式（基于 `83e95e7`）
-> 当前测试：**23/23 PlayMode 通过**（`Logs/TestResults_vector.xml`，27.27 秒）
+> 当前测试：**23/23 PlayMode 通过**（`Logs/TestResults_scene.xml`，26.21 秒）
 > 本文档描述当前实际状态；历史更新报告已合并到本文与 `docs/DEVELOPMENT.md`。
 
 ---
@@ -177,7 +177,7 @@ Portal Pair                 PortalPair，world (3,3)
 | 组件 | 挂载位置 | 职责 |
 |---|---|---|
 | `PortalPair` | `Portal Pair` | 玩家引用、门薄碰撞箱、碰撞转发、传送、冷却、相机相对映射、地形开洞接入、画面尺寸配置与下发 |
-| `CaptureDisplayGroup` | `Portal A/B` | 配对/交叉连线、遮罩、半屏裁剪、颜色/可见性、静态光带驱动、碰撞转发 |
+| `CaptureDisplayGroup` | `Portal A/B` | 配对/交叉连线、自动查找 View 结构、遮罩、半屏裁剪、颜色/可见性、静态光带驱动、碰撞转发 |
 | `RegionSnapshotCamera` | `Portal Capture` | 相机 → RenderTexture → Texture2D → Sprite |
 | `PortalTerrainCarver` | `Portal Pair`（运行时补） | 按门洞矩形切割 Tilemap 碰撞并恢复 |
 
@@ -201,7 +201,21 @@ public Vector2 BackDirection => -OpeningDirection;
 - B 朝右旋转 45°：`(0.707, 0.707)`；
 - 门整体旋转时，开口方向、背面判断、开洞方向、出口和速度全部实时跟随。
 
-### 6.3 成像与交叉输出
+### 6.3 本组 View 结构自动解析
+
+`CaptureDisplayGroup.Awake()` 和 `Start()` 都会调用 `ResolveViewRig()`，从本组子物体中按名字查找：
+
+```text
+Portal View Center
+  └─ Portal View（SpriteRenderer）
+Portal Mask
+  ├─ View Mask Top
+  └─ View Mask Bottom
+```
+
+查找结果写入 `viewCenter`、`output`、`viewObject`、`maskTop`、`maskBottom`，因此场景引用留空也能工作。Inspector 右键菜单“重新查找 Portal View 结构”可手动刷新。`ResolveMaskRig()` 保留为兼容入口，内部也走 `ResolveViewRig()`。
+
+### 6.4 成像与交叉输出
 
 ```text
 A 的 Portal Capture → 渲染 A 的相机 → 画到 B 的 Portal View
@@ -226,16 +240,47 @@ partner.capture.output = output;
 - Portal Camera 的 `cullingMask` 排除 Portal View 所在 Snapshot(8) 层，避免递归；
 - 主相机仍渲染 Snapshot 层。
 
-### 6.4 半屏裁剪
+### 6.5 半屏裁剪
 
 `ApplyHalfCrop()`：
 
-- A 保留右半，B 保留左半；
+- 默认 A 保留右半，B 保留左半；
 - 中线留 `centerGapPixels=1`；
 - 用完整纹理的一半重建 Sprite，X 偏移 `±(W/4 + gap/2)`；
 - 在 `Portal View` 初始 localPosition 上叠加，只改 X，不覆盖 `Portal View Center` 的 Z 偏移。
 
-### 6.5 遮罩
+可以通过 `CaptureDisplayGroup` 直接改写某扇门输出使用的半屏：
+
+```csharp
+// 设置自己（A 的 Portal View 使用 B 相机的哪半）
+groupA.OutputHalf = PortalViewHalf.Right;
+groupA.SetOutputHalf(PortalViewHalf.Left);
+
+// 控制另一扇门（A 的 partner 是 B）
+// 语义：让 B 的 Portal View 使用 A 相机的右半，A 自己的输出不变
+groupA.SetPartnerCameraHalf(PortalViewHalf.Right);
+groupA.SetPartnerOutputHalf(PortalViewHalf.Right); // 同义
+groupA.PartnerOutputHalf = PortalViewHalf.Right;   // 属性写法
+```
+
+- `PortalViewHalf.Left / Right`
+- `OutputHalf`：本门 Portal View 使用 partner 相机的哪半张纹理；
+- `PartnerOutputHalf` / `SetPartnerOutputHalf` / `SetPartnerCameraHalf`：从当前门控制 partner 的输出，也就是“我的相机哪半张纹理给对方显示”；不会改自己的 `OutputHalf`；
+- 本门 `OutputHalf` / `SetOutputHalf` setter 会立即重建半屏 Sprite，并**按新半屏自动对齐 Portal View 的 localPosition.x**；
+- `PartnerOutputHalf` / `SetPartnerOutputHalf` / `SetPartnerCameraHalf` 只替换 partner 的纹理；partner 还没有半屏时仍会自动对齐一次，已经处于半屏时才**不修改对方的 Portal View localPosition.x**；
+- 首次裁切/尺寸变化/正常刷新仍会重新计算半屏 X 偏移；
+- `_fullSprite` 会缓存完整捕获纹理，所以可以在左半/右半之间反复切换，不会以半屏为源二次裁剪；
+- 如果调用时 `partner` 尚未解析，控制值会缓存，等 `ResolvePartner()` 后补发。
+
+因此 A 的 `ChangeFacing()` 应在完成自己的显示变化后调用：
+
+```csharp
+SetPartnerCameraHalf(PortalViewHalf.Right); // B 使用 A 相机的右半
+```
+
+而不是 `SetOutputHalf(...)`，后者只会改 A 自己的输出。
+
+### 6.6 遮罩
 
 每端两块 `View Mask Top/Bottom`：
 
@@ -246,7 +291,7 @@ partner.capture.output = output;
 
 > 已知问题：运行时主相机截图中曾出现 Portal View 以整块着色画面叠加、未被裁成门洞的现象。当前测试只校验遮罩节点、排序和高度，不校验像素；视觉验收时需要单独确认。
 
-### 6.6 静态光带/粒子
+### 6.7 静态光带/粒子
 
 - `CaptureDisplayGroup.hintRenderer` / `hintParticles` 是场景引用；
 - 运行时 `EnsureHint()` 只赋 Sprite/材质，不创建对象；
@@ -255,7 +300,7 @@ partner.capture.output = output;
 - 排序层统一为 `Portal light band`，光带 order 0，粒子 order 1；
 - A 蓝、B 红；`Hidden/Platformer/PortalHintBeam` 加法混合。
 
-### 6.7 传送
+### 6.8 传送
 
 `PortalPair.Teleport`：
 
@@ -291,7 +336,7 @@ outVelocity  = partner.OpeningDirection * (-normalSpeed)
 - 传送后本帧强制双门 `CaptureNow()` + `ApplyHalfCrop()`；
 - 相机相对矩阵由 `PortalPair` 记录，`CameraFollow2D.TeleportRelative()` 延迟到 LateUpdate 应用。
 
-### 6.8 玩家显示与回正
+### 6.9 玩家显示与回正
 
 `PlayerController2D`：
 
@@ -306,7 +351,7 @@ outVelocity  = partner.OpeningDirection * (-normalSpeed)
   - `portalRealignGroundedSpeedMultiplier=6`
 - 回正在 `Update` 中推进；触地/下坠加速；结束后显示角度归 0。
 
-### 6.9 相机
+### 6.10 相机
 
 `CameraFollow2D` 当前实现：
 
@@ -325,7 +370,7 @@ cameraRelative = playerVisual.worldToLocalMatrix * camera.localToWorldMatrix
 
 > 这取代了旧版“只维护玩家显示空间 `_localOffset`”的方案；旧文档中的描述已不再适用。
 
-### 6.10 地形开洞
+### 6.11 地形开洞
 
 `PortalTerrainCarver` 由 `PortalPair` 运行时 `AddComponent`：
 
@@ -440,7 +485,7 @@ Start
 
 ## 11. 测试（23/23）
 
-最近结果：`Logs/TestResults_vector.xml`，23 total / 23 passed / 0 failed，27.27 秒。
+最近结果：`Logs/TestResults_scene.xml`，23 total / 23 passed / 0 failed，26.21 秒。
 
 | 文件 | 用例数 | 覆盖 |
 |---|---:|---|

@@ -140,9 +140,10 @@ namespace Platformer.Tests
             yield return new WaitForFixedUpdate();
             yield return new WaitForFixedUpdate();
 
-            // 用 B 门做入口：起点放在 B 的开口方向外侧，向门内移动。
+            // 用 B 门做入口：B 在场景中位置较高，起点贴近门一些，
+            // 避免玩家在下落过程中错过门洞。
             Vector3 start = (Vector3)b.transform.position
-                            + (Vector3)b.OpeningDirection * 1.2f;
+                            + (Vector3)b.OpeningDirection * 0.45f;
             controller.Teleport(start);
             yield return new WaitForFixedUpdate();
             yield return new WaitForFixedUpdate();
@@ -192,9 +193,10 @@ namespace Platformer.Tests
             int aOpenCount = a.OpenAnimationCount;
             int bOpenCount = b.OpenAnimationCount;
 
-            // 用 B 门做入口：B 当前旋转 45°，起点沿其开口方向外侧，出口是 A。
+            // 用 B 门做入口：B 在当前场景中位置较高，起点贴近门以减少下落，
+            // 出口是 A。
             Vector3 start = (Vector3)b.transform.position
-                            + (Vector3)b.OpeningDirection * 1.2f;
+                            + (Vector3)b.OpeningDirection * 0.45f;
             controller.Teleport(start);
             yield return new WaitForFixedUpdate();
             yield return new WaitForFixedUpdate();

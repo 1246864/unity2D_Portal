@@ -1,7 +1,7 @@
 # 开发文档 — 2D 平台跳跃 / 传送门
 
 > 当前开发版：捕获范围静态/动态双模式（基于 `83e95e7`）
-> 最近验证：23/23 PlayMode 通过（`Logs/TestResults_vector.xml`，27.27 秒）
+> 最近验证：23/23 PlayMode 通过（`Logs/TestResults_scene.xml`，26.21 秒）
 > 项目总览见 **[../PROJECT.md](../PROJECT.md)**，快速开始见 **[../README.md](../README.md)**。
 
 ---
@@ -204,6 +204,20 @@ world = newPlayerVisual.localToWorldMatrix * cameraRelative
 - 分组：水平移动、跳跃、地面检测、重生、传送门碰撞点、显示、传送门旋转、回正动态加速；
 - 不改变字段名，兼容序列化和测试。
 
+### 3.11 输出半屏控制
+
+`CaptureDisplayGroup` 提供：
+
+```csharp
+public PortalViewHalf OutputHalf { get; set; }          // 本门显示 partner 相机的哪半
+public PortalViewHalf PartnerOutputHalf { get; set; }   // 控制 partner 门使用我的相机的哪半
+public void SetOutputHalf(PortalViewHalf half);         // 只改自己
+public void SetPartnerOutputHalf(PortalViewHalf half);  // 只改 partner
+public void SetPartnerCameraHalf(PortalViewHalf half);  // 同义，只改 partner
+```
+
+`ApplyHalfCrop()` 使用 `_fullSprite` 缓存完整捕获纹理；切换半屏时会强制重建，避免以已经裁过的半屏为源。默认 A 右半、B 左半。本门 `OutputHalf` / `SetOutputHalf` 使用 `preserveX: false`，按新半屏自动对齐 Portal View 的 X；partner 控制 API 在对方还没有半屏时先正常对齐，对方已有半屏时才使用 `preserveX: true`，只替换纹理、不修改对方 Portal View 的 X。首次裁切/尺寸变化/正常刷新仍会重新计算半屏 X 偏移。
+
 ---
 
 ## 4. 生命周期/帧顺序
@@ -212,7 +226,7 @@ world = newPlayerVisual.localToWorldMatrix * cameraRelative
 Awake
   PlayerController2D → EnsureVisualRoot / Center Point
   PortalPair → CacheGroups / EnsureGates / EnsureTerrainCarver / PushPlayer / PushViewSettings
-  CaptureDisplayGroup → ResolvePartner / WireUp / 遮罩 / EnsureHint
+  CaptureDisplayGroup → ResolveViewRig / ResolvePartner / WireUp / EnsureHint
 
 Start
   RegionSnapshotCamera → 分配 RT / Sprite / 启用 Portal Camera / Capture
@@ -264,7 +278,7 @@ Unity.exe -batchmode -projectPath <项目> `
 | `PortalTeleportTests` | 8 |
 | `PortalTerrainCarverTests` | 3 |
 
-最近结果：23/23，0 failed，27.27 秒。
+最近结果：23/23，0 failed，26.21 秒。
 
 测试注意事项：
 
