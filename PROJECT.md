@@ -1,7 +1,7 @@
 # 2D 传送门（unity2D_Portal）— 项目总览
 
 > 当前开发版：捕获范围静态/动态双模式（基于 `83e95e7`）
-> 当前测试：**23/23 PlayMode 通过**（`Logs/TestResults_scene.xml`，26.21 秒）
+> 当前测试：**23/23 PlayMode 通过**（`Logs/TestResults_newscene3.xml`，27.13 秒）
 > 本文档描述当前实际状态；历史更新报告已合并到本文与 `docs/DEVELOPMENT.md`。
 
 ---
@@ -485,7 +485,7 @@ Start
 
 ## 11. 测试（23/23）
 
-最近结果：`Logs/TestResults_scene.xml`，23 total / 23 passed / 0 failed，26.21 秒。
+最近结果：`Logs/TestResults_newscene3.xml`，23 total / 23 passed / 0 failed，27.13 秒。
 
 | 文件 | 用例数 | 覆盖 |
 |---|---:|---|

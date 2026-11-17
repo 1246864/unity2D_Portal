@@ -482,7 +482,8 @@ namespace Platformer
                     maskBottom.transform.localScale = new Vector3(1f, -1f, 1f);
                     viewCenter.localScale = new Vector3(-1f, -1f, 1f);
                     output.flipY = true;
-                    PartnerOutput.flipX = true;
+                    PartnerOutput.flipX = false;
+                    PartnerOutputObject.transform.parent.localScale = new Vector3(-1f, 1f, 1f);
                     SetPartnerCameraHalf(PortalViewHalf.Left);
 
 

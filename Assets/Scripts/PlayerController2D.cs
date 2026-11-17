@@ -25,6 +25,12 @@ namespace Platformer
         [Tooltip("空中松开方向时的减速度")]
         public float airDeceleration = 45f;
 
+        [Header("输入方向")]
+        [Tooltip("反转水平输入；开启后按右会向左走。")]
+        public bool invertHorizontalInput;
+
+        public bool IsHorizontalInputInverted => invertHorizontalInput;
+
         [Header("跳跃")]
         [Tooltip("最大跳跃高度（世界单位，等于格）")]
         public float jumpHeight = 6f;
@@ -191,6 +197,9 @@ namespace Platformer
             if (!_manualInput)
             {
                 _moveInput = Input.GetAxisRaw("Horizontal");
+                if (invertHorizontalInput)
+                    _moveInput = -_moveInput;
+
                 if (Input.GetButtonDown("Jump")) JumpPressed();
                 if (Input.GetButtonUp("Jump")) JumpReleased();
             }
@@ -424,7 +433,21 @@ namespace Platformer
         public void SetMoveInput(float horizontal)
         {
             _manualInput = true;
+            if (invertHorizontalInput)
+                horizontal = -horizontal;
             _moveInput = Mathf.Clamp(horizontal, -1f, 1f);
+        }
+
+        /// <summary>设置是否反转水平输入。</summary>
+        public void SetHorizontalInputInverted(bool inverted)
+        {
+            if (invertHorizontalInput == inverted) return;
+
+            invertHorizontalInput = inverted;
+
+            // 手动输入时立即翻转当前输入，键盘输入会在下一次 Update 重新读取。
+            if (_manualInput)
+                _moveInput = -_moveInput;
         }
 
         /// <summary>把控制权交还给键盘。</summary>

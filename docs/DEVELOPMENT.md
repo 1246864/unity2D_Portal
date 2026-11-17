@@ -1,7 +1,7 @@
 # 开发文档 — 2D 平台跳跃 / 传送门
 
 > 当前开发版：捕获范围静态/动态双模式（基于 `83e95e7`）
-> 最近验证：23/23 PlayMode 通过（`Logs/TestResults_scene.xml`，26.21 秒）
+> 最近验证：23/23 PlayMode 通过（`Logs/TestResults_newscene3.xml`，27.13 秒）
 > 项目总览见 **[../PROJECT.md](../PROJECT.md)**，快速开始见 **[../README.md](../README.md)**。
 
 ---
@@ -278,7 +278,7 @@ Unity.exe -batchmode -projectPath <项目> `
 | `PortalTeleportTests` | 8 |
 | `PortalTerrainCarverTests` | 3 |
 
-最近结果：23/23，0 failed，26.21 秒。
+最近结果：23/23，0 failed，27.13 秒。
 
 测试注意事项：
 

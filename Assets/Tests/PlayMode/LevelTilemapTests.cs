@@ -157,10 +157,12 @@ namespace Platformer.Tests
                 Assert.AreEqual(baseWorldZ, group.output.transform.position.z, 0.001f,
                     "半屏裁剪不能移动 Portal View 的世界 Z。");
 
-                if (group.side == CaptureGroupSide.A)
-                    Assert.Greater(group.output.transform.localPosition.x, 0f, "A 应显示右半。");
+                if (group.OutputHalf == PortalViewHalf.Right)
+                    Assert.Greater(group.output.transform.localPosition.x, 0f,
+                        $"{group.side} 应显示右半。");
                 else
-                    Assert.Less(group.output.transform.localPosition.x, 0f, "B 应显示左半。");
+                    Assert.Less(group.output.transform.localPosition.x, 0f,
+                        $"{group.side} 应显示左半。");
 
                 Object.Destroy(group.output.sprite);
                 group.output.sprite = null;
@@ -168,9 +170,9 @@ namespace Platformer.Tests
                 Object.Destroy(texture);
             }
 
-            // 默认 A 右半、B 左半，并验证可以从另一扇门直接改写输出半屏。
-            Assert.AreEqual(PortalViewHalf.Right, groupA.OutputHalf);
-            Assert.AreEqual(PortalViewHalf.Left, groupB.OutputHalf);
+            // 先固定为 A 右半、B 左半，再验证可以从另一扇门直接改写输出半屏。
+            groupA.OutputHalf = PortalViewHalf.Right;
+            groupB.OutputHalf = PortalViewHalf.Left;
 
             var apiTexture = new Texture2D(64, 32, TextureFormat.RGBA32, false);
             var apiSprite = Sprite.Create(apiTexture, new Rect(0, 0, 64, 32),
@@ -341,9 +343,20 @@ namespace Platformer.Tests
             Assert.AreEqual(capturedWidth * 0.5f, snapshot.output.sprite.bounds.size.x, 0.2f,
                 "Snapshot shows half of the captured width.");
 
-            // A 保留右半，B 保留左半。
-            Assert.Greater(groupA.output.transform.localPosition.x, 0f, "Group A should show the right half.");
-            Assert.Less(groupB.output.transform.localPosition.x, 0f, "Group B should show the left half.");
+            // 半屏位置必须和当前 OutputHalf 一致（场景朝向变化时半屏方向也会变）。
+            if (groupA.OutputHalf == PortalViewHalf.Right)
+                Assert.Greater(groupA.output.transform.localPosition.x, 0f,
+                    "Group A should show the right half.");
+            else
+                Assert.Less(groupA.output.transform.localPosition.x, 0f,
+                    "Group A should show the left half.");
+
+            if (groupB.OutputHalf == PortalViewHalf.Right)
+                Assert.Greater(groupB.output.transform.localPosition.x, 0f,
+                    "Group B should show the right half.");
+            else
+                Assert.Less(groupB.output.transform.localPosition.x, 0f,
+                    "Group B should show the left half.");
             Vector3 outputScale = snapshot.output.transform.lossyScale;
             Assert.AreEqual(1f, Mathf.Abs(outputScale.x), 0.001f,
                 "Snapshot output X scale must remain 1.");

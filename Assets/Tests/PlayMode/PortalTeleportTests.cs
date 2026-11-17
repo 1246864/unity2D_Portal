@@ -377,10 +377,10 @@ namespace Platformer.Tests
             Assert.Greater(materialA.GetFloat("_NoiseSpeed"), 0.5f,
                 "噪音掩码应持续移动。");
 
-            Assert.Greater(a.HintLinePosition.x, a.transform.position.x,
-                "A 朝左，细线应在门的背面（右侧）。");
-            Assert.Less(b.HintLinePosition.x, b.transform.position.x,
-                "B 朝右，细线应在门的背面（左侧）。");
+            Assert.Greater(-a.FacingSign * (a.HintLinePosition.x - a.transform.position.x), 0f,
+                "细线应在门的背面，方向与 facing 相反。");
+            Assert.Greater(-b.FacingSign * (b.HintLinePosition.x - b.transform.position.x), 0f,
+                "细线应在门的背面，方向与 facing 相反。");
 
             // 高度只看 PortalPair，不跟开门动画。
             a.PlayOpenAnimation();

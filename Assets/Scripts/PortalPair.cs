@@ -70,6 +70,7 @@ namespace Platformer
         BoxCollider2D _gateA;
         BoxCollider2D _gateB;
         PortalTerrainCarver _terrainCarver;
+        PlayerCameraMirror _cameraMirror;
 
         float _cooldown;
         bool _forceCapture;
@@ -269,6 +270,15 @@ namespace Platformer
             if (_groupB != null) _groupB.ApplyHalfCrop();
         }
 
+        void ToggleCameraMirrorAndInput()
+        {
+            if (_cameraMirror == null)
+                _cameraMirror = FindObjectOfType<PlayerCameraMirror>();
+
+            if (_cameraMirror != null)
+                _cameraMirror.ToggleMirrorAndInput();
+        }
+
         /// <summary>
         /// 把玩家送到另一扇门朝向的一侧，只离开碰撞箱一点点；
         /// 垂直方向保留玩家相对本门的高度，速度与相机相对位置一并迁移。
@@ -277,6 +287,8 @@ namespace Platformer
         {
             var controller = player.GetComponent<PlayerController2D>();
             if (controller == null) return;
+
+            bool sameFacing = source.Facing == partner.Facing;
 
             var rb = player.GetComponent<Rigidbody2D>();
             Vector3 playerPosition = player.position;
@@ -353,6 +365,30 @@ namespace Platformer
 
             // 本帧 LateUpdate 里强制两扇门各捕获一次，并重新生成半屏画面。
             _forceCapture = true;
+
+            // 后处理：两扇门朝向一致时，等传送/相机相对映射都完成后，
+            // 翻转相机与水平输入；再把相机位置沿玩家相对 Y 轴水平镜像。
+            if (sameFacing)
+            {
+                ToggleCameraMirrorAndInput();
+
+                if (followCamera != null)
+                {
+                    CameraFollow2D cameraFollow = followCamera.GetComponent<CameraFollow2D>();
+                    if (cameraFollow != null)
+                    {
+                        cameraFollow.MirrorPendingCameraPosition();
+                    }
+                    else
+                    {
+                        Vector3 localPosition = playerVisual.InverseTransformPoint(
+                            followCamera.transform.position);
+                        localPosition.x = -localPosition.x;
+                        followCamera.transform.position =
+                            playerVisual.TransformPoint(localPosition);
+                    }
+                }
+            }
         }
 
         /// <summary>

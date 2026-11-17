@@ -45,6 +45,7 @@ namespace Platformer
         bool _initialized;
         bool _wasRealigning;
         bool _pendingTeleport;
+        bool _pendingMirrorPosition;
         Transform _pendingVisual;
         Matrix4x4 _pendingRelative;
 
@@ -183,6 +184,16 @@ namespace Platformer
             _pendingVisual = playerVisual;
             _pendingRelative = relativeTransform;
             _pendingTeleport = true;
+            _pendingMirrorPosition = false;
+        }
+
+        /// <summary>
+        /// 后处理：在待应用的传送相机位置基础上，沿玩家相对 Y 轴镜像一次 X。
+        /// </summary>
+        public void MirrorPendingCameraPosition()
+        {
+            if (_pendingTeleport)
+                _pendingMirrorPosition = true;
         }
 
         void ApplyPendingTeleport()
@@ -192,6 +203,14 @@ namespace Platformer
 
             Matrix4x4 world = _pendingVisual.localToWorldMatrix * _pendingRelative;
             Decompose2D(world, out Vector3 position, out Quaternion rotation, out Vector3 scale);
+
+            if (_pendingMirrorPosition)
+            {
+                _pendingMirrorPosition = false;
+                Vector3 localPosition = _pendingVisual.InverseTransformPoint(position);
+                localPosition.x = -localPosition.x;
+                position = _pendingVisual.TransformPoint(localPosition);
+            }
 
             transform.SetPositionAndRotation(position, rotation);
             transform.localScale = scale;
