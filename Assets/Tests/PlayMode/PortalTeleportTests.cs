@@ -48,6 +48,33 @@ namespace Platformer.Tests
             }
         }
 
+        static void PrepareTransparencySandbox(PortalPair pair, CaptureDisplayGroup a, CaptureDisplayGroup b)
+        {
+            pair.carveTerrain = false;
+            a.GetComponent<BoxCollider2D>().enabled = false;
+            b.GetComponent<BoxCollider2D>().enabled = false;
+
+            Rigidbody2D rb = pair.player.GetComponent<Rigidbody2D>();
+            rb.bodyType = RigidbodyType2D.Kinematic;
+            rb.gravityScale = 0f;
+            rb.velocity = Vector2.zero;
+        }
+
+        static void PlacePlayerEye(PortalPair pair, Vector3 eye)
+        {
+            var controller = pair.player.GetComponent<PlayerController2D>();
+            controller.Teleport((Vector2)(eye - Vector3.up * pair.playerEyeOffset));
+        }
+
+        static void SetFacingTransparencyLayout(CaptureDisplayGroup a, CaptureDisplayGroup b)
+        {
+            a.transform.position = new Vector3(-1f, 0f, 0f);
+            b.transform.position = new Vector3(1f, 0f, 0f);
+            a.transform.rotation = b.transform.rotation = Quaternion.identity;
+            a.Facing = PortalFacing.Right;
+            b.Facing = PortalFacing.Left;
+        }
+
         [UnityTest]
         public IEnumerator Portal_Gates_Match_Portal_Height()
         {
@@ -219,6 +246,11 @@ namespace Platformer.Tests
             }
 
             controller.SetMoveInput(0f);
+            if (teleported)
+            {
+                Assert.AreEqual(1f, a.output.color.a, 0.05f,
+                    "B → A 传送完成后，出口 A 必须当帧恢复不透明，不能等待下一次 LateUpdate。");
+            }
             yield return null; // wait for CameraFollow2D LateUpdate
 
             Assert.IsTrue(teleported, "玩家走进门后应该被传送到另一扇门的正面。");
@@ -264,64 +296,137 @@ namespace Platformer.Tests
         public IEnumerator Other_Portal_Fades_When_Player_Is_Near()
         {
             FindGroups(out var a, out var b);
-            var player = FindPlayer();
+            var pair = Object.FindObjectOfType<PortalPair>();
+            PrepareTransparencySandbox(pair, a, b);
 
-            Assert.IsNotNull(a);
-            Assert.IsNotNull(b);
-            Assert.IsNotNull(player);
+            a.transform.position = Vector3.zero;
+            b.transform.position = new Vector3(10f, 0f, 0f);
+            a.transform.rotation = b.transform.rotation = Quaternion.identity;
+            a.Facing = b.Facing = PortalFacing.Right;
 
-            var controller = player.GetComponent<PlayerController2D>();
-            Assert.IsNotNull(controller);
-
-            // B 的 alpha 由“玩家到 A”的距离和 B 自己的 otherViewFadeDistance 决定。
-            float fade = b.otherViewFadeDistance;
+            float fade = a.otherViewFadeDistance;
             Assert.Greater(fade, 0f, "淡出距离应大于 0。");
 
-            // 用 A 的实际视觉中心作为距离基准，并临时关闭重力，
-            // 避免玩家在等待 LateUpdate 时下落导致距离和 alpha 不精确。
-            Transform anchor = a.viewCenter != null ? a.viewCenter : a.transform;
-            Rigidbody2D rb = player.GetComponent<Rigidbody2D>();
-            float originalGravity = rb != null ? rb.gravityScale : 1f;
-            RigidbodyType2D originalBodyType = rb != null ? rb.bodyType : RigidbodyType2D.Dynamic;
-            if (rb != null)
-            {
-                // 这个测试只验证距离与 alpha，不验证物理；改成 Kinematic 避免
-                // 传送点落在地形/残余碰撞里时被物理解算器推开。
-                rb.bodyType = RigidbodyType2D.Kinematic;
-                rb.gravityScale = 0f;
-                rb.velocity = Vector2.zero;
-            }
+            // 玩家眼睛位于 A 开口正面的一半衰减距离，B 应保持半透明。
+            PlacePlayerEye(pair, a.ViewAnchor.position +
+                               (Vector3)a.OpeningDirection * (fade * 0.5f));
+            yield return null;
 
-            try
-            {
-                // 靠近 A 到淡出距离的一半：另一扇门 B 应半透明，A 自己保持不透明。
-                controller.Teleport((Vector2)anchor.position
-                                    + (Vector2)anchor.right * (fade * 0.5f));
-                yield return new WaitForFixedUpdate();
-                yield return null;
+            Assert.AreEqual(0.5f, b.output.color.a, 0.05f,
+                "靠近 A 到一半距离时，B 的画面应为半透明。");
+            Assert.AreEqual(1f, a.output.color.a, 0.05f,
+                "A 是接近基准门，必须保持不透明。");
 
-                Assert.AreEqual(0.5f, b.output.color.a, 0.05f,
-                    "靠近 A 到一半距离时，B 的画面应为半透明。");
-                Assert.AreEqual(1f, a.output.color.a, 0.05f,
-                    "A 自己的画面不应变透明。");
+            PlacePlayerEye(pair, a.ViewAnchor.position +
+                               (Vector3)a.OpeningDirection * (fade * 2f));
+            yield return null;
 
-                // 退到淡出距离之外：B 恢复不透明。
-                controller.Teleport((Vector2)anchor.position
-                                    + (Vector2)anchor.right * (fade * 2f));
-                yield return new WaitForFixedUpdate();
-                yield return null;
+            Assert.AreEqual(1f, b.output.color.a, 0.05f,
+                "超过淡出距离后，B 的画面应恢复不透明。");
+            Assert.AreEqual(1f, a.output.color.a, 0.05f);
+        }
 
-                Assert.AreEqual(1f, b.output.color.a, 0.05f,
-                    "超过淡出距离后，B 的画面应恢复不透明。");
-            }
-            finally
-            {
-                if (rb != null)
-                {
-                    rb.gravityScale = originalGravity;
-                    rb.bodyType = originalBodyType;
-                }
-            }
+        [UnityTest]
+        public IEnumerator Transparency_Adapts_When_Both_Portals_Are_Inside_Fade_Range()
+        {
+            FindGroups(out var a, out var b);
+            var pair = Object.FindObjectOfType<PortalPair>();
+            PrepareTransparencySandbox(pair, a, b);
+            SetFacingTransparencyLayout(a, b);
+
+            // 使用不同上限，验证自适应交换不依赖两门配置完全一致。
+            a.otherViewFadeDistance = 2f;
+            b.otherViewFadeDistance = 2.8f;
+
+            // A 评分 0.5、B 评分 1.5；有效阈值缩小到 1.5，而不是使用上限 2。
+            PlacePlayerEye(pair, new Vector3(-0.5f, 0f, 0f));
+            yield return null;
+            Assert.AreEqual(1f, a.output.color.a, 0.01f);
+            Assert.AreEqual(1f / 3f, b.output.color.a, 0.03f,
+                "双门都在范围内时，应使用搭档评分作为实际衰减阈值。");
+
+            // 等分点两门评分都是 1，交换前 target 已恢复为 1。
+            PlacePlayerEye(pair, Vector3.zero);
+            yield return null;
+            Assert.AreEqual(1f, a.output.color.a, 0.01f,
+                "自动交换中线上 A 必须完全不透明。");
+            Assert.AreEqual(1f, b.output.color.a, 0.01f,
+                "自动交换中线上 B 必须完全不透明，不能从半透明跳变。");
+
+            // 越过中线后 B 成为 source，A 从 1 平滑进入新的距离曲线。
+            PlacePlayerEye(pair, new Vector3(0.5f, 0f, 0f));
+            yield return null;
+            Assert.AreEqual(1f / 3f, a.output.color.a, 0.03f);
+            Assert.AreEqual(1f, b.output.color.a, 0.01f);
+        }
+
+        [UnityTest]
+        public IEnumerator Selected_Portal_Overrides_Automatic_Transparency()
+        {
+            FindGroups(out var a, out var b);
+            var pair = Object.FindObjectOfType<PortalPair>();
+            PrepareTransparencySandbox(pair, a, b);
+            SetFacingTransparencyLayout(a, b);
+            a.otherViewFadeDistance = b.otherViewFadeDistance = 3f;
+
+            PlacePlayerEye(pair, new Vector3(-0.75f, 0f, 0f));
+            yield return null;
+            Assert.Less(b.output.color.a, 1f, "自动模式下接近 A 应让 B 透明。");
+
+            // 强制改以 B 为基准；当前 B 比 A 远，因此两门都应不透明。
+            pair.SelectPortal(b);
+            Assert.AreSame(b, pair.SelectedPortal);
+            Assert.AreEqual(1f, a.output.color.a, 0.01f);
+            Assert.AreEqual(1f, b.output.color.a, 0.01f,
+                "选中覆盖不能让自动 source 继续决定透明目标。");
+
+            // 玩家靠近被选中的 B 后，A 按 B 的接近评分透明。
+            PlacePlayerEye(pair, new Vector3(0.75f, 0f, 0f));
+            yield return null;
+            Assert.Less(a.output.color.a, 0.2f);
+            Assert.AreEqual(1f, b.output.color.a, 0.01f);
+
+            pair.ClearSelectedPortal();
+            Assert.IsNull(pair.SelectedPortal);
+
+            // 清除后回到 A 附近，自动模式应再次让 B 透明。
+            PlacePlayerEye(pair, new Vector3(-0.75f, 0f, 0f));
+            yield return null;
+            Assert.AreEqual(1f, a.output.color.a, 0.01f);
+            Assert.Less(b.output.color.a, 0.2f);
+
+            var foreignGo = new GameObject("ForeignPortal");
+            foreignGo.SetActive(false);
+            var foreign = foreignGo.AddComponent<CaptureDisplayGroup>();
+            Assert.Throws<System.ArgumentException>(() => pair.SelectPortal(foreign));
+            Object.Destroy(foreignGo);
+        }
+
+        [UnityTest]
+        public IEnumerator Facing_Penalty_Prevents_Back_Portal_From_Becoming_Source()
+        {
+            FindGroups(out var a, out var b);
+            var pair = Object.FindObjectOfType<PortalPair>();
+            PrepareTransparencySandbox(pair, a, b);
+
+            a.transform.position = new Vector3(-1f, 0f, 0f);
+            b.transform.position = new Vector3(1f, 0f, 0f);
+            a.transform.rotation = b.transform.rotation = Quaternion.identity;
+            a.Facing = b.Facing = PortalFacing.Right;
+            a.otherViewFadeDistance = b.otherViewFadeDistance = 3f;
+
+            // B 的直线距离只有 0.2，但玩家在 B 背面；A 距离 1.8 且位于正面。
+            PlacePlayerEye(pair, new Vector3(0.8f, 0f, 0f));
+            yield return null;
+            Assert.AreEqual(1f, a.output.color.a, 0.01f,
+                "正面较远的 A 应胜过直线距离更近但背面的 B。");
+            Assert.AreEqual(0.6f, b.output.color.a, 0.03f);
+
+            // B 改为朝左后，玩家位于 B 正面，透明目标立即换成 A。
+            b.Facing = PortalFacing.Left;
+            yield return null;
+            Assert.Less(a.output.color.a, 0.2f);
+            Assert.AreEqual(1f, b.output.color.a, 0.01f);
         }
 
         [UnityTest]

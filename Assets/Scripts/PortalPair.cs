@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -57,6 +58,16 @@ namespace Platformer
         [Tooltip("静态模式：捕获矩形高度（世界单位）")]
         [Min(0.01f)] public float captureHeight = 50f;
 
+        [Header("画面透明仲裁")]
+        [Tooltip("开口法向距离在接近评分中的权重")]
+        [Min(0f)] public float approachNormalWeight = 1f;
+
+        [Tooltip("沿门面方向的偏移在接近评分中的权重")]
+        [Min(0f)] public float approachTangentWeight = 1f;
+
+        [Tooltip("玩家位于门背面时增加的接近惩罚分")]
+        [Min(0f)] public float approachBackPenalty = 10f;
+
         [Header("地形开洞")]
         [Tooltip("传送门激活时，把门洞矩形覆盖到的地形格改为无碰撞，再重建 CompositeCollider2D")]
         public bool carveTerrain = true;
@@ -80,11 +91,15 @@ namespace Platformer
         float _cooldown;
         bool _forceCapture;
         Transform _lastPlayer;
+        CaptureDisplayGroup _automaticViewSource;
         CapsuleCollider2D _ignoredPlayerBody;
         int _originalBodyExcludeLayers;
 
         /// <summary>门碰撞箱所在层（复用 Snapshot 层，玩家身体胶囊会排除该层）。</summary>
         const int GateLayer = 8;
+
+        /// <summary>手动选中的接近基准门；null 表示自动仲裁。</summary>
+        public CaptureDisplayGroup SelectedPortal { get; private set; }
 
         /// <summary>玩家眼睛的世界坐标。</summary>
         public Vector3 PlayerEye => player != null
@@ -114,17 +129,22 @@ namespace Platformer
             PushViewSettingsToGroups();
             IgnorePlayerBodyCollision();
             CaptureDisplayGroup.ApplyFacingStates(_groupA, _groupB);
+            UpdateViewTransparency(true);
         }
 
         void OnEnable()
         {
             // 重新启用后重新绑定玩家碰撞过滤；禁用时会恢复原始位。
             _lastPlayer = null;
+            UpdateViewTransparency(true);
         }
 
         void OnDisable()
         {
             RestorePlayerBodyCollision();
+            if (_groupA != null) _groupA.SetViewAlpha(1f);
+            if (_groupB != null) _groupB.SetViewAlpha(1f);
+            _automaticViewSource = null;
         }
 
         void Update()
@@ -135,6 +155,7 @@ namespace Platformer
                 _lastPlayer = player;
                 PushPlayerToGroups();
                 IgnorePlayerBodyCollision();
+                UpdateViewTransparency(true);
             }
 
             if (_cooldown > 0f)
@@ -150,6 +171,7 @@ namespace Platformer
         void LateUpdate()
         {
             UpdateGateSizes();
+            UpdateViewTransparency();
 
             if (_forceCapture)
             {
@@ -191,6 +213,89 @@ namespace Platformer
                 Mathf.Max(0.01f, cameraSizeMultiplier.y));
             snapshot.captureWidth = Mathf.Max(0.01f, captureWidth);
             snapshot.captureHeight = Mathf.Max(0.01f, captureHeight);
+        }
+
+        /// <summary>选中一扇门作为接近基准，其搭档接收透明。</summary>
+        public void SelectPortal(CaptureDisplayGroup portal)
+        {
+            if (portal == null) throw new ArgumentNullException(nameof(portal));
+            if (portal != _groupA && portal != _groupB)
+                throw new ArgumentException("只能选中当前 PortalPair 的 A/B 门。", nameof(portal));
+
+            SelectedPortal = portal;
+            UpdateViewTransparency(true);
+        }
+
+        /// <summary>清除手动选中并立即恢复自动仲裁。</summary>
+        public void ClearSelectedPortal()
+        {
+            SelectedPortal = null;
+            UpdateViewTransparency(true);
+        }
+
+        /// <summary>
+        /// 每对门只有一个透明目标。source 始终不透明，target 的 alpha 由两门评分共同决定。
+        /// </summary>
+        void UpdateViewTransparency(bool force = false)
+        {
+            if (player == null || _groupA == null || _groupB == null)
+            {
+                if (_groupA != null) _groupA.SetViewAlpha(1f);
+                if (_groupB != null) _groupB.SetViewAlpha(1f);
+                _automaticViewSource = null;
+                return;
+            }
+
+            float scoreA = CalculateApproachScore(_groupA);
+            float scoreB = CalculateApproachScore(_groupB);
+
+            bool keepPrevious = !force && SelectedPortal == null &&
+                                _automaticViewSource != null &&
+                                Mathf.Approximately(scoreA, scoreB);
+
+            CaptureDisplayGroup source;
+            if (SelectedPortal != null)
+                source = SelectedPortal;
+            else if (keepPrevious)
+                source = _automaticViewSource;
+            else
+                source = scoreA <= scoreB ? _groupA : _groupB;
+
+            CaptureDisplayGroup target = source == _groupA ? _groupB : _groupA;
+            float sourceScore = source == _groupA ? scoreA : scoreB;
+            float partnerScore = target == _groupA ? scoreA : scoreB;
+
+            if (SelectedPortal == null)
+                _automaticViewSource = source;
+
+            source.SetViewAlpha(1f);
+            target.SetViewAlpha(CalculateTargetViewAlpha(
+                sourceScore, partnerScore, source.otherViewFadeDistance));
+        }
+
+        float CalculateApproachScore(CaptureDisplayGroup portal)
+        {
+            Transform anchor = portal.ViewAnchor;
+            Vector2 delta = PlayerEye - anchor.position;
+            float normal = Vector2.Dot(delta, portal.OpeningDirection);
+            float tangent = Vector2.Dot(delta, (Vector2)portal.transform.up);
+
+            float normalCost = normal >= 0f
+                ? normal
+                : Mathf.Max(0f, approachBackPenalty) + Mathf.Abs(normal);
+
+            return normalCost * Mathf.Max(0f, approachNormalWeight) +
+                   Mathf.Abs(tangent) * Mathf.Max(0f, approachTangentWeight);
+        }
+
+        static float CalculateTargetViewAlpha(float sourceScore, float partnerScore, float maxFade)
+        {
+            if (maxFade <= 0f) return 1f;
+
+            // 双门都进入衰减范围时缩小阈值，使自动交换点前 target 已恢复为 1。
+            float effectiveFade = Mathf.Min(maxFade, Mathf.Max(0f, partnerScore));
+            if (effectiveFade <= 0.0001f) return 1f;
+            return Mathf.Clamp01(sourceScore / effectiveFade);
         }
 
         /// <summary>
@@ -394,6 +499,9 @@ namespace Platformer
                 control.ToggleMirrorAndInput();
                 control.MirrorPendingCameraPosition(playerVisual);
             }
+
+            // 出口门必须当帧恢复不透明，目标交换不等待下一次 LateUpdate。
+            UpdateViewTransparency(true);
         }
 
         /// <summary>
