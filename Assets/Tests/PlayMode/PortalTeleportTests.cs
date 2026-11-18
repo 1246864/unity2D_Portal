@@ -704,6 +704,76 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Initially_Inactive_Portal_Does_Not_Accumulate_View_X()
+        {
+            var root = new GameObject("InactivePortalViewLifecycleTest");
+            root.SetActive(false);
+            var texture = new Texture2D(64, 32, TextureFormat.RGBA32, false);
+            Sprite fullA = null;
+            Sprite fullB = null;
+
+            CaptureDisplayGroup CreateGroup(CaptureGroupSide side)
+            {
+                var groupObject = new GameObject($"Portal {side}");
+                groupObject.transform.SetParent(root.transform, false);
+
+                var centerObject = new GameObject("Portal View Center");
+                centerObject.transform.SetParent(groupObject.transform, false);
+                var viewObject = new GameObject("Portal View");
+                viewObject.transform.SetParent(centerObject.transform, false);
+                var renderer = viewObject.AddComponent<SpriteRenderer>();
+                renderer.sprite = Sprite.Create(texture, new Rect(0f, 0f, 64f, 32f),
+                    new Vector2(0.5f, 0.5f), 40f);
+
+                var topObject = new GameObject("View Mask Top");
+                topObject.transform.SetParent(groupObject.transform, false);
+                var bottomObject = new GameObject("View Mask Bottom");
+                bottomObject.transform.SetParent(groupObject.transform, false);
+
+                var group = groupObject.AddComponent<CaptureDisplayGroup>();
+                group.side = side;
+                group.viewCenter = centerObject.transform;
+                group.output = renderer;
+                group.maskTop = topObject.transform;
+                group.maskBottom = bottomObject.transform;
+                group.openDuration = 0f;
+                return group;
+            }
+
+            var a = CreateGroup(CaptureGroupSide.A);
+            var b = CreateGroup(CaptureGroupSide.B);
+            fullA = a.output.sprite;
+            fullB = b.output.sprite;
+
+            try
+            {
+                a.partner = b;
+                b.partner = a;
+
+                // 模拟 PortalPair.Start 在门自身 Awake/Start 之前设置四态视觉。
+                CaptureDisplayGroup.ApplyFacingStates(a, b);
+                float expectedAX = a.output.transform.localPosition.x;
+                float expectedBX = b.output.transform.localPosition.x;
+
+                root.SetActive(true);
+                yield return null;
+                yield return null;
+
+                Assert.AreEqual(expectedAX, a.output.transform.localPosition.x, 0.0001f,
+                    "A 首次启用时不能把已裁切的 X 当成初始基准并再次叠加偏移。");
+                Assert.AreEqual(expectedBX, b.output.transform.localPosition.x, 0.0001f,
+                    "B 首次启用时不能把已裁切的 X 当成初始基准并再次叠加偏移。");
+            }
+            finally
+            {
+                Object.Destroy(root);
+                if (fullA != null) Object.Destroy(fullA);
+                if (fullB != null) Object.Destroy(fullB);
+                Object.Destroy(texture);
+            }
+        }
+
+        [UnityTest]
         public IEnumerator Portal_View_Hides_When_Player_Is_Behind()
         {
             FindGroups(out var a, out _);

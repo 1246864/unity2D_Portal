@@ -342,8 +342,9 @@ namespace Platformer
             // 先解析本组自己的 View 结构，WireUp 需要 output 已就位。
             ResolveViewRig();
 
-            // 在任何半屏裁切/partner 调用之前记录 Portal View 的原始局部位置。
-            if (output != null)
+            // Pair 可能已提前处理未激活门并完成首次裁切；此时必须保留原始基准，
+            // 不能把已经叠加过半屏偏移的局部位置重新记为基准。
+            if (output != null && !_hasViewBase)
             {
                 _viewBaseLocalPosition = output.transform.localPosition;
                 _hasViewBase = true;
