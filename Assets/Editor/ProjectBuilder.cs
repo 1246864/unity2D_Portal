@@ -12,10 +12,10 @@ using UnityEngine.Tilemaps;
 namespace Platformer.EditorTools
 {
     /// <summary>
-    /// 从零构建可运行的模板：导入占位美术、创建预制体、搭建关卡并保存场景。
+    /// 主场景与 Prefab 的维护工具。
     ///
-    /// 菜单：Platformer > Rebuild Level + Prefabs
-    /// 批处理：-executeMethod Platformer.EditorTools.ProjectBuilder.BuildAll -quit
+    /// 自动 Rebuild 已退役：当前主场景由手工维护，只保留校验、打开和预览入口。
+    /// 旧构建代码暂时隔离在统一防护后，不能再由菜单或批处理覆盖工作成果。
     /// </summary>
     public static class ProjectBuilder
     {
@@ -51,8 +51,13 @@ namespace Platformer.EditorTools
         static readonly Color DarkTerrainColor = new Color(0.27f, 0.30f, 0.36f);
         static readonly Color BackgroundColor = new Color(0.086f, 0.102f, 0.153f);
 
-        [MenuItem("Platformer/Rebuild Level + Prefabs", priority = 10)]
         public static void BuildAll()
+        {
+            throw new System.InvalidOperationException(
+                "[Platformer] Rebuild 已退役，主场景 Level01 和 Player Prefab 只能通过手工维护。");
+        }
+
+        static void BuildAllLegacy()
         {
             try
             {
@@ -91,7 +96,6 @@ namespace Platformer.EditorTools
             }
         }
 
-        [MenuItem("Platformer/Rebuild + Render Preview", priority = 11)]
         public static void BuildAllAndRenderPreview()
         {
             BuildAll();
@@ -104,7 +108,7 @@ namespace Platformer.EditorTools
             if (File.Exists(ScenePath))
                 EditorSceneManager.OpenScene(ScenePath);
             else
-                Debug.LogWarning("[Platformer] Level01.unity not found. Run Rebuild first.");
+                Debug.LogWarning("[Platformer] Level01.unity not found. Please create or restore the maintained scene.");
         }
 
         // ------------------------------------------------------------------
@@ -140,10 +144,18 @@ namespace Platformer.EditorTools
                 if (element.FindPropertyRelative("name").stringValue == name) return;
             }
 
+            int uniqueId = 1;
+            for (int i = 0; i < sortingLayers.arraySize; i++)
+            {
+                int id = sortingLayers.GetArrayElementAtIndex(i)
+                    .FindPropertyRelative("uniqueID").intValue;
+                if (id >= uniqueId && id < int.MaxValue) uniqueId = id + 1;
+            }
+
             sortingLayers.InsertArrayElementAtIndex(sortingLayers.arraySize);
             SerializedProperty added = sortingLayers.GetArrayElementAtIndex(sortingLayers.arraySize - 1);
             added.FindPropertyRelative("name").stringValue = name;
-            added.FindPropertyRelative("uniqueID").intValue = name.GetHashCode();
+            added.FindPropertyRelative("uniqueID").intValue = uniqueId;
             added.FindPropertyRelative("locked").intValue = 0;
         }
 
@@ -638,13 +650,14 @@ namespace Platformer.EditorTools
 
             var group = root.AddComponent<CaptureDisplayGroup>();
             group.side = side;
-            group.Facing = side == CaptureGroupSide.A ? PortalFacing.Left : PortalFacing.Right;
             group.openDuration = 0.3f;
             group.capture = controller;
             group.output = outputSprite;
             group.viewCenter = viewCenterGo.transform;
             group.maskTop = maskTop;
             group.maskBottom = maskBottom;
+            // 所有依赖连接完成后再应用朝向，避免 setter 进入未初始化视觉路径。
+            group.Facing = side == CaptureGroupSide.A ? PortalFacing.Left : PortalFacing.Right;
             return group;
         }
 
@@ -664,10 +677,15 @@ namespace Platformer.EditorTools
         [MenuItem("Platformer/Validate Level", priority = 30)]
         public static void ValidateLevel()
         {
+            ValidateLevelInternal();
+        }
+
+        static bool ValidateLevelInternal()
+        {
             if (!File.Exists(ScenePath))
             {
                 Debug.LogError("[Platformer] Scene missing: " + ScenePath);
-                return;
+                return false;
             }
 
             Scene scene = EditorSceneManager.OpenScene(ScenePath);
@@ -750,13 +768,13 @@ namespace Platformer.EditorTools
 
             if (issues == 0) Debug.Log("[Platformer] Validation passed.");
             else Debug.LogError($"[Platformer] Validation finished with {issues} issue(s).");
+            return issues == 0;
         }
 
         [MenuItem("Platformer/Render Preview Image", priority = 31)]
         public static void RenderPreview()
         {
-            ValidateLevel();
-            if (!File.Exists(ScenePath)) return;
+            if (!ValidateLevelInternal()) return;
 
             // 描边层是运行时的；出预览图前强制生成一次。
             var terrainForOutline = GameObject.Find("Terrain");
@@ -823,30 +841,45 @@ namespace Platformer.EditorTools
             const int width = 1280;
             const int height = 720;
 
-            var rt = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
-            RenderTexture previous = RenderTexture.active;
+            Vector3 previousPosition = cam.transform.position;
+            float previousSize = cam.orthographicSize;
+            float previousAspect = cam.aspect;
+            RenderTexture previousTarget = cam.targetTexture;
+            RenderTexture previousActive = RenderTexture.active;
+            RenderTexture rt = null;
+            Texture2D tex = null;
 
-            cam.transform.position = position;
-            cam.orthographicSize = orthographicSize;
-            cam.aspect = (float)width / height;
-            cam.targetTexture = rt;
-            cam.Render();
+            try
+            {
+                rt = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
+                cam.transform.position = position;
+                cam.orthographicSize = orthographicSize;
+                cam.aspect = (float)width / height;
+                cam.targetTexture = rt;
+                cam.Render();
 
-            RenderTexture.active = rt;
-            var tex = new Texture2D(width, height, TextureFormat.RGB24, false);
-            tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-            tex.Apply();
+                RenderTexture.active = rt;
+                tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                tex.Apply();
+                File.WriteAllBytes(path, tex.EncodeToPNG());
+                Debug.Log("[Platformer] Preview written to " + path);
+            }
+            finally
+            {
+                RenderTexture.active = previousActive;
+                cam.transform.position = previousPosition;
+                cam.orthographicSize = previousSize;
+                cam.aspect = previousAspect;
+                cam.targetTexture = previousTarget;
 
-            RenderTexture.active = previous;
-            cam.targetTexture = null;
-
-            File.WriteAllBytes(path, tex.EncodeToPNG());
-
-            UnityEngine.Object.DestroyImmediate(tex);
-            rt.Release();
-            UnityEngine.Object.DestroyImmediate(rt);
-
-            Debug.Log("[Platformer] Preview written to " + path);
+                if (tex != null) UnityEngine.Object.DestroyImmediate(tex);
+                if (rt != null)
+                {
+                    rt.Release();
+                    UnityEngine.Object.DestroyImmediate(rt);
+                }
+            }
         }
 
         // ------------------------------------------------------------------

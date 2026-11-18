@@ -165,8 +165,7 @@ namespace Platformer
         {
             get
             {
-                Vector3 line = ViewAnchor.position;
-                line.x -= FacingSign * hintBackOffset;
+                Vector3 line = ViewAnchor.position + (Vector3)BackDirection * hintBackOffset;
                 line.z = transform.position.z;
                 return line;
             }
@@ -305,7 +304,7 @@ namespace Platformer
         }
 
         /// <summary>门的视觉中心：优先用 Portal View Center，否则退回组根节点。</summary>
-        Transform ViewAnchor => viewCenter != null
+        public Transform ViewAnchor => viewCenter != null
             ? viewCenter
             : (output != null && output.transform.parent != null ? output.transform.parent : transform);
 
@@ -316,7 +315,7 @@ namespace Platformer
         PortalViewHalf? _pendingPartnerHalf;
         PortalPair _pair;
         Transform _viewAnchor;
-        Transform _partnerViewAnchor;
+        float _viewAlpha = 1f;
         SpriteRenderer _hint;
         ParticleSystem _particles;
         Material _beamMaterial;
@@ -343,8 +342,9 @@ namespace Platformer
             // 先解析本组自己的 View 结构，WireUp 需要 output 已就位。
             ResolveViewRig();
 
-            // 在任何半屏裁切/partner 调用之前记录 Portal View 的原始局部位置。
-            if (output != null)
+            // Pair 可能已提前处理未激活门并完成首次裁切；此时必须保留原始基准，
+            // 不能把已经叠加过半屏偏移的局部位置重新记为基准。
+            if (output != null && !_hasViewBase)
             {
                 _viewBaseLocalPosition = output.transform.localPosition;
                 _hasViewBase = true;
@@ -435,61 +435,101 @@ namespace Platformer
 
         void ChangeFacing()
         {
-            // 立刻把光带方向/粒子方向同步到新朝向，而不是等下一帧 LateUpdate。
-            UpdateHint();
+            if (partner == null) ResolvePartner();
 
-            if (side == CaptureGroupSide.A)
+            CaptureDisplayGroup groupA = side == CaptureGroupSide.A ? this : partner;
+            CaptureDisplayGroup groupB = side == CaptureGroupSide.B ? this : partner;
+            ApplyFacingStates(groupA, groupB);
+        }
+
+        /// <summary>按 A/B 的四种朝向组合，直接设置两扇门的全部视觉状态。</summary>
+        public static void ApplyFacingStates(CaptureDisplayGroup groupA, CaptureDisplayGroup groupB)
+        {
+            if (groupA == null || groupB == null) return;
+
+            if (groupA.side != CaptureGroupSide.A || groupB.side != CaptureGroupSide.B)
             {
-                if (facing == PortalFacing.Right)
-                {
-                    Debug.Log("[CaptureDisplayGroup] A 门朝向右", this);
-                    maskTop.transform.localScale = new Vector3(-1f, 1f, 1f);
-                    maskBottom.transform.localScale = new Vector3(-1f, 1f, 1f);
-                    viewCenter.localScale = new Vector3(-1f, -1f, 1f);
-                    output.flipY = true;
-                    PartnerOutput.flipX = true;
-                    SetPartnerCameraHalf(PortalViewHalf.Right);
-                }
-                else if(facing == PortalFacing.Left)
-                {
-                    Debug.Log("[CaptureDisplayGroup] A 门朝向左", this);
-                    maskTop.transform.localScale = new Vector3(1f, -1f, 1f);
-                    maskBottom.transform.localScale = new Vector3(1f, -1f, 1f);
-                    viewCenter.localScale = new Vector3(1f, 1f, 1f);
-                    output.flipY = false;
-                    PartnerOutput.flipX = false;
-                    SetPartnerCameraHalf(PortalViewHalf.Left);
-
-                }
-            }
-            else if(side == CaptureGroupSide.B)
-            {
-                if (facing == PortalFacing.Right)
-                {
-                    Debug.Log("[CaptureDisplayGroup] B 门朝向右", this);
-                    maskTop.transform.localScale = new Vector3(1f, 1f, 1f);
-                    maskBottom.transform.localScale = new Vector3(1f, 1f, 1f);
-                    viewCenter.localScale = new Vector3(1f, -1f, 1f);
-                    output.flipY = true;
-                    PartnerOutput.flipX = false;
-                    SetPartnerCameraHalf(PortalViewHalf.Right);
-
-                }
-                else if (facing == PortalFacing.Left)
-                {
-                    Debug.Log("[CaptureDisplayGroup] B 门朝向左", this);
-                    maskTop.transform.localScale = new Vector3(1f, -1f, 1f);
-                    maskBottom.transform.localScale = new Vector3(1f, -1f, 1f);
-                    viewCenter.localScale = new Vector3(-1f, -1f, 1f);
-                    output.flipY = true;
-                    PartnerOutput.flipX = false;
-                    PartnerOutputObject.transform.parent.localScale = new Vector3(-1f, 1f, 1f);
-                    SetPartnerCameraHalf(PortalViewHalf.Left);
-
-
-                }
+                var temp = groupA;
+                groupA = groupB;
+                groupB = temp;
             }
 
+
+            groupA.UpdateHint();
+            groupB.UpdateHint();
+
+            if (groupA.maskTop == null || groupA.maskBottom == null ||
+                groupA.viewCenter == null || groupA.output == null ||
+                groupB.maskTop == null || groupB.maskBottom == null ||
+                groupB.viewCenter == null || groupB.output == null)
+                return;
+
+            // A 左，B 左。
+            if (groupA.FacesLeft && groupB.FacesLeft)
+            {
+                groupA.maskTop.localScale = groupA.maskBottom.localScale = new Vector3(1f, -1f, 1f);
+                groupA.viewCenter.localScale = new Vector3(-1f, 1f, 1f);
+                groupA.output.flipX = false;
+                groupA.output.flipY = false;
+                groupA.SetOutputHalf(PortalViewHalf.Left);
+
+                groupB.maskTop.localScale = groupB.maskBottom.localScale = new Vector3(1f, -1f, 1f);
+                groupB.viewCenter.localScale = new Vector3(-1f, -1f, 1f);
+                groupB.output.flipX = false;
+                groupB.output.flipY = true;
+                groupB.SetOutputHalf(PortalViewHalf.Left);
+                return;
+            }
+
+            // A 左，B 右。
+            if (groupA.FacesLeft && !groupB.FacesLeft)
+            {
+                groupA.maskTop.localScale = groupA.maskBottom.localScale = new Vector3(1f, -1f, 1f);
+                groupA.viewCenter.localScale = new Vector3(1f, 1f, 1f);
+                groupA.output.flipX = false;
+                groupA.output.flipY = false;
+                groupA.SetOutputHalf(PortalViewHalf.Right);
+
+                groupB.maskTop.localScale = groupB.maskBottom.localScale = new Vector3(1f, 1f, 1f);
+                groupB.viewCenter.localScale = new Vector3(1f, -1f, 1f);
+                groupB.output.flipX = false;
+                groupB.output.flipY = true;
+                groupB.SetOutputHalf(PortalViewHalf.Left);
+                return;
+            }
+
+            // A 右，B 左。
+            if (!groupA.FacesLeft && groupB.FacesLeft)
+            {
+                groupA.maskTop.localScale = groupA.maskBottom.localScale = new Vector3(-1f, 1f, 1f);
+                groupA.viewCenter.localScale = new Vector3(1f, -1f, 1f);
+                groupA.output.flipX = false;
+                groupA.output.flipY = true;
+                groupA.SetOutputHalf(PortalViewHalf.Left);
+
+                groupB.maskTop.localScale = groupB.maskBottom.localScale = new Vector3(1f, -1f, 1f);
+                groupB.viewCenter.localScale = new Vector3(1f, -1f, 1f);
+                groupB.output.flipX = false;
+                groupB.output.flipY = true;
+                groupB.SetOutputHalf(PortalViewHalf.Right);
+                return;
+            }
+
+            // A 右，B 右。
+            if (!groupA.FacesLeft && !groupB.FacesLeft)
+            {
+                groupA.maskTop.localScale = groupA.maskBottom.localScale = new Vector3(-1f, 1f, 1f);
+                groupA.viewCenter.localScale = new Vector3(-1f, -1f, 1f);
+                groupA.output.flipX = false;
+                groupA.output.flipY = true;
+                groupA.SetOutputHalf(PortalViewHalf.Right);
+
+                groupB.maskTop.localScale = groupB.maskBottom.localScale = new Vector3(1f, 1f, 1f);
+                groupB.viewCenter.localScale = new Vector3(-1f, -1f, 1f);
+                groupB.output.flipX = false;
+                groupB.output.flipY = true;
+                groupB.SetOutputHalf(PortalViewHalf.Right);
+            }
         }
 
         /// <summary>
@@ -552,11 +592,10 @@ namespace Platformer
                 player = _pair.player.gameObject;
         }
 
-        /// <summary>缓存本门与另一扇门的视觉中心，避免每帧重复解析层级。</summary>
+        /// <summary>缓存本门视觉中心，避免每帧重复解析层级。</summary>
         void CacheViewAnchors()
         {
             _viewAnchor = ViewAnchor;
-            _partnerViewAnchor = partner != null ? partner.ViewAnchor : null;
         }
 
         static Sprite HintSprite
@@ -611,10 +650,14 @@ namespace Platformer
             Shader beamShader = Shader.Find("Hidden/Platformer/PortalHintBeam");
             if (beamShader != null)
             {
-                _beamMaterial = new Material(beamShader)
+                // Awake/Start 和重复初始化共用同一份运行时材质，避免丢失旧引用。
+                if (_beamMaterial == null)
                 {
-                    hideFlags = HideFlags.DontSave
-                };
+                    _beamMaterial = new Material(beamShader)
+                    {
+                        hideFlags = HideFlags.DontSave
+                    };
+                }
                 _beamMaterial.SetColor("_Color", side == CaptureGroupSide.A ? HintBlue : HintRed);
                 _beamMaterial.SetFloat("_Direction", FacingSign);
                 _beamMaterial.SetFloat("_CoreWidth", hintCoreWidth);
@@ -804,37 +847,36 @@ namespace Platformer
             output.enabled = Vector3.Dot(openingDirection, toPlayer) > 0f;
         }
 
+        /// <summary>接收 PortalPair 的统一仲裁结果并立即应用，不在本组内决定透明目标。</summary>
+        internal void SetViewAlpha(float alpha)
+        {
+            _viewAlpha = Mathf.Clamp01(alpha);
+            UpdateViewColor();
+        }
+
         /// <summary>
-        /// 根据玩家与两扇门的距离更新画面颜色：
-        /// 到本门的距离决定 RGB 冷暖，到另一扇门的距离决定 alpha（越近越透明）。
+        /// 本门距离只决定 RGB 冷暖；alpha 由 PortalPair 下发，开门进度只影响 RGB 明暗。
         /// </summary>
         void UpdateViewColor()
         {
-            if (player == null || output == null) return;
-
-            Vector3 playerPosition = player.transform.position;
-
-            // 玩家到本门视觉中心局部 Y 轴的垂直距离。
-            Transform ownAnchor = _viewAnchor != null ? _viewAnchor : transform;
-            float playerDistanceToYAxis = Mathf.Abs(ownAnchor.InverseTransformPoint(playerPosition).x);
+            if (output == null) return;
 
             float color_offs = 0.5f;
-            if (playerDistanceToYAxis <= 5f)
+            if (player != null)
             {
-                color_offs = playerDistanceToYAxis / 10f;
-            }
+                Vector3 playerPosition = player.transform.position;
 
-            // 另一扇门：玩家越靠近它，本门画面越透明；距离达到阈值时恢复 1。
-            float alpha = 1f;
-            if (_partnerViewAnchor != null && otherViewFadeDistance > 0f)
-            {
-                float distanceToPartner = Mathf.Abs(_partnerViewAnchor.InverseTransformPoint(playerPosition).x);
-                alpha = Mathf.Clamp01(distanceToPartner / otherViewFadeDistance);
+                // 玩家到本门视觉中心局部 Y 轴的垂直距离。
+                Transform ownAnchor = _viewAnchor != null ? _viewAnchor : transform;
+                float playerDistanceToYAxis = Mathf.Abs(ownAnchor.InverseTransformPoint(playerPosition).x);
+
+                if (playerDistanceToYAxis <= 5f)
+                    color_offs = playerDistanceToYAxis / 10f;
             }
 
             output.color = side == CaptureGroupSide.B
-                ? new Color(1f, 1f - color_offs, 1f - color_offs, alpha)
-                : new Color(1f - color_offs, 1f - color_offs, 1f, alpha);
+                ? new Color(1f, 1f - color_offs, 1f - color_offs, _viewAlpha)
+                : new Color(1f - color_offs, 1f - color_offs, 1f, _viewAlpha);
 
             // 开门动画的明暗只在这里乘一次，避免 ApplyMaskOffsets 反复乘导致颜色越来越黑。
             float open = Mathf.Clamp01(_openProgress);

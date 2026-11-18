@@ -397,6 +397,41 @@ namespace Platformer.Tests
             yield return null;
             yield return null;
 
+            // 6.5 仅宽度超限时，两轴按同一比例降低 PPU，世界捕获尺寸不能被 Clamp 改变。
+            int originalMaxTextureSize = snapshot.maxTextureSize;
+            snapshot.maxTextureSize = 512;
+            pair.captureWidth = 128f;
+            pair.captureHeight = 8f;
+            pair.PushViewSettingsToGroups();
+            yield return null;
+            yield return null;
+
+            Texture2D clampedTexture = snapshot.output.sprite.texture;
+            Assert.LessOrEqual(clampedTexture.width, snapshot.maxTextureSize);
+            Assert.LessOrEqual(clampedTexture.height, snapshot.maxTextureSize);
+            Assert.AreEqual(4f, clampedTexture.width / pair.captureWidth, 0.001f,
+                "宽度超限后应使用统一缩放后的像素密度。");
+            Assert.AreEqual(clampedTexture.width / pair.captureWidth,
+                clampedTexture.height / pair.captureHeight, 0.001f,
+                "单轴超限不能破坏纹理两轴的像素密度比例。");
+            Assert.AreEqual(8f, snapshot.captureCamera.orthographicSize * 2f, 0.001f,
+                "纹理限额不能改变世界捕获高度。");
+            Assert.AreEqual(128f,
+                snapshot.captureCamera.aspect * snapshot.captureCamera.orthographicSize * 2f, 0.001f,
+                "纹理限额不能改变世界捕获宽度。");
+            Assert.AreEqual(8f, snapshot.output.sprite.bounds.size.y, 0.001f,
+                "限制纹理尺寸后，输出精灵仍应覆盖原世界高度。");
+            float expectedHalfWidth = 64f - groupB.centerGapPixels / 4f;
+            Assert.AreEqual(expectedHalfWidth, snapshot.output.sprite.bounds.size.x, 0.001f,
+                "半屏输出应覆盖原世界宽度的一半，并保留配置的中线缝隙。");
+
+            snapshot.maxTextureSize = originalMaxTextureSize;
+            pair.captureWidth = 50f;
+            pair.captureHeight = 35f;
+            pair.PushViewSettingsToGroups();
+            yield return null;
+            yield return null;
+
             // 7. 切到动态模式：宽/高分别 = 主相机视野宽/高 × X/Y 倍率。
             pair.useDynamicSize = true;
             pair.cameraSizeMultiplier = new Vector2(1.2f, 2f);

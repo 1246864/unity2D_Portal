@@ -56,6 +56,16 @@ namespace Platformer
         bool _warnedTextureClamp;
         bool _warnedMissingSource;
 
+        void OnEnable()
+        {
+            _renderingAvailable = SystemInfo.graphicsDeviceType != GraphicsDeviceType.Null;
+            if (captureCamera == null) return;
+
+            // 捕获完全由 Capture/CaptureNow 调度，禁用 URP 的自动渲染路径。
+            captureCamera.enabled = false;
+            if (_renderTexture != null) captureCamera.targetTexture = _renderTexture;
+        }
+
         void Start()
         {
             // 无头运行（-nographics 的批处理测试）无法渲染到纹理，
@@ -69,14 +79,14 @@ namespace Platformer
 
             if (!EnsureResources()) return;
             captureCamera.targetTexture = _renderTexture;
-            // URP 会自动渲染已启用的相机；对已禁用的相机手动调用 Camera.Render()
-            // 会被忽略，所以这台相机保持启用状态。
-            captureCamera.enabled = true;
+            captureCamera.enabled = false;
             Capture();
         }
 
         void LateUpdate()
         {
+            // 输出被门背面逻辑隐藏或对象未激活时，不做无效渲染与同步回读。
+            if (output == null || !output.enabled || !output.gameObject.activeInHierarchy) return;
             if (!EnsureResources()) return;
 
             // captureInterval 为 0 时每帧都重新渲染/读取一次，分辨率不变。
@@ -103,6 +113,7 @@ namespace Platformer
         /// <summary>立即捕获一次（预览渲染也会用到）。</summary>
         public void CaptureNow()
         {
+            if (!isActiveAndEnabled) return;
             if (!_renderingAvailable && SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null) return;
             if (!EnsureResources()) return;
             Capture();
@@ -145,10 +156,21 @@ namespace Platformer
             captureCamera.orthographicSize = worldHeight * 0.5f;
             captureCamera.aspect = worldWidth / worldHeight;
 
-            int desiredWidth = Mathf.RoundToInt(worldWidth * pixelsPerUnit);
-            int desiredHeight = Mathf.RoundToInt(worldHeight * pixelsPerUnit);
-            int width = Mathf.Clamp(desiredWidth, 16, maxTextureSize);
-            int height = Mathf.Clamp(desiredHeight, 16, maxTextureSize);
+            int textureLimit = Mathf.Max(16, maxTextureSize);
+            float density = Mathf.Max(0.01f, pixelsPerUnit);
+            int desiredWidth = Mathf.Max(1, Mathf.RoundToInt(worldWidth * density));
+            int desiredHeight = Mathf.Max(1, Mathf.RoundToInt(worldHeight * density));
+
+            // 两轴共用同一个缩放系数；单轴超限时不能破坏世界宽高比。
+            float resolutionScale = Mathf.Min(
+                1f,
+                textureLimit / (float)desiredWidth,
+                textureLimit / (float)desiredHeight);
+            float actualPixelsPerUnit = density * resolutionScale;
+            int width = Mathf.Clamp(
+                Mathf.RoundToInt(worldWidth * actualPixelsPerUnit), 16, textureLimit);
+            int height = Mathf.Clamp(
+                Mathf.RoundToInt(worldHeight * actualPixelsPerUnit), 16, textureLimit);
 
             if (width != desiredWidth || height != desiredHeight)
             {
@@ -158,7 +180,7 @@ namespace Platformer
                     Debug.LogWarning(
                         $"[RegionSnapshotCamera] 捕获尺寸 {worldWidth}×{worldHeight} 在 {pixelsPerUnit} PPU 下" +
                         $"需要 {desiredWidth}×{desiredHeight} 纹理，超过 maxTextureSize={maxTextureSize}，" +
-                        "纹理分辨率被限制，像素密度会降低。",
+                        "纹理分辨率已按统一比例限制，像素密度会降低。",
                         this);
                 }
             }
@@ -181,9 +203,8 @@ namespace Platformer
                 _texture = new Texture2D(width, height, TextureFormat.RGB24, false);
                 _texture.name = "Region Snapshot";
 
-                float pixelsPerWorldUnit = height / Mathf.Max(0.001f, worldHeight);
                 _sprite = Sprite.Create(_texture, new Rect(0, 0, width, height),
-                    new Vector2(0.5f, 0.5f), pixelsPerWorldUnit);
+                    new Vector2(0.5f, 0.5f), actualPixelsPerUnit);
                 _sprite.name = "Region Snapshot Sprite";
                 output.sprite = _sprite;
                 _spriteWorldWidth = worldWidth;
@@ -195,19 +216,27 @@ namespace Platformer
 
         void Capture()
         {
-            // 按需渲染：在编辑模式和批处理 PlayMode 测试中都有效，
-            // 因为这些场景里相机的自动渲染循环不会出帧。
+            // 相机保持 disabled，只在这里显式提交一次渲染，避免自动/手动双调度。
             captureCamera.Render();
 
             RenderTexture previous = RenderTexture.active;
-            RenderTexture.active = _renderTexture;
-            _texture.ReadPixels(new Rect(0, 0, _texture.width, _texture.height), 0, 0);
-            _texture.Apply();
-            RenderTexture.active = previous;
+            try
+            {
+                RenderTexture.active = _renderTexture;
+                _texture.ReadPixels(new Rect(0, 0, _texture.width, _texture.height), 0, 0);
+                _texture.Apply();
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+            }
         }
 
         void ReleaseTargets()
         {
+            if (captureCamera != null && captureCamera.targetTexture == _renderTexture)
+                captureCamera.targetTexture = null;
+
             if (_renderTexture != null)
             {
                 _renderTexture.Release();
@@ -226,6 +255,15 @@ namespace Platformer
                 Destroy(_texture);
                 _texture = null;
             }
+        }
+
+        void OnDisable()
+        {
+            if (captureCamera == null) return;
+
+            captureCamera.enabled = false;
+            captureCamera.targetTexture = null;
+            // 纹理保留以便快速恢复；销毁组件时统一释放。
         }
 
         void OnDestroy()

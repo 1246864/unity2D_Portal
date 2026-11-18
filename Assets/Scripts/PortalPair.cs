@@ -1,4 +1,6 @@
+using System;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Platformer
 {
@@ -16,6 +18,11 @@ namespace Platformer
 
         [Tooltip("眼睛相对玩家中心点的高度（世界单位）")]
         public float playerEyeOffset = 0.4f;
+
+        [Header("玩家与相机总控")]
+        [Tooltip("统一处理输入、相机镜像和相机传送；留空时从跟随相机解析。")]
+        [FormerlySerializedAs("cameraMirror")]
+        public PlayerControlManager playerControl;
 
         [Header("传送")]
         [Tooltip("传送冷却（秒），一对门共享，避免连续帧反复触发")]
@@ -51,6 +58,16 @@ namespace Platformer
         [Tooltip("静态模式：捕获矩形高度（世界单位）")]
         [Min(0.01f)] public float captureHeight = 50f;
 
+        [Header("画面透明仲裁")]
+        [Tooltip("开口法向距离在接近评分中的权重")]
+        [Min(0f)] public float approachNormalWeight = 1f;
+
+        [Tooltip("沿门面方向的偏移在接近评分中的权重")]
+        [Min(0f)] public float approachTangentWeight = 1f;
+
+        [Tooltip("玩家位于门背面时增加的接近惩罚分")]
+        [Min(0f)] public float approachBackPenalty = 10f;
+
         [Header("地形开洞")]
         [Tooltip("传送门激活时，把门洞矩形覆盖到的地形格改为无碰撞，再重建 CompositeCollider2D")]
         public bool carveTerrain = true;
@@ -70,14 +87,19 @@ namespace Platformer
         BoxCollider2D _gateA;
         BoxCollider2D _gateB;
         PortalTerrainCarver _terrainCarver;
-        PlayerCameraMirror _cameraMirror;
 
         float _cooldown;
         bool _forceCapture;
         Transform _lastPlayer;
+        CaptureDisplayGroup _automaticViewSource;
+        CapsuleCollider2D _ignoredPlayerBody;
+        int _originalBodyExcludeLayers;
 
         /// <summary>门碰撞箱所在层（复用 Snapshot 层，玩家身体胶囊会排除该层）。</summary>
         const int GateLayer = 8;
+
+        /// <summary>手动选中的接近基准门；null 表示自动仲裁。</summary>
+        public CaptureDisplayGroup SelectedPortal { get; private set; }
 
         /// <summary>玩家眼睛的世界坐标。</summary>
         public Vector3 PlayerEye => player != null
@@ -106,6 +128,23 @@ namespace Platformer
             PushPlayerToGroups();
             PushViewSettingsToGroups();
             IgnorePlayerBodyCollision();
+            CaptureDisplayGroup.ApplyFacingStates(_groupA, _groupB);
+            UpdateViewTransparency(true);
+        }
+
+        void OnEnable()
+        {
+            // 重新启用后重新绑定玩家碰撞过滤；禁用时会恢复原始位。
+            _lastPlayer = null;
+            UpdateViewTransparency(true);
+        }
+
+        void OnDisable()
+        {
+            RestorePlayerBodyCollision();
+            if (_groupA != null) _groupA.SetViewAlpha(1f);
+            if (_groupB != null) _groupB.SetViewAlpha(1f);
+            _automaticViewSource = null;
         }
 
         void Update()
@@ -116,6 +155,7 @@ namespace Platformer
                 _lastPlayer = player;
                 PushPlayerToGroups();
                 IgnorePlayerBodyCollision();
+                UpdateViewTransparency(true);
             }
 
             if (_cooldown > 0f)
@@ -124,27 +164,14 @@ namespace Platformer
             // 画面尺寸由 PortalPair 统一管理；运行时改 Inspector 也会立即下发。
             PushViewSettingsToGroups();
 
-            // 允许在 Inspector/运行时改开关与宽度。
-            if (carveTerrain)
-            {
-                if (_terrainCarver == null) EnsureTerrainCarver();
-                else if (!Mathf.Approximately(_terrainCarver.carveWidth, Mathf.Max(0.01f, carveWidth)) ||
-                         !Mathf.Approximately(_terrainCarver.carveFrontMargin, Mathf.Max(0f, carveFrontMargin)))
-                {
-                    _terrainCarver.carveWidth = Mathf.Max(0.01f, carveWidth);
-                    _terrainCarver.carveFrontMargin = Mathf.Max(0f, carveFrontMargin);
-                    _terrainCarver.RefreshNow();
-                }
-            }
-            else if (_terrainCarver != null && _terrainCarver.enabled)
-            {
-                _terrainCarver.enabled = false;
-            }
+            // 开关、参数和组件 enabled 状态在同一个幂等入口同步。
+            SyncTerrainCarver();
         }
 
         void LateUpdate()
         {
             UpdateGateSizes();
+            UpdateViewTransparency();
 
             if (_forceCapture)
             {
@@ -188,6 +215,89 @@ namespace Platformer
             snapshot.captureHeight = Mathf.Max(0.01f, captureHeight);
         }
 
+        /// <summary>选中一扇门作为接近基准，其搭档接收透明。</summary>
+        public void SelectPortal(CaptureDisplayGroup portal)
+        {
+            if (portal == null) throw new ArgumentNullException(nameof(portal));
+            if (portal != _groupA && portal != _groupB)
+                throw new ArgumentException("只能选中当前 PortalPair 的 A/B 门。", nameof(portal));
+
+            SelectedPortal = portal;
+            UpdateViewTransparency(true);
+        }
+
+        /// <summary>清除手动选中并立即恢复自动仲裁。</summary>
+        public void ClearSelectedPortal()
+        {
+            SelectedPortal = null;
+            UpdateViewTransparency(true);
+        }
+
+        /// <summary>
+        /// 每对门只有一个透明目标。source 始终不透明，target 的 alpha 由两门评分共同决定。
+        /// </summary>
+        void UpdateViewTransparency(bool force = false)
+        {
+            if (player == null || _groupA == null || _groupB == null)
+            {
+                if (_groupA != null) _groupA.SetViewAlpha(1f);
+                if (_groupB != null) _groupB.SetViewAlpha(1f);
+                _automaticViewSource = null;
+                return;
+            }
+
+            float scoreA = CalculateApproachScore(_groupA);
+            float scoreB = CalculateApproachScore(_groupB);
+
+            bool keepPrevious = !force && SelectedPortal == null &&
+                                _automaticViewSource != null &&
+                                Mathf.Approximately(scoreA, scoreB);
+
+            CaptureDisplayGroup source;
+            if (SelectedPortal != null)
+                source = SelectedPortal;
+            else if (keepPrevious)
+                source = _automaticViewSource;
+            else
+                source = scoreA <= scoreB ? _groupA : _groupB;
+
+            CaptureDisplayGroup target = source == _groupA ? _groupB : _groupA;
+            float sourceScore = source == _groupA ? scoreA : scoreB;
+            float partnerScore = target == _groupA ? scoreA : scoreB;
+
+            if (SelectedPortal == null)
+                _automaticViewSource = source;
+
+            source.SetViewAlpha(1f);
+            target.SetViewAlpha(CalculateTargetViewAlpha(
+                sourceScore, partnerScore, source.otherViewFadeDistance));
+        }
+
+        float CalculateApproachScore(CaptureDisplayGroup portal)
+        {
+            Transform anchor = portal.ViewAnchor;
+            Vector2 delta = PlayerEye - anchor.position;
+            float normal = Vector2.Dot(delta, portal.OpeningDirection);
+            float tangent = Vector2.Dot(delta, (Vector2)portal.transform.up);
+
+            float normalCost = normal >= 0f
+                ? normal
+                : Mathf.Max(0f, approachBackPenalty) + Mathf.Abs(normal);
+
+            return normalCost * Mathf.Max(0f, approachNormalWeight) +
+                   Mathf.Abs(tangent) * Mathf.Max(0f, approachTangentWeight);
+        }
+
+        static float CalculateTargetViewAlpha(float sourceScore, float partnerScore, float maxFade)
+        {
+            if (maxFade <= 0f) return 1f;
+
+            // 双门都进入衰减范围时缩小阈值，使自动交换点前 target 已恢复为 1。
+            float effectiveFade = Mathf.Min(maxFade, Mathf.Max(0f, partnerScore));
+            if (effectiveFade <= 0.0001f) return 1f;
+            return Mathf.Clamp01(sourceScore / effectiveFade);
+        }
+
         /// <summary>
         /// CaptureDisplayGroup 在 OnEnable/OnDisable 时调用：门激活期间在关卡地形上
         /// 按门洞矩形开洞，门停用后恢复。传送碰撞箱本身不在这里处理。
@@ -226,6 +336,36 @@ namespace Platformer
                 _terrainCarver.SetPortal(_groupA, _groupA.isActiveAndEnabled);
             if (_groupB != null)
                 _terrainCarver.SetPortal(_groupB, _groupB.isActiveAndEnabled);
+        }
+
+        void SyncTerrainCarver()
+        {
+            if (!carveTerrain)
+            {
+                if (_terrainCarver != null && _terrainCarver.enabled)
+                    _terrainCarver.enabled = false;
+                return;
+            }
+
+            if (_terrainCarver == null)
+            {
+                EnsureTerrainCarver();
+                return;
+            }
+
+            float width = Mathf.Max(0.01f, carveWidth);
+            float frontMargin = Mathf.Max(0f, carveFrontMargin);
+            bool parametersChanged =
+                !Mathf.Approximately(_terrainCarver.carveWidth, width) ||
+                !Mathf.Approximately(_terrainCarver.carveFrontMargin, frontMargin);
+
+            _terrainCarver.carveWidth = width;
+            _terrainCarver.carveFrontMargin = frontMargin;
+
+            if (!_terrainCarver.enabled)
+                _terrainCarver.enabled = true; // OnEnable 会恢复旧洞并按当前门状态重切。
+            else if (parametersChanged)
+                _terrainCarver.RefreshNow();
         }
 
         /// <summary>
@@ -270,13 +410,14 @@ namespace Platformer
             if (_groupB != null) _groupB.ApplyHalfCrop();
         }
 
-        void ToggleCameraMirrorAndInput()
+        PlayerControlManager ResolvePlayerControl(Camera followCamera)
         {
-            if (_cameraMirror == null)
-                _cameraMirror = FindObjectOfType<PlayerCameraMirror>();
+            if (playerControl != null) return playerControl;
 
-            if (_cameraMirror != null)
-                _cameraMirror.ToggleMirrorAndInput();
+            if (followCamera != null)
+                return followCamera.GetComponent<PlayerControlManager>();
+
+            return FindObjectOfType<PlayerControlManager>();
         }
 
         /// <summary>
@@ -313,6 +454,7 @@ namespace Platformer
             // 传送前记录相机在玩家显示空间中的全部相对变换（位置 + 旋转）。
             Camera followCamera = source.capture != null ? source.capture.sourceCamera : null;
             if (followCamera == null) followCamera = Camera.main;
+            PlayerControlManager control = ResolvePlayerControl(followCamera);
 
             Transform playerVisual = controller.VisualRoot != null
                 ? controller.VisualRoot
@@ -324,11 +466,11 @@ namespace Platformer
                 : Matrix4x4.identity;
 
 
-            // 出口旋转 = 出口门角度 - 入口门角度。
-            // 玩家进门时是竖直的，所以不需要再叠玩家角度。
+            // 门间角度差叠加到玩家当前显示角；回正未完成时连续传送也不会跳回绝对角。
             float sourceAngle = Vector2.SignedAngle(Vector2.up, source.transform.up);
             float partnerAngle = Vector2.SignedAngle(Vector2.up, partner.transform.up);
-            float exitAngle = Mathf.DeltaAngle(0f, partnerAngle - sourceAngle);
+            float portalDelta = Mathf.DeltaAngle(sourceAngle, partnerAngle);
+            float exitAngle = Mathf.DeltaAngle(0f, controller.CurrentRotationAngle + portalDelta);
 
             // 进门前的速度/受力结果也按传送门坐标系一起变换：
             // 法线分量沿出口正面反向，切线分量保留。
@@ -340,24 +482,9 @@ namespace Platformer
             if (preserveVelocity && rb != null)
                 rb.velocity = velocity;
 
-            // 玩家已经完成瞬移和旋转；现在把相机强制放回它的相对位置/相对旋转。
-            if (followCamera != null)
-            {
-                CameraFollow2D cameraFollow = followCamera.GetComponent<CameraFollow2D>();
-                if (cameraFollow != null)
-                {
-                    cameraFollow.TeleportRelative(playerVisual, cameraRelative);
-                }
-                else
-                {
-                    Matrix4x4 world =
-                        playerVisual.localToWorldMatrix * cameraRelative;
-                    CameraFollow2D.Decompose2D(
-                        world, out Vector3 position, out Quaternion rotation, out Vector3 scale);
-                    followCamera.transform.SetPositionAndRotation(position, rotation);
-                    followCamera.transform.localScale = scale;
-                }
-            }
+            // 玩家已经完成瞬移和旋转；相机具体映射由总控交给跟随组件执行。
+            if (control != null)
+                control.TeleportRelative(playerVisual, cameraRelative);
 
 
             // 一对门共享一个冷却，避免刚落地就被另一扇门立刻传回去。
@@ -366,29 +493,15 @@ namespace Platformer
             // 本帧 LateUpdate 里强制两扇门各捕获一次，并重新生成半屏画面。
             _forceCapture = true;
 
-            // 后处理：两扇门朝向一致时，等传送/相机相对映射都完成后，
-            // 翻转相机与水平输入；再把相机位置沿玩家相对 Y 轴水平镜像。
-            if (sameFacing)
+            // 同向传送仍由 PortalPair 决定联动规则，总控只执行状态和相机指令。
+            if (sameFacing && control != null)
             {
-                ToggleCameraMirrorAndInput();
-
-                if (followCamera != null)
-                {
-                    CameraFollow2D cameraFollow = followCamera.GetComponent<CameraFollow2D>();
-                    if (cameraFollow != null)
-                    {
-                        cameraFollow.MirrorPendingCameraPosition();
-                    }
-                    else
-                    {
-                        Vector3 localPosition = playerVisual.InverseTransformPoint(
-                            followCamera.transform.position);
-                        localPosition.x = -localPosition.x;
-                        followCamera.transform.position =
-                            playerVisual.TransformPoint(localPosition);
-                    }
-                }
+                control.ToggleMirrorAndInput();
+                control.MirrorPendingCameraPosition(playerVisual);
             }
+
+            // 出口门必须当帧恢复不透明，目标交换不等待下一次 LateUpdate。
+            UpdateViewTransparency(true);
         }
 
         /// <summary>
@@ -470,12 +583,29 @@ namespace Platformer
         /// </summary>
         void IgnorePlayerBodyCollision()
         {
+            RestorePlayerBodyCollision();
             if (player == null) return;
 
             var body = player.GetComponent<CapsuleCollider2D>();
             if (body == null) return;
 
+            _ignoredPlayerBody = body;
+            _originalBodyExcludeLayers = body.excludeLayers;
             body.excludeLayers |= 1 << GateLayer;
+        }
+
+        void RestorePlayerBodyCollision()
+        {
+            if (_ignoredPlayerBody == null) return;
+
+            int gateMask = 1 << GateLayer;
+            int layers = _ignoredPlayerBody.excludeLayers;
+            if ((_originalBodyExcludeLayers & gateMask) != 0) layers |= gateMask;
+            else layers &= ~gateMask;
+
+            // 只恢复本系统负责的位，保留其他系统运行期间所做的层过滤修改。
+            _ignoredPlayerBody.excludeLayers = layers;
+            _ignoredPlayerBody = null;
         }
 
         void OnDrawGizmosSelected()

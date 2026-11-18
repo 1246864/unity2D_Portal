@@ -83,6 +83,14 @@ namespace Platformer
         void LateUpdate()
         {
             if (target == null) return;
+
+            Transform currentVisual = GetVisual();
+            if (currentVisual != _visual)
+            {
+                _visual = currentVisual;
+                _initialized = false;
+            }
+
             if (!_initialized) Initialize();
             if (_visual == null) return;
 

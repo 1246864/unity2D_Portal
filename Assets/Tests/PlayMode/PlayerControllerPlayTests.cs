@@ -15,15 +15,17 @@ namespace Platformer.Tests
         GameObject _ground;
         GameObject _player;
         PlayerController2D _controller;
+        Vector2 _originalGravity;
 
         [UnitySetUp]
         public IEnumerator SetUp()
         {
             int groundLayer = LayerMask.NameToLayer("Ground");
             Assert.AreNotEqual(-1, groundLayer,
-                "Layer 'Ground' is missing. Run Platformer > Rebuild Level + Prefabs first.");
+                "Layer 'Ground' is missing. Open Level 01 and check the project layer settings.");
 
-            // 与模板使用的工程级重力保持一致。
+            // 与模板使用的工程级重力保持一致，并在 TearDown 恢复，避免污染其他测试。
+            _originalGravity = Physics2D.gravity;
             Physics2D.gravity = new Vector2(0f, -40f);
 
             _ground = new GameObject("TestGround");
@@ -38,7 +40,7 @@ namespace Platformer.Tests
 #else
             GameObject prefab = null;
 #endif
-            Assert.IsNotNull(prefab, "Player prefab is missing. Run Platformer > Rebuild Level + Prefabs first.");
+            Assert.IsNotNull(prefab, "Player prefab is missing at Assets/Prefabs/Player.prefab.");
 
             _player = Object.Instantiate(prefab, new Vector3(0f, 0.9f, 0f), Quaternion.identity);
             _controller = _player.GetComponent<PlayerController2D>();
@@ -53,6 +55,7 @@ namespace Platformer.Tests
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            Physics2D.gravity = _originalGravity;
             if (_player != null) Object.Destroy(_player);
             if (_ground != null) Object.Destroy(_ground);
             yield return null;
@@ -125,6 +128,233 @@ namespace Platformer.Tests
 
             Debug.Log($"[Test] Camera follow error: {error:F3} units");
             Assert.Less(error, 1.5f, $"Camera should stay close to the player, error was {error:F2}.");
+        }
+
+        [UnityTest]
+        public IEnumerator Camera_Mirror_Toggle_Parity_And_Disable_Restore_Input()
+        {
+            bool originalInput = _controller.IsHorizontalInputInverted;
+            var cameraGo = new GameObject("MirrorParityTestCamera");
+            cameraGo.SetActive(false);
+            var camera = cameraGo.AddComponent<Camera>();
+            camera.orthographic = true;
+            var mirror = cameraGo.AddComponent<PlayerControlManager>();
+            mirror.player = _controller;
+            cameraGo.SetActive(true);
+
+            try
+            {
+                mirror.ToggleMirrorAndInput();
+                Assert.IsTrue(mirror.IsMirrored);
+                Assert.IsTrue(_controller.IsHorizontalInputInverted);
+                Assert.Less(camera.projectionMatrix.m00, 0f, "第一次切换应镜像投影。");
+
+                mirror.ToggleMirrorAndInput();
+                Assert.IsFalse(mirror.IsMirrored);
+                Assert.IsFalse(_controller.IsHorizontalInputInverted);
+                Assert.Greater(camera.projectionMatrix.m00, 0f, "第二次切换应恢复投影。");
+
+                mirror.ToggleMirrorAndInput();
+                Assert.IsTrue(mirror.IsMirrored);
+                Assert.IsTrue(_controller.IsHorizontalInputInverted);
+                Assert.Less(camera.projectionMatrix.m00, 0f, "第三次切换应再次镜像投影。");
+
+                mirror.enabled = false;
+                Assert.AreEqual(originalInput, _controller.IsHorizontalInputInverted,
+                    "禁用镜像组件应恢复玩家进入镜像前的输入基线。");
+                Assert.Greater(camera.projectionMatrix.m00, 0f,
+                    "禁用镜像组件应恢复相机原始投影。");
+            }
+            finally
+            {
+                if (mirror != null) mirror.enabled = false;
+                _controller.SetHorizontalInputInverted(originalInput);
+                Object.Destroy(cameraGo);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Camera_Mirror_Switching_Players_Restores_Both_Baselines()
+        {
+            bool originalFirstInput = _controller.IsHorizontalInputInverted;
+            var secondPlayer = Object.Instantiate(
+                _player, new Vector3(20f, 0.9f, 0f), Quaternion.identity);
+            var secondController = secondPlayer.GetComponent<PlayerController2D>();
+            bool originalSecondInput = secondController.IsHorizontalInputInverted;
+
+            _controller.SetHorizontalInputInverted(false);
+            secondController.SetHorizontalInputInverted(true);
+
+            var cameraGo = new GameObject("MirrorSwitchPlayerTestCamera");
+            cameraGo.SetActive(false);
+            var camera = cameraGo.AddComponent<Camera>();
+            camera.orthographic = true;
+            var mirror = cameraGo.AddComponent<PlayerControlManager>();
+            mirror.player = _controller;
+            cameraGo.SetActive(true);
+
+            try
+            {
+                mirror.ToggleMirrorAndInput();
+                Assert.IsTrue(_controller.IsHorizontalInputInverted);
+
+                mirror.player = secondController;
+                mirror.ToggleMirrorAndInput();
+
+                Assert.IsFalse(_controller.IsHorizontalInputInverted,
+                    "换玩家后应恢复旧玩家的 false 基线，而不是把新玩家状态留给旧玩家。");
+                Assert.IsFalse(secondController.IsHorizontalInputInverted,
+                    "新玩家应接收当前未镜像状态。");
+
+                mirror.enabled = false;
+                Assert.IsFalse(_controller.IsHorizontalInputInverted,
+                    "禁用组件不应再次覆盖旧玩家。");
+                Assert.IsTrue(secondController.IsHorizontalInputInverted,
+                    "禁用组件应恢复新玩家自己的 true 基线。");
+            }
+            finally
+            {
+                if (mirror != null) mirror.enabled = false;
+                _controller.SetHorizontalInputInverted(originalFirstInput);
+                if (secondController != null)
+                    secondController.SetHorizontalInputInverted(originalSecondInput);
+                Object.Destroy(cameraGo);
+                Object.Destroy(secondPlayer);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Control_Manager_Does_Not_Overwrite_Program_Move_Input()
+        {
+            bool originalInput = _controller.IsHorizontalInputInverted;
+            _controller.SetHorizontalInputInverted(false);
+
+            var cameraGo = new GameObject("ProgramInputPriorityTestCamera");
+            cameraGo.SetActive(false);
+            cameraGo.AddComponent<Camera>();
+            var control = cameraGo.AddComponent<PlayerControlManager>();
+            control.player = _controller;
+            cameraGo.SetActive(true);
+
+            try
+            {
+                control.SetMoveInput(0.75f);
+                yield return null;
+
+                Assert.IsTrue(_controller.IsManualInput, "程序移动应保持接管状态。");
+                Assert.AreEqual(0.75f, _controller.MoveInput, 0.001f,
+                    "总控的设备输入帧不能覆盖程序移动。");
+
+                control.SetMoveInput(0f);
+                yield return null;
+                Assert.IsTrue(_controller.IsManualInput, "程序传入 0 仍应保持接管。");
+                Assert.AreEqual(0f, _controller.MoveInput, 0.001f);
+
+                control.ClearManualInput();
+                yield return null;
+                Assert.IsFalse(_controller.IsManualInput, "清除后应恢复设备输入。");
+                Assert.AreEqual(0f, _controller.MoveInput, 0.001f,
+                    "没有按键时，恢复设备输入后应保持静止。");
+            }
+            finally
+            {
+                if (control != null) control.enabled = false;
+                Object.Destroy(cameraGo);
+                _controller.SetHorizontalInputInverted(originalInput);
+                _controller.SetMoveInput(0f);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Independent_And_Linked_States_Do_Not_Overwrite_Each_Other()
+        {
+            bool originalInput = _controller.IsHorizontalInputInverted;
+            _controller.SetHorizontalInputInverted(false);
+
+            var cameraGo = new GameObject("IndependentStateTestCamera");
+            cameraGo.SetActive(false);
+            cameraGo.AddComponent<Camera>();
+            var control = cameraGo.AddComponent<PlayerControlManager>();
+            control.player = _controller;
+            cameraGo.SetActive(true);
+
+            try
+            {
+                control.SetMirrorAndInput(false);
+                control.SetInputInverted(true);
+
+                Assert.IsTrue(_controller.IsHorizontalInputInverted);
+                Assert.IsFalse(control.IsMirrored, "独立输入反转不能镜像相机。");
+                Assert.Greater(cameraGo.GetComponent<Camera>().projectionMatrix.m00, 0f);
+
+                control.SetCameraMirrored(true);
+                Assert.IsTrue(_controller.IsHorizontalInputInverted,
+                    "独立相机镜像不能改变输入方向。");
+                Assert.Less(cameraGo.GetComponent<Camera>().projectionMatrix.m00, 0f);
+
+                control.SetMirrorAndInput(false);
+                Assert.IsFalse(_controller.IsHorizontalInputInverted);
+                Assert.IsFalse(control.IsMirrored);
+            }
+            finally
+            {
+                if (control != null) control.enabled = false;
+                Object.Destroy(cameraGo);
+                _controller.SetHorizontalInputInverted(originalInput);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Mouse_World_RoundTrip_Matches_Current_Mirror_State()
+        {
+            var cameraGo = new GameObject("MirrorMouseProjectionTestCamera");
+            cameraGo.SetActive(false);
+            cameraGo.transform.position = new Vector3(0f, 0f, -10f);
+            var camera = cameraGo.AddComponent<Camera>();
+            camera.orthographic = true;
+            var control = cameraGo.AddComponent<PlayerControlManager>();
+            control.player = _controller;
+            cameraGo.SetActive(true);
+
+            Vector3[] worldPoints =
+            {
+                new Vector3(0f, 0f, 0f),
+                new Vector3(2f, 1f, 0f),
+                new Vector3(-3f, -1f, 0f)
+            };
+
+            try
+            {
+                for (int state = 0; state < 2; state++)
+                {
+                    bool mirrored = state == 1;
+                    control.SetCameraMirrored(mirrored);
+
+                    foreach (Vector3 world in worldPoints)
+                    {
+                        Vector3 screen = camera.WorldToScreenPoint(world);
+                        Vector3 roundTrip = control.ScreenToWorldPoint(screen);
+
+                        Assert.AreEqual(world.x, roundTrip.x, 0.001f,
+                            $"镜像={mirrored}，世界点 {world} 的 X 往返不一致。");
+                        Assert.AreEqual(world.y, roundTrip.y, 0.001f,
+                            $"镜像={mirrored}，世界点 {world} 的 Y 往返不一致。");
+                    }
+                }
+            }
+            finally
+            {
+                if (control != null) control.enabled = false;
+                Object.Destroy(cameraGo);
+            }
+
+            yield return null;
         }
 
         [UnityTest]
