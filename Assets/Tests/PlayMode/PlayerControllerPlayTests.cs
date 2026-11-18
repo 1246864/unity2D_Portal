@@ -138,7 +138,7 @@ namespace Platformer.Tests
             cameraGo.SetActive(false);
             var camera = cameraGo.AddComponent<Camera>();
             camera.orthographic = true;
-            var mirror = cameraGo.AddComponent<PlayerCameraMirror>();
+            var mirror = cameraGo.AddComponent<PlayerControlManager>();
             mirror.player = _controller;
             cameraGo.SetActive(true);
 
@@ -191,7 +191,7 @@ namespace Platformer.Tests
             cameraGo.SetActive(false);
             var camera = cameraGo.AddComponent<Camera>();
             camera.orthographic = true;
-            var mirror = cameraGo.AddComponent<PlayerCameraMirror>();
+            var mirror = cameraGo.AddComponent<PlayerControlManager>();
             mirror.player = _controller;
             cameraGo.SetActive(true);
 
@@ -222,6 +222,136 @@ namespace Platformer.Tests
                     secondController.SetHorizontalInputInverted(originalSecondInput);
                 Object.Destroy(cameraGo);
                 Object.Destroy(secondPlayer);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Control_Manager_Does_Not_Overwrite_Program_Move_Input()
+        {
+            bool originalInput = _controller.IsHorizontalInputInverted;
+            _controller.SetHorizontalInputInverted(false);
+
+            var cameraGo = new GameObject("ProgramInputPriorityTestCamera");
+            cameraGo.SetActive(false);
+            cameraGo.AddComponent<Camera>();
+            var control = cameraGo.AddComponent<PlayerControlManager>();
+            control.player = _controller;
+            cameraGo.SetActive(true);
+
+            try
+            {
+                control.SetMoveInput(0.75f);
+                yield return null;
+
+                Assert.IsTrue(_controller.IsManualInput, "程序移动应保持接管状态。");
+                Assert.AreEqual(0.75f, _controller.MoveInput, 0.001f,
+                    "总控的设备输入帧不能覆盖程序移动。");
+
+                control.SetMoveInput(0f);
+                yield return null;
+                Assert.IsTrue(_controller.IsManualInput, "程序传入 0 仍应保持接管。");
+                Assert.AreEqual(0f, _controller.MoveInput, 0.001f);
+
+                control.ClearManualInput();
+                yield return null;
+                Assert.IsFalse(_controller.IsManualInput, "清除后应恢复设备输入。");
+                Assert.AreEqual(0f, _controller.MoveInput, 0.001f,
+                    "没有按键时，恢复设备输入后应保持静止。");
+            }
+            finally
+            {
+                if (control != null) control.enabled = false;
+                Object.Destroy(cameraGo);
+                _controller.SetHorizontalInputInverted(originalInput);
+                _controller.SetMoveInput(0f);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Independent_And_Linked_States_Do_Not_Overwrite_Each_Other()
+        {
+            bool originalInput = _controller.IsHorizontalInputInverted;
+            _controller.SetHorizontalInputInverted(false);
+
+            var cameraGo = new GameObject("IndependentStateTestCamera");
+            cameraGo.SetActive(false);
+            cameraGo.AddComponent<Camera>();
+            var control = cameraGo.AddComponent<PlayerControlManager>();
+            control.player = _controller;
+            cameraGo.SetActive(true);
+
+            try
+            {
+                control.SetMirrorAndInput(false);
+                control.SetInputInverted(true);
+
+                Assert.IsTrue(_controller.IsHorizontalInputInverted);
+                Assert.IsFalse(control.IsMirrored, "独立输入反转不能镜像相机。");
+                Assert.Greater(cameraGo.GetComponent<Camera>().projectionMatrix.m00, 0f);
+
+                control.SetCameraMirrored(true);
+                Assert.IsTrue(_controller.IsHorizontalInputInverted,
+                    "独立相机镜像不能改变输入方向。");
+                Assert.Less(cameraGo.GetComponent<Camera>().projectionMatrix.m00, 0f);
+
+                control.SetMirrorAndInput(false);
+                Assert.IsFalse(_controller.IsHorizontalInputInverted);
+                Assert.IsFalse(control.IsMirrored);
+            }
+            finally
+            {
+                if (control != null) control.enabled = false;
+                Object.Destroy(cameraGo);
+                _controller.SetHorizontalInputInverted(originalInput);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Mouse_World_RoundTrip_Matches_Current_Mirror_State()
+        {
+            var cameraGo = new GameObject("MirrorMouseProjectionTestCamera");
+            cameraGo.SetActive(false);
+            cameraGo.transform.position = new Vector3(0f, 0f, -10f);
+            var camera = cameraGo.AddComponent<Camera>();
+            camera.orthographic = true;
+            var control = cameraGo.AddComponent<PlayerControlManager>();
+            control.player = _controller;
+            cameraGo.SetActive(true);
+
+            Vector3[] worldPoints =
+            {
+                new Vector3(0f, 0f, 0f),
+                new Vector3(2f, 1f, 0f),
+                new Vector3(-3f, -1f, 0f)
+            };
+
+            try
+            {
+                for (int state = 0; state < 2; state++)
+                {
+                    bool mirrored = state == 1;
+                    control.SetCameraMirrored(mirrored);
+
+                    foreach (Vector3 world in worldPoints)
+                    {
+                        Vector3 screen = camera.WorldToScreenPoint(world);
+                        Vector3 roundTrip = control.ScreenToWorldPoint(screen);
+
+                        Assert.AreEqual(world.x, roundTrip.x, 0.001f,
+                            $"镜像={mirrored}，世界点 {world} 的 X 往返不一致。");
+                        Assert.AreEqual(world.y, roundTrip.y, 0.001f,
+                            $"镜像={mirrored}，世界点 {world} 的 Y 往返不一致。");
+                    }
+                }
+            }
+            finally
+            {
+                if (control != null) control.enabled = false;
+                Object.Destroy(cameraGo);
             }
 
             yield return null;

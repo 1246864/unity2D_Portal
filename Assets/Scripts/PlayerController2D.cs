@@ -194,16 +194,6 @@ namespace Platformer
         {
             AdvancePortalRealign();
 
-            if (!_manualInput)
-            {
-                _moveInput = Input.GetAxisRaw("Horizontal");
-                if (invertHorizontalInput)
-                    _moveInput = -_moveInput;
-
-                if (Input.GetButtonDown("Jump")) JumpPressed();
-                if (Input.GetButtonUp("Jump")) JumpReleased();
-            }
-
             if (_sr != null && Mathf.Abs(_moveInput) > 0.01f)
                 _sr.flipX = _moveInput < 0f;
         }
@@ -436,10 +426,37 @@ namespace Platformer
             _spawnPoint = worldPosition;
         }
 
-        /// <summary>接管键盘输入（传 0 表示停下）。</summary>
+        /// <summary>外部程序接管移动输入（传 0 表示停下并保持接管）。</summary>
+        public bool IsManualInput => _manualInput;
+
         public void SetMoveInput(float horizontal)
         {
             _manualInput = true;
+            ApplyMoveInput(horizontal);
+        }
+
+        /// <summary>总控提交本帧设备输入；程序接管期间不覆盖外部命令。</summary>
+        internal void SubmitDeviceInput(float horizontal, bool jumpDown, bool jumpUp)
+        {
+            if (_manualInput) return;
+
+            ApplyMoveInput(horizontal);
+            if (jumpDown) JumpPressed();
+            if (jumpUp) JumpReleased();
+        }
+
+        /// <summary>总控停用时清理设备状态，不影响外部程序接管。</summary>
+        internal void ClearDeviceInput()
+        {
+            if (_manualInput) return;
+
+            ApplyMoveInput(0f);
+            _jumpBufferCounter = 0f;
+            JumpReleased();
+        }
+
+        void ApplyMoveInput(float horizontal)
+        {
             if (invertHorizontalInput)
                 horizontal = -horizontal;
             _moveInput = Mathf.Clamp(horizontal, -1f, 1f);
@@ -452,15 +469,16 @@ namespace Platformer
 
             invertHorizontalInput = inverted;
 
-            // 手动输入时立即翻转当前输入，键盘输入会在下一次 Update 重新读取。
+            // 程序输入立即翻转；设备输入由总控下一次提交时应用新方向。
             if (_manualInput)
                 _moveInput = -_moveInput;
         }
 
-        /// <summary>把控制权交还给键盘。</summary>
+        /// <summary>清除程序接管并停下，下一帧恢复总控设备输入。</summary>
         public void ClearManualInput()
         {
             _manualInput = false;
+            ApplyMoveInput(0f);
         }
 
         /// <summary>缓存一次跳跃输入（等价于按下跳跃键）。</summary>

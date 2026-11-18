@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Platformer
 {
@@ -17,8 +18,10 @@ namespace Platformer
         [Tooltip("眼睛相对玩家中心点的高度（世界单位）")]
         public float playerEyeOffset = 0.4f;
 
-        [Tooltip("负责当前玩家画面镜像的组件；留空时优先从主相机解析")]
-        public PlayerCameraMirror cameraMirror;
+        [Header("玩家与相机总控")]
+        [Tooltip("统一处理输入、相机镜像和相机传送；留空时从跟随相机解析。")]
+        [FormerlySerializedAs("cameraMirror")]
+        public PlayerControlManager playerControl;
 
         [Header("传送")]
         [Tooltip("传送冷却（秒），一对门共享，避免连续帧反复触发")]
@@ -73,7 +76,6 @@ namespace Platformer
         BoxCollider2D _gateA;
         BoxCollider2D _gateB;
         PortalTerrainCarver _terrainCarver;
-        PlayerCameraMirror _cameraMirror;
 
         float _cooldown;
         bool _forceCapture;
@@ -303,16 +305,14 @@ namespace Platformer
             if (_groupB != null) _groupB.ApplyHalfCrop();
         }
 
-        void ToggleCameraMirrorAndInput()
+        PlayerControlManager ResolvePlayerControl(Camera followCamera)
         {
-            if (_cameraMirror == null) _cameraMirror = cameraMirror;
-            if (_cameraMirror == null && Camera.main != null)
-                _cameraMirror = Camera.main.GetComponent<PlayerCameraMirror>();
-            if (_cameraMirror == null)
-                _cameraMirror = FindObjectOfType<PlayerCameraMirror>();
+            if (playerControl != null) return playerControl;
 
-            if (_cameraMirror != null)
-                _cameraMirror.ToggleMirrorAndInput();
+            if (followCamera != null)
+                return followCamera.GetComponent<PlayerControlManager>();
+
+            return FindObjectOfType<PlayerControlManager>();
         }
 
         /// <summary>
@@ -349,6 +349,7 @@ namespace Platformer
             // 传送前记录相机在玩家显示空间中的全部相对变换（位置 + 旋转）。
             Camera followCamera = source.capture != null ? source.capture.sourceCamera : null;
             if (followCamera == null) followCamera = Camera.main;
+            PlayerControlManager control = ResolvePlayerControl(followCamera);
 
             Transform playerVisual = controller.VisualRoot != null
                 ? controller.VisualRoot
@@ -376,24 +377,9 @@ namespace Platformer
             if (preserveVelocity && rb != null)
                 rb.velocity = velocity;
 
-            // 玩家已经完成瞬移和旋转；现在把相机强制放回它的相对位置/相对旋转。
-            if (followCamera != null)
-            {
-                CameraFollow2D cameraFollow = followCamera.GetComponent<CameraFollow2D>();
-                if (cameraFollow != null)
-                {
-                    cameraFollow.TeleportRelative(playerVisual, cameraRelative);
-                }
-                else
-                {
-                    Matrix4x4 world =
-                        playerVisual.localToWorldMatrix * cameraRelative;
-                    CameraFollow2D.Decompose2D(
-                        world, out Vector3 position, out Quaternion rotation, out Vector3 scale);
-                    followCamera.transform.SetPositionAndRotation(position, rotation);
-                    followCamera.transform.localScale = scale;
-                }
-            }
+            // 玩家已经完成瞬移和旋转；相机具体映射由总控交给跟随组件执行。
+            if (control != null)
+                control.TeleportRelative(playerVisual, cameraRelative);
 
 
             // 一对门共享一个冷却，避免刚落地就被另一扇门立刻传回去。
@@ -402,28 +388,11 @@ namespace Platformer
             // 本帧 LateUpdate 里强制两扇门各捕获一次，并重新生成半屏画面。
             _forceCapture = true;
 
-            // 后处理：两扇门朝向一致时，等传送/相机相对映射都完成后，
-            // 翻转相机与水平输入；再把相机位置沿玩家相对 Y 轴水平镜像。
-            if (sameFacing)
+            // 同向传送仍由 PortalPair 决定联动规则，总控只执行状态和相机指令。
+            if (sameFacing && control != null)
             {
-                ToggleCameraMirrorAndInput();
-
-                if (followCamera != null)
-                {
-                    CameraFollow2D cameraFollow = followCamera.GetComponent<CameraFollow2D>();
-                    if (cameraFollow != null)
-                    {
-                        cameraFollow.MirrorPendingCameraPosition();
-                    }
-                    else
-                    {
-                        Vector3 localPosition = playerVisual.InverseTransformPoint(
-                            followCamera.transform.position);
-                        localPosition.x = -localPosition.x;
-                        followCamera.transform.position =
-                            playerVisual.TransformPoint(localPosition);
-                    }
-                }
+                control.ToggleMirrorAndInput();
+                control.MirrorPendingCameraPosition(playerVisual);
             }
         }
 
