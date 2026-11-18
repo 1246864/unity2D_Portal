@@ -109,3 +109,5 @@ desktop.ini
 *.orig
 *.rej
 ~$*
+
+.trae/
