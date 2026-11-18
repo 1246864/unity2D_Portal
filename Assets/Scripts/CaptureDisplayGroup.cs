@@ -434,32 +434,101 @@ namespace Platformer
 
         void ChangeFacing()
         {
-            // 本门只拥有自己的视觉节点；涉及对方输出的部分由 PortalPair 统一协调。
-            PortalPair pair = Pair;
-            if (pair != null) pair.ApplyFacingState(this);
-            else ApplyLocalFacingState();
+            if (partner == null) ResolvePartner();
+
+            CaptureDisplayGroup groupA = side == CaptureGroupSide.A ? this : partner;
+            CaptureDisplayGroup groupB = side == CaptureGroupSide.B ? this : partner;
+            ApplyFacingStates(groupA, groupB);
         }
 
-        internal void ApplyLocalFacingState()
+        /// <summary>按 A/B 的四种朝向组合，直接设置两扇门的全部视觉状态。</summary>
+        public static void ApplyFacingStates(CaptureDisplayGroup groupA, CaptureDisplayGroup groupB)
         {
-            UpdateHint();
+            if (groupA == null || groupB == null) return;
 
-            // 初始化引用尚未连接时保持安全状态；Start 会在解析完成后再次应用。
-            if (maskTop == null || maskBottom == null || viewCenter == null || output == null)
+            if (groupA.side != CaptureGroupSide.A || groupB.side != CaptureGroupSide.B)
+            {
+                var temp = groupA;
+                groupA = groupB;
+                groupB = temp;
+            }
+
+
+            groupA.UpdateHint();
+            groupB.UpdateHint();
+
+            if (groupA.maskTop == null || groupA.maskBottom == null ||
+                groupA.viewCenter == null || groupA.output == null ||
+                groupB.maskTop == null || groupB.maskBottom == null ||
+                groupB.viewCenter == null || groupB.output == null)
                 return;
 
-            bool facesLeft = FacesLeft;
-            float maskX = side == CaptureGroupSide.A && !facesLeft ? -1f : 1f;
-            float maskY = facesLeft ? -1f : 1f;
-            maskTop.localScale = new Vector3(maskX, maskY, 1f);
-            maskBottom.localScale = new Vector3(maskX, maskY, 1f);
+            // A 左，B 左。
+            if (groupA.FacesLeft && groupB.FacesLeft)
+            {
+                groupA.maskTop.localScale = groupA.maskBottom.localScale = new Vector3(1f, -1f, 1f);
+                groupA.viewCenter.localScale = new Vector3(-1f, 1f, 1f);
+                groupA.output.flipX = false;
+                groupA.output.flipY = false;
+                groupA.SetOutputHalf(PortalViewHalf.Left);
 
-            float viewX = side == CaptureGroupSide.A
-                ? (facesLeft ? 1f : -1f)
-                : (facesLeft ? -1f : 1f);
-            float viewY = side == CaptureGroupSide.A && facesLeft ? 1f : -1f;
-            viewCenter.localScale = new Vector3(viewX, viewY, 1f);
-            output.flipY = side == CaptureGroupSide.B || !facesLeft;
+                groupB.maskTop.localScale = groupB.maskBottom.localScale = new Vector3(1f, -1f, 1f);
+                groupB.viewCenter.localScale = new Vector3(-1f, -1f, 1f);
+                groupB.output.flipX = false;
+                groupB.output.flipY = true;
+                groupB.SetOutputHalf(PortalViewHalf.Left);
+                return;
+            }
+
+            // A 左，B 右。
+            if (groupA.FacesLeft && !groupB.FacesLeft)
+            {
+                groupA.maskTop.localScale = groupA.maskBottom.localScale = new Vector3(1f, -1f, 1f);
+                groupA.viewCenter.localScale = new Vector3(1f, 1f, 1f);
+                groupA.output.flipX = false;
+                groupA.output.flipY = false;
+                groupA.SetOutputHalf(PortalViewHalf.Right);
+
+                groupB.maskTop.localScale = groupB.maskBottom.localScale = new Vector3(1f, 1f, 1f);
+                groupB.viewCenter.localScale = new Vector3(1f, -1f, 1f);
+                groupB.output.flipX = false;
+                groupB.output.flipY = true;
+                groupB.SetOutputHalf(PortalViewHalf.Left);
+                return;
+            }
+
+            // A 右，B 左。
+            if (!groupA.FacesLeft && groupB.FacesLeft)
+            {
+                groupA.maskTop.localScale = groupA.maskBottom.localScale = new Vector3(-1f, 1f, 1f);
+                groupA.viewCenter.localScale = new Vector3(1f, -1f, 1f);
+                groupA.output.flipX = false;
+                groupA.output.flipY = true;
+                groupA.SetOutputHalf(PortalViewHalf.Left);
+
+                groupB.maskTop.localScale = groupB.maskBottom.localScale = new Vector3(1f, -1f, 1f);
+                groupB.viewCenter.localScale = new Vector3(1f, -1f, 1f);
+                groupB.output.flipX = false;
+                groupB.output.flipY = true;
+                groupB.SetOutputHalf(PortalViewHalf.Right);
+                return;
+            }
+
+            // A 右，B 右。
+            if (!groupA.FacesLeft && !groupB.FacesLeft)
+            {
+                groupA.maskTop.localScale = groupA.maskBottom.localScale = new Vector3(-1f, 1f, 1f);
+                groupA.viewCenter.localScale = new Vector3(-1f, -1f, 1f);
+                groupA.output.flipX = false;
+                groupA.output.flipY = true;
+                groupA.SetOutputHalf(PortalViewHalf.Right);
+
+                groupB.maskTop.localScale = groupB.maskBottom.localScale = new Vector3(1f, 1f, 1f);
+                groupB.viewCenter.localScale = new Vector3(-1f, -1f, 1f);
+                groupB.output.flipX = false;
+                groupB.output.flipY = true;
+                groupB.SetOutputHalf(PortalViewHalf.Right);
+            }
         }
 
         /// <summary>

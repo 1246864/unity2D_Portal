@@ -472,7 +472,7 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
-        public IEnumerator Facing_Repeated_Switches_Preserve_Partner_View_Center()
+        public IEnumerator Facing_Repeated_Switches_Restore_View_Centers()
         {
             FindGroups(out var a, out var b);
             var pair = Object.FindObjectOfType<PortalPair>();
@@ -495,14 +495,11 @@ namespace Platformer.Tests
                 for (int i = 0; i < 2; i++)
                 {
                     a.Facing = oppositeFacing;
-                    pair.ApplyFacingState(a);
+                    CaptureDisplayGroup.ApplyFacingStates(a, b);
                     yield return null;
 
-                    Assert.AreEqual(partnerScale, b.viewCenter.localScale,
-                        "A 换向只能改 B 的输出，不能改 B 的 View Center 父节点。");
-
                     a.Facing = originalFacing;
-                    pair.ApplyFacingState(a);
+                    CaptureDisplayGroup.ApplyFacingStates(a, b);
                     yield return null;
 
                     Assert.AreEqual(originalScale, a.viewCenter.localScale,
@@ -514,7 +511,88 @@ namespace Platformer.Tests
             finally
             {
                 a.Facing = originalFacing;
-                pair.ApplyFacingState(a);
+                CaptureDisplayGroup.ApplyFacingStates(a, b);
+            }
+
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Facing_AllFourCombinations_ApplyBothPortals_AtOnce()
+        {
+            FindGroups(out var a, out var b);
+            var pair = Object.FindObjectOfType<PortalPair>();
+
+            Assert.IsNotNull(a);
+            Assert.IsNotNull(b);
+            Assert.IsNotNull(pair);
+
+            PortalFacing originalA = a.Facing;
+            PortalFacing originalB = b.Facing;
+            PortalFacing[] directions = { PortalFacing.Left, PortalFacing.Right };
+
+            // 先记录左右半屏各自的正确位置，后续验证动态换向不会保留旧 X。
+            a.SetOutputHalf(PortalViewHalf.Left);
+            float aLeftX = a.output.transform.localPosition.x;
+            a.SetOutputHalf(PortalViewHalf.Right);
+            float aRightX = a.output.transform.localPosition.x;
+            b.SetOutputHalf(PortalViewHalf.Left);
+            float bLeftX = b.output.transform.localPosition.x;
+            b.SetOutputHalf(PortalViewHalf.Right);
+            float bRightX = b.output.transform.localPosition.x;
+
+            try
+            {
+                foreach (PortalFacing aFacing in directions)
+                {
+                    foreach (PortalFacing bFacing in directions)
+                    {
+                        a.Facing = aFacing;
+                        b.Facing = bFacing;
+                        CaptureDisplayGroup.ApplyFacingStates(a, b);
+
+                        bool aLeft = aFacing == PortalFacing.Left;
+                        bool bLeft = bFacing == PortalFacing.Left;
+
+                        Assert.AreEqual(new Vector3(aLeft ? 1f : -1f, aLeft ? -1f : 1f, 1f),
+                            a.maskTop.localScale, $"A={aFacing}, B={bFacing}：A 上遮罩。");
+                        Assert.AreEqual(a.maskTop.localScale, a.maskBottom.localScale,
+                            $"A={aFacing}, B={bFacing}：A 两块遮罩应一致。");
+                        float viewX = aLeft == bLeft ? -1f : 1f;
+                        Assert.AreEqual(new Vector3(viewX, aLeft ? 1f : -1f, 1f),
+                            a.viewCenter.localScale, $"A={aFacing}, B={bFacing}：A 视图。");
+                        Assert.AreEqual(!aLeft, a.output.flipY,
+                            $"A={aFacing}, B={bFacing}：A 输出 Y 翻转。");
+
+                        Assert.AreEqual(new Vector3(1f, bLeft ? -1f : 1f, 1f),
+                            b.maskTop.localScale, $"A={aFacing}, B={bFacing}：B 上遮罩。");
+                        Assert.AreEqual(b.maskTop.localScale, b.maskBottom.localScale,
+                            $"A={aFacing}, B={bFacing}：B 两块遮罩应一致。");
+                        Assert.AreEqual(new Vector3(viewX, -1f, 1f),
+                            b.viewCenter.localScale, $"A={aFacing}, B={bFacing}：B 视图。");
+                        Assert.IsTrue(b.output.flipY,
+                            $"A={aFacing}, B={bFacing}：B 输出 Y 始终翻转。");
+
+                        Assert.IsFalse(a.output.flipX,
+                            $"A={aFacing}, B={bFacing}：A 输出 X 不翻转。");
+                        Assert.IsFalse(b.output.flipX,
+                            $"A={aFacing}, B={bFacing}：B 输出 X 不翻转。");
+                        Assert.AreEqual(aLeft ? PortalViewHalf.Left : PortalViewHalf.Right, b.OutputHalf,
+                            $"A={aFacing}, B={bFacing}：B 使用 A 相机的对应半屏。");
+                        Assert.AreEqual(bLeft ? PortalViewHalf.Left : PortalViewHalf.Right, a.OutputHalf,
+                            $"A={aFacing}, B={bFacing}：A 使用 B 相机的对应半屏。");
+                        Assert.AreEqual(aLeft ? bLeftX : bRightX, b.output.transform.localPosition.x, 0.0001f,
+                            $"A={aFacing}, B={bFacing}：B 换半屏后必须同步更新 X，不能保留旧位置。");
+                        Assert.AreEqual(bLeft ? aLeftX : aRightX, a.output.transform.localPosition.x, 0.0001f,
+                            $"A={aFacing}, B={bFacing}：A 换半屏后必须同步更新 X，不能保留旧位置。");
+                    }
+                }
+            }
+            finally
+            {
+                a.Facing = originalA;
+                b.Facing = originalB;
+                CaptureDisplayGroup.ApplyFacingStates(a, b);
             }
 
             yield return null;

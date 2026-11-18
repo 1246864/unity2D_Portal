@@ -111,8 +111,7 @@ namespace Platformer
             PushPlayerToGroups();
             PushViewSettingsToGroups();
             IgnorePlayerBodyCollision();
-            ApplyFacingState(_groupA);
-            ApplyFacingState(_groupB);
+            CaptureDisplayGroup.ApplyFacingStates(_groupA, _groupB);
         }
 
         void OnEnable()
@@ -190,22 +189,6 @@ namespace Platformer
                 Mathf.Max(0.01f, cameraSizeMultiplier.y));
             snapshot.captureWidth = Mathf.Max(0.01f, captureWidth);
             snapshot.captureHeight = Mathf.Max(0.01f, captureHeight);
-        }
-
-        /// <summary>统一应用一扇门的本地视觉状态及它对对方输出的控制。</summary>
-        public void ApplyFacingState(CaptureDisplayGroup source)
-        {
-            if (source == null) return;
-
-            source.ApplyLocalFacingState();
-            if (source.partner == null) source.ResolvePartner();
-
-            CaptureDisplayGroup target = source.partner;
-            if (target == null || target.output == null) return;
-
-            // 保留既有 A/B 视觉映射，但不再从 B 门写 A 门的父节点缩放。
-            target.output.flipX = source.side == CaptureGroupSide.A && !source.FacesLeft;
-            source.SetPartnerCameraHalf(source.FacesLeft ? PortalViewHalf.Left : PortalViewHalf.Right);
         }
 
         /// <summary>
