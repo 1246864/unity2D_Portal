@@ -1,7 +1,7 @@
 # 开发文档 — 2D 平台跳跃 / 传送门
 
-> 当前开发版：捕获范围静态/动态双模式（基于 `83e95e7`）
-> 最近验证：23/23 PlayMode 通过（`Logs/TestResults_newscene3.xml`，27.13 秒）
+> 当前开发版：PlayMode 自包含测试夹具
+> 最近验证：39 个用例，38 通过 / 0 失败 / 1 跳过（2026-11-20，`-nographics`；真实快照图像检查跳过）
 > 项目总览见 **[../PROJECT.md](../PROJECT.md)**，快速开始见 **[../README.md](../README.md)**。
 
 ---
@@ -260,32 +260,44 @@ Center Point 撞门
 
 ## 5. 测试
 
-命令行：
+### 5.1 运行方式
 
 ```powershell
-Unity.exe -batchmode -projectPath <项目> `
+Unity.exe -batchmode -nographics -projectPath <项目> `
   -runTests -testPlatform PlayMode `
   -testResults Logs\TestResults.xml `
   -logFile Logs\playtests.log
 ```
 
-当前 23 个用例：
+当前 39 个用例：
 
-| 文件 | 用例 |
-|---|---|
-| `PlayerControllerPlayTests` | 7 |
-| `LevelTilemapTests` | 5 |
-| `PortalTeleportTests` | 8 |
-| `PortalTerrainCarverTests` | 3 |
+| 文件 | 用例 | 覆盖 |
+|---|---:|---|
+| `PlayerControllerPlayTests.cs` | 16 | 角色物理、输入、相机跟随/镜像/传送 |
+| `LevelTilemapTests.cs` | 5 | 临时地形站立/斜坡、描边、Portal View、快照 |
+| `PortalTeleportTests.cs` | 15 | 门状态、传送、速度、相对位姿、透明度 |
+| `PortalTerrainCarverTests.cs` | 3 | 开洞/恢复、方向、移动跟随 |
 
-最近结果：23/23，0 failed，27.13 秒。
+最近结果（2026-11-20）：**38 passed / 0 failed / 1 skipped**。跳过项为 `Snapshot_Camera_Captures_Own_View`，原因是命令行使用 `-nographics`，无法验证真实渲染图像；其余用例不依赖图形设备。
 
-测试注意事项：
+### 5.2 自包含夹具
 
-- PlayMode 测试以 additive 方式加载 `Level01`；
-- 地形开洞会影响 Ground 碰撞，部分测试会临时关闭 carver；
-- 传送/相机测试会临时改 `portalRealignSpeed`、Rigidbody 类型等，测试结束要还原；
-- `Level01` 场景当前 A 未旋转、B 旋转 45°，断言使用门的实际 `OpeningDirection`/角度，不假设水平。
+`PlayTestFixtures.cs` 提供测试程序集内部共享的三类工厂：
+
+- `PortalTestRig.Create(bool withTerrain = false)`：在未激活根节点下装配玩家、主相机、`PlayerControlManager`、`CameraFollow2D`、`PortalPair` 和双门，可选创建地形，完成后统一激活；输出 Sprite/Texture 由夹具持有，使半屏结构用例可在无图形环境运行。
+- `TilemapTestRig`：创建 Grid、Tilemap、静态 Rigidbody2D、TilemapCollider2D 和实体多边形模式的 CompositeCollider2D，并提供实心/斜坡 Tile、矩形填充和资源清理。
+- `PlayTestFixtures.CreatePlayer`：创建最小胶囊玩家，显式设置重力、碰撞和 Ground 层，不加载玩家 Prefab。
+
+夹具生成的地形使用 32×32 纹理。`Sprite.OverridePhysicsShape` 的轮廓按纹理矩形左下角为原点、以像素为单位，实心瓦片范围为 `(0,0)..(32,32)`；修改 Tilemap 后显式执行 `ProcessTilemapChanges()`、`GenerateGeometry()` 和必要的 `Physics2D.SyncTransforms()`。
+
+### 5.3 编写约束
+
+- 不加载 `Level01` / `TeatScene`，不使用 `SceneManager` 切换正式关卡。
+- 不通过 `Camera.main`、`GameObject.Find`、`FindObjectOfType` 或正式节点路径获取被测对象；从当前用例的 rig 取引用。
+- 断言坐标由本用例生成的地形、门位置、碰撞尺寸计算，不引用正式地图坐标、瓦片数量或对象命名。
+- 每个用例只声明需要的最小环境；地形开洞用例先停用 rig，完成瓦片和门位置配置后再激活，避免组件在半成品环境上执行。
+- `UnityTearDown` 统一销毁根节点、Sprite、Texture、Tile 和物理材质，避免跨用例污染。
+- 真实图像验证必须在有图形设备的环境单独运行；不能用结构断言冒充像素验证。
 
 ---
 

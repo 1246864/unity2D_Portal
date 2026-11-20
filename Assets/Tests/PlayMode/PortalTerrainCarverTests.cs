@@ -1,40 +1,49 @@
 using System.Collections;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using UnityEngine.Tilemaps;
 
 namespace Platformer.Tests
 {
     /// <summary>
-    /// 传送门地形开洞的 PlayMode 测试：门激活时按“背向矩形”精确切掉地形碰撞，
-    /// 允许切到半格；门停用后恢复。
+    /// 传送门地形开洞的 PlayMode 测试：使用测试自行生成的 Tilemap，
+    /// 验证背向矩形切割、移动跟随以及停用后的碰撞恢复。
     /// </summary>
     public class PortalTerrainCarverTests
     {
-        const string LevelScene = "Level01";
+        PortalTestRig _rig;
+        Tile _solidTile;
+        int _groundMask;
 
         [UnitySetUp]
         public IEnumerator SetUp()
         {
-            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
-            yield return new WaitForSeconds(0.5f);
+            _rig = PortalTestRig.Create(withTerrain: true);
+            _rig.Root.SetActive(false);
+            _solidTile = _rig.Terrain.CreateSolidTile();
+            _rig.Terrain.FillSolidRect(_solidTile, -4, 4, -4, 8);
+            _groundMask = _rig.Player.groundMask;
+
+            // A 朝左，背向 +X 切墙；B 放在没有地形的远处，避免参与本组断言。
+            _rig.A.transform.SetPositionAndRotation(
+                new Vector3(0.1f, 0.5f, 0f), Quaternion.identity);
+            _rig.A.Facing = PortalFacing.Left;
+            _rig.B.transform.position = new Vector3(20f, 20f, 0f);
+
+            _rig.Root.SetActive(true);
+            _rig.Terrain.TilemapCollider.ProcessTilemapChanges();
+            _rig.Terrain.Composite.GenerateGeometry();
+            Physics2D.SyncTransforms();
+            yield return new WaitForFixedUpdate();
+            yield return null;
         }
 
         [UnityTearDown]
         public IEnumerator TearDown()
         {
-            Scene scene = SceneManager.GetSceneByName(LevelScene);
-            if (scene.IsValid() && scene.isLoaded)
-                yield return SceneManager.UnloadSceneAsync(scene);
-        }
-
-        static CaptureDisplayGroup FindGroup(CaptureGroupSide side)
-        {
-            foreach (var group in Object.FindObjectsOfType<CaptureDisplayGroup>())
-                if (group.side == side) return group;
-            return null;
+            if (_rig != null) _rig.Destroy();
+            yield return null;
         }
 
         static int CountResidualColliders(GameObject terrainGo)
@@ -50,27 +59,12 @@ namespace Platformer.Tests
         [UnityTest]
         public IEnumerator Portal_Carves_Terrain_And_Restores_When_Deactivated()
         {
-            var pair = Object.FindObjectOfType<PortalPair>();
-            Assert.IsNotNull(pair, "场景缺少 PortalPair。");
-
+            PortalPair pair = _rig.Pair;
             var carver = pair.GetComponent<PortalTerrainCarver>();
-            Assert.IsNotNull(carver, "PortalPair 上应该运行时补上 PortalTerrainCarver。");
-
-            var terrainGo = GameObject.Find("Terrain");
-            Assert.IsNotNull(terrainGo, "找不到 Terrain。");
-            var terrain = terrainGo.GetComponent<Tilemap>();
-            var tilemapCollider = terrainGo.GetComponent<TilemapCollider2D>();
-            var composite = terrainGo.GetComponent<CompositeCollider2D>();
-            Assert.IsNotNull(terrain);
-            Assert.IsNotNull(tilemapCollider);
-            Assert.IsNotNull(composite);
-
-            var groupA = FindGroup(CaptureGroupSide.A);
-            Assert.IsNotNull(groupA, "找不到 Portal A。");
-
-            // 场景里的 A 可能被移动/旋转过；测试统一放到已知的墙位，保证结果可复现。
-            groupA.transform.SetPositionAndRotation(
-                new Vector3(6.03f, 1.52f, 0f), Quaternion.identity);
+            CaptureDisplayGroup groupA = _rig.A;
+            GameObject terrainGo = _rig.Terrain.TerrainObject;
+            Tilemap terrain = _rig.Terrain.Tilemap;
+            TilemapCollider2D tilemapCollider = _rig.Terrain.TilemapCollider;
 
             // 先关闭 A，保证从“未开洞”的干净状态开始。
             groupA.gameObject.SetActive(false);
@@ -78,171 +72,118 @@ namespace Platformer.Tests
             yield return null;
 
             Vector2 portal = groupA.transform.position;
-            Vector2 back = groupA.BackDirection; // A 朝左，背向是 +X
+            Vector2 back = groupA.BackDirection;
             Vector2 inside = portal + back * 0.2f;
-            // 矩形长度取当前 PortalPair 的 carveWidth（场景为 0.8），再多留一点作为外部点。
             Vector2 outside = portal + back * (pair.carveWidth + 0.15f);
 
             var gateCell = new Vector3Int(
                 Mathf.FloorToInt(portal.x),
                 Mathf.FloorToInt(portal.y),
                 0);
-            Assert.IsTrue(terrain.HasTile(gateCell),
-                $"测试要求门洞格 {gateCell} 有墙；当前场景 A 门应嵌在墙里。");
+            Assert.IsTrue(terrain.HasTile(gateCell), "夹具应在门洞所在格生成实心瓦片。");
+            Assert.IsNotNull(Physics2D.OverlapPoint(inside, _groundMask),
+                "开门前，矩形内部的点应该能检测到地面碰撞。");
+            Assert.IsNotNull(Physics2D.OverlapPoint(outside, _groundMask),
+                "开门前，矩形外部的点应该能检测到地面碰撞。");
 
-            var groundMask = 1 << 6;
-            Assert.IsNotNull(Physics2D.OverlapPoint(inside, groundMask),
-                "开门前，矩形内部的点应该能检测到 Ground 碰撞。");
-            Assert.IsNotNull(Physics2D.OverlapPoint(outside, groundMask),
-                "开门前，矩形外部的点应该能检测到 Ground 碰撞。");
-
-            // 激活 A：carver 应该只切掉背向 carveWidth 长的矩形。
             groupA.gameObject.SetActive(true);
             yield return new WaitForFixedUpdate();
             yield return null;
 
-            Assert.GreaterOrEqual(carver.CarvedCellCount, 1,
-                "carver 应该记录了被切过的格子。");
-            Assert.IsNull(Physics2D.OverlapPoint(inside, groundMask),
-                "门激活时，矩形内部的 Ground 碰撞应该被切掉。");
-            Assert.IsNotNull(Physics2D.OverlapPoint(outside, groundMask),
-                "门激活时，矩形外部的 Ground 碰撞应该保留（支持半格切割）。");
+            Assert.GreaterOrEqual(carver.CarvedCellCount, 1);
+            Assert.IsNull(Physics2D.OverlapPoint(inside, _groundMask),
+                "门激活时，矩形内部的地面碰撞应该被切掉。");
+            Assert.IsNotNull(Physics2D.OverlapPoint(outside, _groundMask),
+                "门激活时，矩形外部的地面碰撞应该保留（支持半格切割）。");
 
-            // 停用 A：地形碰撞恢复。
             groupA.gameObject.SetActive(false);
             yield return new WaitForFixedUpdate();
             yield return null;
 
-            Assert.IsNotNull(Physics2D.OverlapPoint(inside, groundMask),
-                "门停用后，矩形内部的 Ground 碰撞应该恢复。");
-            Assert.IsNotNull(Physics2D.OverlapPoint(outside, groundMask),
-                "门停用后，矩形外部的 Ground 碰撞应该保持。");
+            Assert.IsNotNull(Physics2D.OverlapPoint(inside, _groundMask),
+                "门停用后，矩形内部的地面碰撞应该恢复。");
+            Assert.IsNotNull(Physics2D.OverlapPoint(outside, _groundMask));
 
-            // 再启用一次：这是之前的回归点，不能对 "(Carved)" Sprite 再次 OverridePhysicsShape。
+            // 再启用一次，覆盖重复开洞不能残留旧物理形状的回归点。
             groupA.gameObject.SetActive(true);
             yield return new WaitForFixedUpdate();
             yield return null;
 
-            Assert.IsNull(Physics2D.OverlapPoint(inside, groundMask),
-                "门重新启用后，矩形内部的 Ground 碰撞应该重新被剔除。");
-            Assert.IsNotNull(Physics2D.OverlapPoint(outside, groundMask),
-                "门重新启用后，矩形外部的 Ground 碰撞应该保持。");
+            Assert.IsNull(Physics2D.OverlapPoint(inside, _groundMask));
+            Assert.IsNotNull(Physics2D.OverlapPoint(outside, _groundMask));
 
-            // 残余碰撞必须继承地形物理材质，否则开洞边缘的摩擦/弹性会突然变化。
             foreach (var polygon in terrainGo.GetComponentsInChildren<PolygonCollider2D>(true))
             {
                 if (!polygon.name.StartsWith("Carved Collider ")) continue;
                 Assert.AreSame(tilemapCollider.sharedMaterial, polygon.sharedMaterial,
                     "残余 PolygonCollider2D 应继承 TilemapCollider2D 的物理材质。");
             }
-            Assert.Greater(CountResidualColliders(terrainGo), 0,
-                "该墙位应至少生成一个残余 PolygonCollider2D。");
+            Assert.Greater(CountResidualColliders(terrainGo), 0);
 
             // 全局开关也必须可逆：false 恢复旧洞，true 按当前门状态重切。
             pair.carveTerrain = false;
             yield return new WaitForFixedUpdate();
             yield return null;
 
-            Assert.IsFalse(carver.enabled, "carveTerrain=false 应禁用 carver。");
-            Assert.AreEqual(0, carver.CarvedCellCount, "关闭开洞后不应保留已切格记录。");
-            Assert.AreEqual(0, CountResidualColliders(terrainGo),
-                "关闭开洞后应销毁全部残余碰撞对象。");
-            Assert.IsNotNull(Physics2D.OverlapPoint(inside, groundMask),
-                "carveTerrain=false 应恢复门洞内部碰撞。");
+            Assert.IsFalse(carver.enabled);
+            Assert.AreEqual(0, carver.CarvedCellCount);
+            Assert.AreEqual(0, CountResidualColliders(terrainGo));
+            Assert.IsNotNull(Physics2D.OverlapPoint(inside, _groundMask));
 
             pair.carveTerrain = true;
             yield return new WaitForFixedUpdate();
             yield return null;
 
-            Assert.IsTrue(carver.enabled, "carveTerrain=true 应重新启用 carver。");
-            Assert.GreaterOrEqual(carver.CarvedCellCount, 1,
-                "重新开启后应按当前门位置重新开洞。");
-            Assert.IsNull(Physics2D.OverlapPoint(inside, groundMask),
-                "carveTerrain 重新开启后应重新移除门洞内部碰撞。");
-            Assert.IsNotNull(Physics2D.OverlapPoint(outside, groundMask),
-                "重新开启后仍应保留门洞外部碰撞。");
+            Assert.IsTrue(carver.enabled);
+            Assert.GreaterOrEqual(carver.CarvedCellCount, 1);
+            Assert.IsNull(Physics2D.OverlapPoint(inside, _groundMask));
+            Assert.IsNotNull(Physics2D.OverlapPoint(outside, _groundMask));
 
             pair.carveTerrain = false;
             yield return new WaitForFixedUpdate();
             yield return null;
 
             Assert.AreEqual(0, carver.CarvedCellCount);
-            Assert.AreEqual(0, CountResidualColliders(terrainGo),
-                "第二次关闭后同样不能残留旧洞。");
-            Assert.IsNotNull(Physics2D.OverlapPoint(inside, groundMask),
-                "第二次关闭后门洞内部碰撞仍应完整恢复。");
+            Assert.AreEqual(0, CountResidualColliders(terrainGo));
+            Assert.IsNotNull(Physics2D.OverlapPoint(inside, _groundMask));
         }
 
         [UnityTest]
         public IEnumerator OpeningDirection_Follows_Transform_Rotation()
         {
-            var groupA = FindGroup(CaptureGroupSide.A);
-            Assert.IsNotNull(groupA, "找不到 Portal A。");
-
-            Quaternion originalRotation = groupA.transform.rotation;
-
+            CaptureDisplayGroup groupA = _rig.A;
             groupA.transform.rotation = Quaternion.identity;
             yield return null;
-            Assert.Less(Vector2.Distance(new Vector2(-1f, 0f), groupA.OpeningDirection), 0.001f,
-                "A 朝左且未旋转时，开口方向应为 (-1,0)。");
+            Assert.Less(Vector2.Distance(new Vector2(-1f, 0f), groupA.OpeningDirection), 0.001f);
 
             groupA.transform.rotation = Quaternion.Euler(0f, 0f, 90f);
             yield return null;
-            Assert.Less(Vector2.Distance(new Vector2(0f, -1f), groupA.OpeningDirection), 0.001f,
-                "门旋转 90° 后，开口方向应实时转到 (0,-1)。");
-
-            groupA.transform.rotation = originalRotation;
-            yield return null;
+            Assert.Less(Vector2.Distance(new Vector2(0f, -1f), groupA.OpeningDirection), 0.001f);
         }
 
         [UnityTest]
         public IEnumerator Carve_Follows_Portal_When_Moved()
         {
-            var pair = Object.FindObjectOfType<PortalPair>();
-            Assert.IsNotNull(pair, "场景缺少 PortalPair。");
-
-            var carver = pair.GetComponent<PortalTerrainCarver>();
-            Assert.IsNotNull(carver, "PortalPair 上应该运行时补上 PortalTerrainCarver。");
-
-            var terrainGo = GameObject.Find("Terrain");
-            Assert.IsNotNull(terrainGo, "找不到 Terrain。");
-            var terrain = terrainGo.GetComponent<Tilemap>();
-            Assert.IsNotNull(terrain);
-
-            var groupA = FindGroup(CaptureGroupSide.A);
-            Assert.IsNotNull(groupA, "找不到 Portal A。");
-
-            // 统一放到已知墙位，避免场景手动调整影响移动测试。
-            groupA.transform.SetPositionAndRotation(
-                new Vector3(6.03f, 1.52f, 0f), Quaternion.identity);
-            yield return new WaitForFixedUpdate();
-            yield return null;
-
-            var groundMask = 1 << 6;
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup groupA = _rig.A;
             Vector2 originalPosition = groupA.transform.position;
-            Vector2 back = groupA.BackDirection;
-            Vector2 oldInside = originalPosition + back * 0.2f;
+            Vector2 oldInside = originalPosition + groupA.BackDirection * 0.2f;
 
-            Assert.IsNull(Physics2D.OverlapPoint(oldInside, groundMask),
-                "移动前，A 门洞内部应该没有 Ground 碰撞。");
+            Assert.IsNull(Physics2D.OverlapPoint(oldInside, _groundMask),
+                "移动前，A 门洞内部应该没有地面碰撞。");
 
-            // 把门整体上移超过一个门洞高度，确保旧矩形完全离开新矩形。
+            // 夹具在新旧两个位置都生成了瓦片，两个位置的开洞断言都有效。
             groupA.transform.position =
                 (Vector3)originalPosition + Vector3.up * (pair.PortalHeight + 0.5f);
             yield return new WaitForFixedUpdate();
             yield return null;
 
-            Assert.IsNotNull(Physics2D.OverlapPoint(oldInside, groundMask),
+            Assert.IsNotNull(Physics2D.OverlapPoint(oldInside, _groundMask),
                 "移动后，旧位置的地形碰撞应该恢复。");
 
             Vector2 newInside = (Vector2)groupA.transform.position + groupA.BackDirection * 0.2f;
-            Assert.IsNull(Physics2D.OverlapPoint(newInside, groundMask),
-                "移动后，新位置的门洞内部应该没有 Ground 碰撞。");
-
-            // 还原位置，避免影响其它测试。
-            groupA.transform.position = originalPosition;
-            yield return new WaitForFixedUpdate();
-            yield return null;
+            Assert.IsNull(Physics2D.OverlapPoint(newInside, _groundMask),
+                "移动后，新位置的门洞内部应该没有地面碰撞。");
         }
     }
 }

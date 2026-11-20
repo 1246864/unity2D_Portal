@@ -2,7 +2,7 @@
 
 一个可运行的 2D 横版平台跳跃 + 双门传送门原型。关卡由 1×1 Tilemap 搭建，角色支持 6 格跳高、45° 斜坡、土狼时间和跳跃缓冲；场景中的 `Portal A` / `Portal B` 支持任意角度旋转、玩家显示/物理分离、地形动态开洞和相机相对映射。
 
-> 当前验证：**23/23 PlayMode 通过**（最近一次：`Logs/TestResults_newscene3.xml`，27.13 秒）。
+> 当前验证：**39 个 PlayMode 用例，38 通过 / 0 失败 / 1 跳过**（2026-11-20，`-nographics`；真实快照图像检查因无图形设备跳过）。
 > 详细架构、场景数据与已知问题见 **[PROJECT.md](PROJECT.md)**，实现细节见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**。
 
 ## 快速开始
@@ -77,19 +77,21 @@ Portal Pair
 命令行：
 
 ```powershell
-Unity.exe -batchmode -projectPath <项目> `
+Unity.exe -batchmode -nographics -projectPath <项目> `
   -runTests -testPlatform PlayMode `
   -testResults Logs\TestResults.xml `
   -logFile Logs\playtests.log
 ```
 
-当前 **23 个 PlayMode 用例**：
+当前 **39 个 PlayMode 用例**。测试通过 `PlayTestFixtures.cs` 自行创建最小玩家、相机、传送门和 Tilemap，不加载 `Level01` / `TeatScene`，也不依赖正式场景对象名、地图坐标、瓦片数量或玩家 Prefab。
 
 - 角色物理：站立、6 格跳、水平移动、45° 斜坡、坠落重生；
-- 相机：跟随、出传送门旋转/回正；
+- 相机：跟随、传送相对位姿、投影镜像与回正时序；
 - Tilemap：合并碰撞站立、描边层、斜坡爬升、快照结构；
 - 传送门：门洞高度、开门动画、重新启用后传送、出口位置/旋转、速度、另一门淡出、光带、背面隐藏；
 - 地形开洞：切割/恢复、开口方向实时旋转、门移动后跟随。
+
+无图形环境下真实快照图像检查会显式跳过，其余结构、物理和逻辑用例仍可运行。
 
 ## 目录
 

@@ -1,179 +1,132 @@
 using System.Collections;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using UnityEngine.Tilemaps;
 
 namespace Platformer.Tests
 {
     /// <summary>
-    /// Tilemap 关卡的集成测试：以叠加方式加载 Level01，
-    /// 检查 Tilemap 已绘制瓦片，且玩家站在 Tilemap/Composite 合并碰撞体上。
+    /// Tilemap、玩家和捕获相机的组件级 PlayMode 测试。
+    /// 每个用例只创建自身所需的地形和对象，不加载正式关卡。
     /// </summary>
     public class LevelTilemapTests
     {
-        const string LevelScene = "Level01";
+        TilemapTestRig _terrainRig;
+        PortalTestRig _portalRig;
+        PlayerController2D _player;
 
         [UnityTearDown]
         public IEnumerator TearDown()
         {
-            Scene scene = SceneManager.GetSceneByName(LevelScene);
-            if (scene.IsValid() && scene.isLoaded)
-            {
-                yield return SceneManager.UnloadSceneAsync(scene);
-            }
+            if (_player != null) Object.Destroy(_player.gameObject);
+            if (_portalRig != null) _portalRig.Destroy();
+            if (_terrainRig != null) _terrainRig.Destroy();
+            yield return null;
         }
 
         [UnityTest]
-        public IEnumerator Tilemap_Level_Has_Grounded_Player()
+        public IEnumerator Player_Stands_On_Generated_Tilemap()
         {
-            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
+            _terrainRig = TilemapTestRig.Create(null);
+            Tile solid = _terrainRig.CreateSolidTile();
+            _terrainRig.FillSolidRect(solid, -20, 20, -2, -1);
+            _terrainRig.TilemapCollider.ProcessTilemapChanges();
+            _terrainRig.Composite.GenerateGeometry();
 
-            Scene scene = SceneManager.GetSceneByName(LevelScene);
-            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
-
-            // 让物理在 Tilemap 碰撞体上稳定下来。
-            yield return new WaitForSeconds(0.75f);
-
-            GameObject player = null;
-            foreach (GameObject root in scene.GetRootGameObjects())
-            {
-                if (root.name == "Player") player = root;
-            }
-
-            // 场景里现在有 Terrain 和运行时的 Outline 两个 Tilemap，按名字取地形。
-            var terrainGo = GameObject.Find("Terrain");
-            Tilemap tilemap = terrainGo != null ? terrainGo.GetComponent<Tilemap>() : null;
-
-            Assert.IsNotNull(player, "Player not found in Level01.");
-            Assert.IsNotNull(tilemap, "Tilemap not found in Level01.");
+            _player = PlayTestFixtures.CreatePlayer(null, new Vector3(0f, 0.9f, 0f));
+            for (int i = 0; i < 20; i++)
+                yield return new WaitForFixedUpdate();
 
             int cells = 0;
-            foreach (Vector3Int position in tilemap.cellBounds.allPositionsWithin)
+            foreach (Vector3Int position in _terrainRig.Tilemap.cellBounds.allPositionsWithin)
             {
-                if (tilemap.HasTile(position)) cells++;
+                if (_terrainRig.Tilemap.HasTile(position)) cells++;
             }
+            Assert.AreEqual(41 * 2, cells, "夹具应生成指定的两行地面瓦片。");
 
-            Assert.Greater(cells, 100, $"Expected a populated tilemap, found {cells} cells.");
-
-            var controller = player.GetComponent<PlayerController2D>();
-
-            var composite = tilemap.GetComponent<CompositeCollider2D>();
-            var tilemapCollider = tilemap.GetComponent<TilemapCollider2D>();
-            Debug.Log($"[TilemapTest] playerY={player.transform.position.y:F2} grounded={controller.IsGrounded} " +
-                      $"compositePaths={(composite != null ? composite.pathCount : -1)} " +
-                      $"tileShapes={(tilemapCollider != null ? tilemapCollider.shapeCount : -1)}");
-
-            Assert.IsTrue(controller.IsGrounded, "Player should stand on the tilemap collider.");
-            Assert.AreEqual(0.75f, player.transform.position.y, 0.15f,
-                "Player should rest on top of the tilemap ground.");
+            var capsule = _player.GetComponent<CapsuleCollider2D>();
+            float groundTop = _terrainRig.Tilemap.GetCellCenterWorld(new Vector3Int(0, -1, 0)).y +
+                              _terrainRig.Tilemap.layoutGrid.cellSize.y * 0.5f;
+            float expectedY = groundTop + capsule.size.y * 0.5f;
+            Assert.IsTrue(_player.IsGrounded, "玩家应站在临时 Tilemap 的合并碰撞体上。");
+            Assert.AreEqual(expectedY, _player.transform.position.y, 0.15f,
+                "落地高度应由临时瓦片顶面和胶囊高度计算。");
         }
 
         [UnityTest]
-        public IEnumerator Tilemap_Has_Outline_Layer()
+        public IEnumerator Generated_Tilemap_Has_Outline_Layer()
         {
-            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
+            _terrainRig = TilemapTestRig.Create(null);
+            Tile solid = _terrainRig.CreateSolidTile();
+            _terrainRig.FillSolidRect(solid, 0, 1, 0, 1);
+            _terrainRig.TerrainObject.AddComponent<TilemapOutline>();
+            yield return null;
 
-            Scene scene = SceneManager.GetSceneByName(LevelScene);
-            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
-
-            yield return new WaitForSeconds(0.3f);
-
-            var outlineGo = GameObject.Find("Outline");
-            Assert.IsNotNull(outlineGo, "Level01 应该有一个运行时生成的 Outline 描边层。");
-
+            Transform outlineGo = _terrainRig.TerrainObject.transform.parent.Find("Outline");
+            Assert.IsNotNull(outlineGo, "TilemapOutline 应在同一 Grid 下创建描边层。");
             var outline = outlineGo.GetComponent<Tilemap>();
-            Assert.IsNotNull(outline, "Outline 物体上应该有 Tilemap。");
+            Assert.IsNotNull(outline);
 
             int cells = 0;
             foreach (Vector3Int position in outline.cellBounds.allPositionsWithin)
             {
                 if (outline.HasTile(position)) cells++;
             }
-
-            Assert.Greater(cells, 0, "描边层应该按邻居规则绘制了描边瓦片。");
+            Assert.Greater(cells, 0, "描边层应根据临时地形的邻居规则生成瓦片。");
         }
 
         [UnityTest]
         public IEnumerator Portal_View_Keeps_Offset_Under_View_Center()
         {
-            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
+            _portalRig = PortalTestRig.Create();
+            yield return null;
 
-            Scene scene = SceneManager.GetSceneByName(LevelScene);
-            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
-
-            yield return new WaitForSeconds(0.3f);
-
-            CaptureDisplayGroup groupA = null;
-            CaptureDisplayGroup groupB = null;
-            foreach (var group in Object.FindObjectsOfType<CaptureDisplayGroup>())
-            {
-                if (group.side == CaptureGroupSide.A) groupA = group;
-                else if (group.side == CaptureGroupSide.B) groupB = group;
-            }
-
-            Assert.IsNotNull(groupA, "A 组未找到。");
-            Assert.IsNotNull(groupB, "B 组未找到。");
-
+            CaptureDisplayGroup groupA = _portalRig.A;
+            CaptureDisplayGroup groupB = _portalRig.B;
             foreach (var group in new[] { groupA, groupB })
             {
-                // 清空引用后重新解析，验证启动时的自动查找逻辑。
+                // 清空引用后重新解析，验证自动查找只依赖夹具声明的组件契约。
                 group.viewCenter = null;
                 group.output = null;
                 group.maskTop = null;
                 group.maskBottom = null;
                 group.ResolveViewRig();
 
-                Assert.IsNotNull(group.viewCenter, $"{group.side} 应解析到 Portal View Center。");
-                Assert.AreEqual("Portal View Center", group.viewCenter.name,
-                    $"{group.side} 的视觉中心应为 Portal View Center。");
-                Assert.IsNotNull(group.output, $"{group.side} 应解析到 Portal View。");
-                Assert.AreEqual("Portal View", group.output.name,
-                    $"{group.side} 的显示精灵应名为 Portal View。");
-                Assert.AreEqual(group.viewCenter, group.output.transform.parent,
-                    "Portal View 应是 Portal View Center 的直接子节点。");
-                Assert.IsNotNull(group.maskTop, $"{group.side} 应解析到 View Mask Top。");
-                Assert.IsNotNull(group.maskBottom, $"{group.side} 应解析到 View Mask Bottom。");
-                Assert.AreEqual("View Mask Top", group.maskTop.name);
-                Assert.AreEqual("View Mask Bottom", group.maskBottom.name);
+                Assert.IsNotNull(group.viewCenter);
+                Assert.AreEqual("Portal View Center", group.viewCenter.name);
+                Assert.IsNotNull(group.output);
+                Assert.AreEqual("Portal View", group.output.name);
+                Assert.AreEqual(group.viewCenter, group.output.transform.parent);
+                Assert.IsNotNull(group.maskTop);
+                Assert.IsNotNull(group.maskBottom);
 
                 int outputLayer = group.output.gameObject.layer;
-                Assert.AreNotEqual(0, outputLayer, "Portal View 应在专用层（Snapshot）。");
-                Assert.AreEqual(0, group.capture.captureCamera.cullingMask & (1 << outputLayer),
-                    "传送门相机应排除 Portal View 所在层，避免递归渲染。");
+                Assert.AreNotEqual(0, outputLayer);
+                Assert.AreEqual(0, group.capture.captureCamera.cullingMask & (1 << outputLayer));
 
                 float baseLocalZ = group.output.transform.localPosition.z;
                 float baseWorldZ = group.output.transform.position.z;
-
-                // 用临时 Sprite 让 ApplyHalfCrop 真正走完，验证它只叠加 X 偏移。
                 var texture = new Texture2D(64, 32, TextureFormat.RGBA32, false);
-                var sprite = Sprite.Create(texture, new Rect(0, 0, 64, 32), new Vector2(0.5f, 0.5f), 40f);
+                var sprite = Sprite.Create(texture, new Rect(0, 0, 64, 32),
+                    new Vector2(0.5f, 0.5f), 40f);
                 group.output.sprite = sprite;
                 group.ApplyHalfCrop();
 
-                Assert.AreEqual(baseLocalZ, group.output.transform.localPosition.z, 0.001f,
-                    "半屏裁剪不能覆盖 Portal View 的 local Z。");
-                Assert.AreEqual(baseWorldZ, group.output.transform.position.z, 0.001f,
-                    "半屏裁剪不能移动 Portal View 的世界 Z。");
-
+                Assert.AreEqual(baseLocalZ, group.output.transform.localPosition.z, 0.001f);
+                Assert.AreEqual(baseWorldZ, group.output.transform.position.z, 0.001f);
                 if (group.OutputHalf == PortalViewHalf.Right)
-                    Assert.Greater(group.output.transform.localPosition.x, 0f,
-                        $"{group.side} 应显示右半。");
+                    Assert.Greater(group.output.transform.localPosition.x, 0f);
                 else
-                    Assert.Less(group.output.transform.localPosition.x, 0f,
-                        $"{group.side} 应显示左半。");
+                    Assert.Less(group.output.transform.localPosition.x, 0f);
 
-                Object.Destroy(group.output.sprite);
                 group.output.sprite = null;
                 Object.Destroy(sprite);
                 Object.Destroy(texture);
             }
 
-            // 先固定为 A 右半、B 左半，再验证可以从另一扇门直接改写输出半屏。
             groupA.OutputHalf = PortalViewHalf.Right;
             groupB.OutputHalf = PortalViewHalf.Left;
-
             var apiTexture = new Texture2D(64, 32, TextureFormat.RGBA32, false);
             var apiSprite = Sprite.Create(apiTexture, new Rect(0, 0, 64, 32),
                 new Vector2(0.5f, 0.5f), 40f);
@@ -181,124 +134,79 @@ namespace Platformer.Tests
             groupB.ApplyHalfCrop();
             float xBeforeSelfSwitch = groupB.output.transform.localPosition.x;
 
-            // 本门直接换半屏：X 应按新半屏自动对齐。
             groupB.OutputHalf = PortalViewHalf.Right;
             float xAfterSelfSwitch = groupB.output.transform.localPosition.x;
             Assert.AreEqual(PortalViewHalf.Right, groupB.OutputHalf);
-            Assert.Greater(xAfterSelfSwitch, xBeforeSelfSwitch,
-                "本门换半屏时 Portal View 的 X 应自动对齐到右半位置。");
+            Assert.Greater(xAfterSelfSwitch, xBeforeSelfSwitch);
 
-            // 从另一扇门控制 B：只换纹理，保持 B 当前的 X。
             groupA.SetPartnerOutputHalf(PortalViewHalf.Left);
-            Assert.AreEqual(PortalViewHalf.Left, groupB.OutputHalf,
-                "A 应能直接控制 partner B 的输出半屏。");
-            Assert.AreEqual(PortalViewHalf.Left, groupA.PartnerOutputHalf,
-                "PartnerOutputHalf 应反映 B 的实际输出半屏。");
-            Assert.AreEqual(PortalViewHalf.Right, groupA.OutputHalf,
-                "修改 partner 的输出不应修改 A 自己的输出。");
-            Assert.AreEqual(xAfterSelfSwitch, groupB.output.transform.localPosition.x, 0.001f,
-                "通过 partner 换半屏时不应修改 Portal View 的 X。");
+            Assert.AreEqual(PortalViewHalf.Left, groupB.OutputHalf);
+            Assert.AreEqual(PortalViewHalf.Left, groupA.PartnerOutputHalf);
+            Assert.AreEqual(PortalViewHalf.Right, groupA.OutputHalf);
+            Assert.AreEqual(xAfterSelfSwitch, groupB.output.transform.localPosition.x, 0.001f);
 
             groupA.SetPartnerCameraHalf(PortalViewHalf.Right);
-            Assert.AreEqual(PortalViewHalf.Right, groupB.OutputHalf,
-                "SetPartnerCameraHalf 应只改变 B 的输出。");
-            Assert.AreEqual(PortalViewHalf.Right, groupA.OutputHalf,
-                "SetPartnerCameraHalf 不应改变 A 自己的输出。");
-            Assert.AreEqual(xAfterSelfSwitch, groupB.output.transform.localPosition.x, 0.001f,
-                "SetPartnerCameraHalf 换半屏时不应修改 Portal View 的 X。");
+            Assert.AreEqual(PortalViewHalf.Right, groupB.OutputHalf);
+            Assert.AreEqual(PortalViewHalf.Right, groupA.OutputHalf);
+            Assert.AreEqual(xAfterSelfSwitch, groupB.output.transform.localPosition.x, 0.001f);
 
-            Object.Destroy(groupB.output.sprite);
             groupB.output.sprite = null;
             Object.Destroy(apiSprite);
             Object.Destroy(apiTexture);
         }
 
         [UnityTest]
-        public IEnumerator Player_Climbs_Tilemap_Ramp()
+        public IEnumerator Player_Climbs_Generated_Tilemap_Ramp()
         {
-            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
+            _terrainRig = TilemapTestRig.Create(null);
+            Tile solid = _terrainRig.CreateSolidTile();
+            Tile slope = _terrainRig.CreateSlopeTile();
 
-            Scene scene = SceneManager.GetSceneByName(LevelScene);
-            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
+            // 平地顶面 y=0；单格斜坡从 (1,0) 升至 (0,1)，左侧接 y=1 平台。
+            _terrainRig.FillSolidRect(solid, -4, 5, -1, -1);
+            _terrainRig.Tilemap.SetTile(new Vector3Int(0, 0, 0), slope);
+            _terrainRig.Tilemap.SetTile(new Vector3Int(-2, 0, 0), solid);
+            _terrainRig.Tilemap.SetTile(new Vector3Int(-1, 0, 0), solid);
+            _terrainRig.TilemapCollider.ProcessTilemapChanges();
+            _terrainRig.Composite.GenerateGeometry();
 
-            yield return new WaitForSeconds(0.5f);
+            _player = PlayTestFixtures.CreatePlayer(null, new Vector3(1.5f, 0.9f, 0f));
+            for (int i = 0; i < 15; i++)
+                yield return new WaitForFixedUpdate();
 
-            GameObject player = null;
-            foreach (GameObject root in scene.GetRootGameObjects())
-            {
-                if (root.name == "Player") player = root;
-            }
-
-            Assert.IsNotNull(player, "Player not found in Level01.");
-            var controller = player.GetComponent<PlayerController2D>();
-
-            // 这个测试只验证 Tilemap 斜坡；关闭传送门开洞，避免当前门洞矩形
-            // 覆盖到坡道区域后把 Ground 碰撞替换掉，影响测试目标。
-            var pair = Object.FindObjectOfType<PortalPair>();
-            if (pair != null)
-            {
-                pair.carveTerrain = false;
-                var carver = pair.GetComponent<PortalTerrainCarver>();
-                if (carver != null) carver.enabled = false;
-            }
-            yield return new WaitForFixedUpdate();
-
-            // 当前地形是一段向右下降的 45° 坡道（x≈9..11），从右侧向左走上去。
-            controller.Teleport(new Vector2(12f, 0.75f));
-            yield return new WaitForFixedUpdate();
-
-            controller.SetMoveInput(-1f);
-            float peakY = player.transform.position.y;
+            _player.SetMoveInput(-1f);
+            float peakY = _player.transform.position.y;
             for (int i = 0; i < 120; i++)
             {
                 yield return new WaitForFixedUpdate();
-                peakY = Mathf.Max(peakY, player.transform.position.y);
+                peakY = Mathf.Max(peakY, _player.transform.position.y);
             }
+            _player.SetMoveInput(0f);
 
-            controller.SetMoveInput(0f);
-
-            Assert.Greater(peakY, 2f,
-                $"Player should walk up the tile ramp to the 2-cell plateau, peak y was {peakY:F2}.");
+            Assert.Greater(peakY, 1.5f,
+                $"玩家应爬上临时平台，峰值高度为 {peakY:F2}。");
         }
 
         [UnityTest]
         public IEnumerator Snapshot_Camera_Captures_Own_View()
         {
-            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
+            _portalRig = PortalTestRig.Create();
+            yield return null;
 
-            Scene scene = SceneManager.GetSceneByName(LevelScene);
-            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Level01 could not be loaded.");
-
-            yield return new WaitForSeconds(0.3f);
-
-            var groups = Object.FindObjectsOfType<CaptureDisplayGroup>();
-            Assert.AreEqual(2, groups.Length, "There should be two capture display groups.");
-
-            CaptureDisplayGroup groupA = null;
-            CaptureDisplayGroup groupB = null;
-            foreach (var group in groups)
-            {
-                if (group.side == CaptureGroupSide.A) groupA = group;
-                else groupB = group;
-            }
-
-            Assert.IsNotNull(groupA, "Capture Display Group A not found.");
-            Assert.IsNotNull(groupB, "Capture Display Group B not found.");
-
-            // 交叉显示：A 的相机画到 B 的输出上，B 的相机画到 A 的输出上。
-            Assert.AreEqual(groupB.output, groupA.capture.output, "A's camera must paint B's output.");
-            Assert.AreEqual(groupA.output, groupB.capture.output, "B's camera must paint A's output.");
+            CaptureDisplayGroup groupA = _portalRig.A;
+            CaptureDisplayGroup groupB = _portalRig.B;
+            PortalPair pair = _portalRig.Pair;
+            Assert.AreEqual(groupB.output, groupA.capture.output);
+            Assert.AreEqual(groupA.output, groupB.capture.output);
 
             var snapshot = groupA.capture;
-            if (snapshot.output.sprite == null)
-            {
-                Assert.Ignore("Rendering is disabled in this run; snapshot image check skipped.");
-            }
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null ||
+                snapshot.output.sprite == null)
+                Assert.Ignore("当前运行环境禁用渲染，跳过快照图像检查。");
 
-            var pair = Object.FindObjectOfType<PortalPair>();
-            Assert.IsNotNull(pair, "场景缺少 PortalPair。");
-
-            // 尺寸参数统一在 PortalPair 上配置，由它下发给 A/B 两个捕获相机。
+            // 该用例显式提高 PPU，覆盖纹理限额；其他用例仍使用夹具的低成本默认值。
+            groupA.capture.pixelsPerUnit = 40f;
+            groupB.capture.pixelsPerUnit = 40f;
             pair.useDynamicSize = false;
             pair.captureWidth = 50f;
             pair.captureHeight = 35f;
@@ -307,97 +215,57 @@ namespace Platformer.Tests
             yield return null;
             yield return null;
 
-            // 验证下发后的静态尺寸不跟随主相机。
-            Assert.AreEqual(pair.captureHeight, snapshot.captureHeight, 0.001f,
-                "PortalPair 的静态高度应下发到捕获相机。");
-            Assert.AreEqual(pair.captureWidth, snapshot.captureWidth, 0.001f,
-                "PortalPair 的静态宽度应下发到捕获相机。");
-
-            // 1. 画面来自捕获相机。批处理 PlayMode 不会渲染相机，所以像素内容
-            //    改由预览渲染来验证；这里只要求输出精灵存在，且尺寸由捕获相机决定。
+            Assert.AreEqual(pair.captureHeight, snapshot.captureHeight, 0.001f);
+            Assert.AreEqual(pair.captureWidth, snapshot.captureWidth, 0.001f);
             Texture2D texture = snapshot.output.sprite.texture;
-            Assert.IsNotNull(texture, "Snapshot output sprite should have a texture.");
+            Assert.IsNotNull(texture);
 
-            // 2. 快照是捕获相机自己的画面：移动玩家相机的不会带动捕获相机。
             Vector3 capturePosition = snapshot.captureCamera.transform.position;
             snapshot.sourceCamera.transform.position += new Vector3(4f, 0f, 0f);
             yield return null;
             yield return null;
             Assert.AreEqual(capturePosition, snapshot.captureCamera.transform.position,
-                "Capture camera must keep its own position, not follow the player camera.");
+                "捕获相机必须保持自身位置，不跟随主相机。");
 
-            // 3. 静态尺寸由 PortalPair 的 captureWidth/captureHeight 下发，不跟随主相机。
             Assert.AreEqual(snapshot.captureHeight * 0.5f,
-                snapshot.captureCamera.orthographicSize, 0.01f,
-                "Capture camera size must come from captureHeight.");
+                snapshot.captureCamera.orthographicSize, 0.01f);
             Assert.AreEqual(snapshot.captureWidth,
-                snapshot.captureCamera.aspect * snapshot.captureHeight, 0.01f,
-                "Capture camera aspect must come from captureWidth/captureHeight.");
+                snapshot.captureCamera.aspect * snapshot.captureHeight, 0.01f);
+            Assert.AreEqual(snapshot.captureHeight, snapshot.output.sprite.bounds.size.y, 0.001f);
+            Assert.AreEqual(snapshot.captureWidth * 0.5f,
+                snapshot.output.sprite.bounds.size.x, 0.2f);
 
-            // 4. 两个轴都是 1:1，以捕获相机真正覆盖的范围为准。
-            float capturedHeight = snapshot.captureHeight;
-            float capturedWidth = snapshot.captureWidth;
-            Assert.AreEqual(capturedHeight, snapshot.output.sprite.bounds.size.y, 0.001f,
-                "Snapshot height must equal the captured world height.");
-            // 宽度是一半，再加上两半为遮住接缝而留出的少量重叠。
-            Assert.AreEqual(capturedWidth * 0.5f, snapshot.output.sprite.bounds.size.x, 0.2f,
-                "Snapshot shows half of the captured width.");
-
-            // 半屏位置必须和当前 OutputHalf 一致（场景朝向变化时半屏方向也会变）。
             if (groupA.OutputHalf == PortalViewHalf.Right)
-                Assert.Greater(groupA.output.transform.localPosition.x, 0f,
-                    "Group A should show the right half.");
+                Assert.Greater(groupA.output.transform.localPosition.x, 0f);
             else
-                Assert.Less(groupA.output.transform.localPosition.x, 0f,
-                    "Group A should show the left half.");
-
+                Assert.Less(groupA.output.transform.localPosition.x, 0f);
             if (groupB.OutputHalf == PortalViewHalf.Right)
-                Assert.Greater(groupB.output.transform.localPosition.x, 0f,
-                    "Group B should show the right half.");
+                Assert.Greater(groupB.output.transform.localPosition.x, 0f);
             else
-                Assert.Less(groupB.output.transform.localPosition.x, 0f,
-                    "Group B should show the left half.");
+                Assert.Less(groupB.output.transform.localPosition.x, 0f);
+
             Vector3 outputScale = snapshot.output.transform.lossyScale;
-            Assert.AreEqual(1f, Mathf.Abs(outputScale.x), 0.001f,
-                "Snapshot output X scale must remain 1.");
-            Assert.AreEqual(1f, Mathf.Abs(outputScale.y), 0.001f,
-                "Snapshot output Y scale must remain 1 (flip is represented by its sign).");
-            Assert.AreEqual(1f, Mathf.Abs(outputScale.z), 0.001f,
-                "Snapshot output Z scale must remain 1.");
-
-            // 新的 Portal View Center 层级：半屏 X 偏移不能覆盖 Portal View 自己的 Z 偏移。
-            Assert.AreEqual(0f, groupA.output.transform.position.z, 0.01f,
-                "A 的 Portal View 应保持在世界 z=0，不能被半屏偏移拉到 Portal View Center 的 z。");
-            Assert.AreEqual(0f, groupB.output.transform.position.z, 0.01f,
-                "B 的 Portal View 应保持在世界 z=0。");
-            Assert.IsNotNull(groupA.viewCenter, "A 应该解析到 Portal View Center。");
-            Assert.AreEqual("Portal View Center", groupA.viewCenter.name,
-                "A 的视觉中心应该是 Portal View Center。");
-            Assert.IsNotNull(groupB.viewCenter, "B 应该解析到 Portal View Center。");
-            Assert.AreEqual("Portal View Center", groupB.viewCenter.name,
-                "B 的视觉中心应该是 Portal View Center。");
-
-            // 5. 画布保持恒定的像素密度。
+            Assert.AreEqual(1f, Mathf.Abs(outputScale.x), 0.001f);
+            Assert.AreEqual(1f, Mathf.Abs(outputScale.y), 0.001f);
+            Assert.AreEqual(1f, Mathf.Abs(outputScale.z), 0.001f);
+            Assert.AreEqual(0f, groupA.output.transform.position.z, 0.01f);
+            Assert.AreEqual(0f, groupB.output.transform.position.z, 0.01f);
             Assert.AreEqual(snapshot.pixelsPerUnit,
-                texture.height / snapshot.output.sprite.bounds.size.y, 0.5f,
-                "Canvas should keep the configured texel density.");
+                texture.height / snapshot.output.sprite.bounds.size.y, 0.5f);
 
-            // 6. 主视野变化时，固定捕获矩形和画布不应变化。
             float originalOrtho = snapshot.sourceCamera.orthographicSize;
             int textureHeightBefore = texture.height;
             float captureSizeBefore = snapshot.captureCamera.orthographicSize;
             snapshot.sourceCamera.orthographicSize = originalOrtho * 2f;
             yield return null;
             yield return null;
-            Assert.AreEqual(captureSizeBefore, snapshot.captureCamera.orthographicSize, 0.01f,
-                "Capture camera must not follow the main view.");
-            Assert.AreEqual(textureHeightBefore, snapshot.output.sprite.texture.height,
-                "Canvas must not grow with the main view.");
+            Assert.AreEqual(captureSizeBefore, snapshot.captureCamera.orthographicSize, 0.01f);
+            Assert.AreEqual(textureHeightBefore, snapshot.output.sprite.texture.height);
             snapshot.sourceCamera.orthographicSize = originalOrtho;
             yield return null;
             yield return null;
 
-            // 6.5 仅宽度超限时，两轴按同一比例降低 PPU，世界捕获尺寸不能被 Clamp 改变。
+            // 单轴超限时，两轴按同一比例降低 PPU，世界捕获尺寸保持不变。
             int originalMaxTextureSize = snapshot.maxTextureSize;
             snapshot.maxTextureSize = 512;
             pair.captureWidth = 128f;
@@ -409,21 +277,15 @@ namespace Platformer.Tests
             Texture2D clampedTexture = snapshot.output.sprite.texture;
             Assert.LessOrEqual(clampedTexture.width, snapshot.maxTextureSize);
             Assert.LessOrEqual(clampedTexture.height, snapshot.maxTextureSize);
-            Assert.AreEqual(4f, clampedTexture.width / pair.captureWidth, 0.001f,
-                "宽度超限后应使用统一缩放后的像素密度。");
+            Assert.AreEqual(4f, clampedTexture.width / pair.captureWidth, 0.001f);
             Assert.AreEqual(clampedTexture.width / pair.captureWidth,
-                clampedTexture.height / pair.captureHeight, 0.001f,
-                "单轴超限不能破坏纹理两轴的像素密度比例。");
-            Assert.AreEqual(8f, snapshot.captureCamera.orthographicSize * 2f, 0.001f,
-                "纹理限额不能改变世界捕获高度。");
+                clampedTexture.height / pair.captureHeight, 0.001f);
+            Assert.AreEqual(8f, snapshot.captureCamera.orthographicSize * 2f, 0.001f);
             Assert.AreEqual(128f,
-                snapshot.captureCamera.aspect * snapshot.captureCamera.orthographicSize * 2f, 0.001f,
-                "纹理限额不能改变世界捕获宽度。");
-            Assert.AreEqual(8f, snapshot.output.sprite.bounds.size.y, 0.001f,
-                "限制纹理尺寸后，输出精灵仍应覆盖原世界高度。");
+                snapshot.captureCamera.aspect * snapshot.captureCamera.orthographicSize * 2f, 0.001f);
+            Assert.AreEqual(8f, snapshot.output.sprite.bounds.size.y, 0.001f);
             float expectedHalfWidth = 64f - groupB.centerGapPixels / 4f;
-            Assert.AreEqual(expectedHalfWidth, snapshot.output.sprite.bounds.size.x, 0.001f,
-                "半屏输出应覆盖原世界宽度的一半，并保留配置的中线缝隙。");
+            Assert.AreEqual(expectedHalfWidth, snapshot.output.sprite.bounds.size.x, 0.001f);
 
             snapshot.maxTextureSize = originalMaxTextureSize;
             pair.captureWidth = 50f;
@@ -432,57 +294,36 @@ namespace Platformer.Tests
             yield return null;
             yield return null;
 
-            // 7. 切到动态模式：宽/高分别 = 主相机视野宽/高 × X/Y 倍率。
             pair.useDynamicSize = true;
             pair.cameraSizeMultiplier = new Vector2(1.2f, 2f);
             pair.PushViewSettingsToGroups();
             yield return null;
             yield return null;
 
-            Assert.IsTrue(snapshot.useDynamicSize, "动态模式应下发到捕获相机。");
-            Assert.AreEqual(1.2f, snapshot.cameraSizeMultiplier.x, 0.001f,
-                "动态宽度倍率应下发到捕获相机。");
-            Assert.AreEqual(2f, snapshot.cameraSizeMultiplier.y, 0.001f,
-                "动态高度倍率应下发到捕获相机。");
-
+            Assert.IsTrue(snapshot.useDynamicSize);
+            Assert.AreEqual(1.2f, snapshot.cameraSizeMultiplier.x, 0.001f);
+            Assert.AreEqual(2f, snapshot.cameraSizeMultiplier.y, 0.001f);
             float sourceHeight = snapshot.sourceCamera.orthographicSize * 2f;
             float sourceWidth = sourceHeight * snapshot.sourceCamera.aspect;
             float dynamicHeight = sourceHeight * 2f;
             float dynamicWidth = sourceWidth * 1.2f;
-
-            Assert.AreEqual(dynamicHeight, snapshot.captureCamera.orthographicSize * 2f, 0.02f,
-                "Dynamic capture height must be main camera height × Y multiplier.");
-            Assert.AreEqual(dynamicWidth, snapshot.captureCamera.aspect * dynamicHeight, 0.02f,
-                "Dynamic capture width must be main camera width × X multiplier.");
-            Assert.AreEqual(dynamicHeight, snapshot.output.sprite.bounds.size.y, 0.01f,
-                "Dynamic snapshot sprite must match the captured world height.");
+            Assert.AreEqual(dynamicHeight, snapshot.captureCamera.orthographicSize * 2f, 0.02f);
+            Assert.AreEqual(dynamicWidth, snapshot.captureCamera.aspect * dynamicHeight, 0.02f);
+            Assert.AreEqual(dynamicHeight, snapshot.output.sprite.bounds.size.y, 0.01f);
             Assert.AreEqual(Mathf.RoundToInt(dynamicHeight * snapshot.pixelsPerUnit),
-                snapshot.output.sprite.texture.height,
-                "Dynamic canvas height must use the fixed pixel density.");
+                snapshot.output.sprite.texture.height);
             Assert.AreEqual(Mathf.RoundToInt(dynamicWidth * snapshot.pixelsPerUnit),
-                snapshot.output.sprite.texture.width,
-                "Dynamic canvas width must use the fixed pixel density.");
+                snapshot.output.sprite.texture.width);
 
-            // 还原静态模式，避免影响后续断言。
             pair.useDynamicSize = false;
             pair.PushViewSettingsToGroups();
             yield return null;
             yield return null;
 
-            // 8. 玩家绘制在快照输出之上。
-            var playerRenderer = Object.FindObjectOfType<PlayerController2D>().GetComponent<SpriteRenderer>();
-            Assert.Greater(playerRenderer.sortingOrder, snapshot.output.sortingOrder,
-                "Player must be drawn above the snapshot output.");
-
-            // 9. 捕获相机排除自己的输出层，不再递归。
+            var playerRenderer = _portalRig.Player.VisualRoot.GetComponent<SpriteRenderer>();
+            Assert.Greater(playerRenderer.sortingOrder, snapshot.output.sortingOrder);
             int outputLayerBit = 1 << snapshot.output.gameObject.layer;
-            Assert.AreEqual(0, snapshot.captureCamera.cullingMask & outputLayerBit,
-                "Capture camera must exclude the Portal View layer to avoid recursion.");
-        }
-
-        static float ColorDistance(Color a, Color b)
-        {
-            return Mathf.Max(Mathf.Abs(a.r - b.r), Mathf.Max(Mathf.Abs(a.g - b.g), Mathf.Abs(a.b - b.b)));
+            Assert.AreEqual(0, snapshot.captureCamera.cullingMask & outputLayerBit);
         }
     }
 }

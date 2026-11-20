@@ -1,7 +1,7 @@
 # 2D 传送门（unity2D_Portal）— 项目总览
 
-> 当前开发版：捕获范围静态/动态双模式（基于 `83e95e7`）
-> 当前测试：**23/23 PlayMode 通过**（`Logs/TestResults_newscene3.xml`，27.13 秒）
+> 当前开发版：PlayMode 自包含测试夹具
+> 当前测试：**39 个用例，38 通过 / 0 失败 / 1 跳过**（2026-11-20，`-nographics`；真实快照图像检查跳过）
 > 本文档描述当前实际状态；历史更新报告已合并到本文与 `docs/DEVELOPMENT.md`。
 
 ---
@@ -70,7 +70,7 @@ unity2D_Portal/
 │  │  └─ TilemapOutline.cs
 │  ├─ Settings/                 URP、Renderer2D、物理材质
 │  ├─ Shaders/PortalHintBeam.shader
-│  ├─ Tests/PlayMode/           4 个测试文件，23 个用例
+│  ├─ Tests/PlayMode/           4 个用例类 + 共享夹具，39 个用例
 │  └─ Tiles/                    10 个 Tile 资产
 ├─ docs/DEVELOPMENT.md
 ├─ Tools/generate_placeholders.py
@@ -483,16 +483,18 @@ Start
 
 ---
 
-## 11. 测试（23/23）
+## 11. 测试（39 个用例）
 
-最近结果：`Logs/TestResults_newscene3.xml`，23 total / 23 passed / 0 failed，27.13 秒。
+最近结果（2026-11-20，`-nographics`）：**38 passed / 0 failed / 1 skipped**。真实快照图像检查因无图形设备跳过。
 
 | 文件 | 用例数 | 覆盖 |
 |---|---:|---|
-| `PlayerControllerPlayTests.cs` | 7 | 站立、跳高、移动、相机、坠落、斜坡、出传送门旋转/回正 |
-| `LevelTilemapTests.cs` | 5 | 关卡站立、描边、Portal View 偏移、斜坡、快照结构 |
-| `PortalTeleportTests.cs` | 8 | 门洞/碰撞箱、开门动画、重新启用、传送、淡出、光带、背面隐藏 |
+| `PlayerControllerPlayTests.cs` | 16 | 角色物理、输入、相机跟随/镜像/传送 |
+| `LevelTilemapTests.cs` | 5 | 临时地形站立、描边、Portal View 偏移、斜坡、快照 |
+| `PortalTeleportTests.cs` | 15 | 门状态、传送、速度、相对位姿、淡出、光带、背面隐藏 |
 | `PortalTerrainCarverTests.cs` | 3 | 开洞/恢复、开口方向、门移动跟随 |
+
+`PlayTestFixtures.cs` 是共享自包含夹具：测试自行创建最小玩家、相机、双门和 Tilemap，不加载正式场景或 Prefab，不依赖地图节点、固定地图坐标和瓦片数量。详细运行方式、物理形状约定及新增用例约束见 `docs/DEVELOPMENT.md` 第 5 节。
 
 ---
 
@@ -512,11 +514,11 @@ Start
 ## 13. Git / 维护
 
 - 最近功能提交：`83e95e7 fix(portal): 连续传送时重置相机与开门动画`
-- 当前改动：`PortalPair` 统一管理捕获尺寸（`useDynamicSize`、`cameraSizeMultiplier`、`captureWidth/Height`），并下发给两个 `RegionSnapshotCamera`
+- 当前改动：PlayMode 测试改用自包含夹具，解除对正式场景、地图坐标和玩家 Prefab 的依赖。
 - `backup/capture-v1`：未合并的旧对象复制实验
 - `feature/portal-every-frame` / `test`：旧分支，指向 `156a16b`
 - 提交前请确认：
   - 没有修改场景中的静态光带/粒子的 Transform；
   - 没有运行 Rebuild；
   - 传送门 A/B 的 `facing`、旋转、PortalHeight、carve 参数与场景一致；
-  - PlayMode 23 个用例通过。
+  - PlayMode 39 个用例完成验证；无图形环境允许真实快照图像检查显式跳过，其余用例必须全部通过。

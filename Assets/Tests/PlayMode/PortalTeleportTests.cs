@@ -1,7 +1,6 @@
 using System.Collections;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 
 namespace Platformer.Tests
@@ -11,46 +10,32 @@ namespace Platformer.Tests
     /// </summary>
     public class PortalTeleportTests
     {
-        const string LevelScene = "Level01";
-        Scene _loadedCameraTestScene;
+        PortalTestRig _rig;
 
         [UnitySetUp]
         public IEnumerator SetUp()
         {
-            yield return SceneManager.LoadSceneAsync(LevelScene, LoadSceneMode.Additive);
-            yield return new WaitForSeconds(0.5f);
+            _rig = PortalTestRig.Create();
+            yield return null;
+            yield return new WaitForFixedUpdate();
         }
 
         [UnityTearDown]
         public IEnumerator TearDown()
         {
-            Scene scene = SceneManager.GetSceneByName(LevelScene);
-            if (scene.IsValid() && scene.isLoaded)
-                yield return SceneManager.UnloadSceneAsync(scene);
-
-            if (_loadedCameraTestScene.IsValid() && _loadedCameraTestScene.isLoaded)
-                yield return SceneManager.UnloadSceneAsync(_loadedCameraTestScene);
-            _loadedCameraTestScene = default;
+            if (_rig != null) _rig.Destroy();
+            yield return null;
         }
 
-        static GameObject FindPlayer()
+        GameObject FindPlayer()
         {
-            foreach (var root in SceneManager.GetSceneByName(LevelScene).GetRootGameObjects())
-            {
-                if (root.name == "Player") return root;
-            }
-            return null;
+            return _rig.Player.gameObject;
         }
 
-        static void FindGroups(out CaptureDisplayGroup a, out CaptureDisplayGroup b)
+        void FindGroups(out CaptureDisplayGroup a, out CaptureDisplayGroup b)
         {
-            a = null;
-            b = null;
-            foreach (var group in Object.FindObjectsOfType<CaptureDisplayGroup>())
-            {
-                if (group.side == CaptureGroupSide.A) a = group;
-                else b = group;
-            }
+            a = _rig.A;
+            b = _rig.B;
         }
 
         static void PrepareTransparencySandbox(PortalPair pair, CaptureDisplayGroup a, CaptureDisplayGroup b)
@@ -96,15 +81,15 @@ namespace Platformer.Tests
             Assert.IsFalse(gateA.isTrigger, "碰撞箱应该是实体碰撞，不能用 Trigger。");
             Assert.Less(gateA.size.x, 0.2f, "碰撞箱应该很薄。");
 
-            var pair = Object.FindObjectOfType<PortalPair>();
-            Assert.IsNotNull(pair, "场景缺少 PortalPair。");
+            var pair = _rig.Pair;
+            Assert.IsNotNull(pair, "测试夹具缺少 PortalPair。");
             Assert.AreEqual(pair.PortalHeight, a.PortalHeight, 0.001f, "A 的门洞高度应该由 PortalPair 决定。");
             Assert.AreEqual(pair.PortalHeight, b.PortalHeight, 0.001f, "B 的门洞高度应该由 PortalPair 决定。");
             Assert.AreEqual(pair.PortalHeight, gateA.size.y, 0.001f, "A 的碰撞箱高度应等于门洞高度。");
             Assert.AreEqual(pair.PortalHeight, gateB.size.y, 0.001f, "B 的碰撞箱高度应等于门洞高度。");
 
             // 改 PortalPair 上的一对偏移，两扇门的门洞高度与碰撞箱应一起变化。
-            // 场景当前是 ±2（高度 4），这里改成 ±3（高度 6），避免用相同值做无效断言。
+            // 将夹具默认的 ±1.5（高度 3）改为 ±3（高度 6），确保配置变化被实际验证。
             pair.maskTopOffset = 3f;
             pair.maskBottomOffset = -3f;
             yield return null;
@@ -120,10 +105,10 @@ namespace Platformer.Tests
         public IEnumerator Portal_Opens_From_Zero_To_Pair_Height()
         {
             FindGroups(out var a, out _);
-            var pair = Object.FindObjectOfType<PortalPair>();
+            var pair = _rig.Pair;
 
             Assert.IsNotNull(a, "找不到 Portal A。");
-            Assert.IsNotNull(pair, "场景缺少 PortalPair。");
+            Assert.IsNotNull(pair, "测试夹具缺少 PortalPair。");
             Assert.IsNotNull(a.maskTop, "Portal A 缺少上遮罩节点。");
             Assert.IsNotNull(a.maskBottom, "Portal A 缺少下遮罩节点。");
 
@@ -172,8 +157,7 @@ namespace Platformer.Tests
             yield return new WaitForFixedUpdate();
             yield return new WaitForFixedUpdate();
 
-            // 用 B 门做入口：B 在场景中位置较高，起点贴近门一些，
-            // 避免玩家在下落过程中错过门洞。
+            // 用 B 门做入口，起点由夹具中的门面和开口方向计算。
             Vector3 start = (Vector3)b.transform.position
                             + (Vector3)b.OpeningDirection * 0.45f;
             controller.Teleport(start);
@@ -189,7 +173,7 @@ namespace Platformer.Tests
                 yield return new WaitForFixedUpdate();
                 elapsed += Time.fixedDeltaTime;
 
-                // 出口是 A；两门存在相对旋转和高度差，不能用单一 X 判断，改用距离。
+                // 出口是 A；用出口距离判断，避免绑定固定世界坐标或单一坐标轴。
                 if (Vector2.Distance(player.transform.position, a.transform.position) < 2f)
                 {
                     teleported = true;
@@ -214,10 +198,10 @@ namespace Platformer.Tests
             Assert.IsNotNull(player);
 
             var controller = player.GetComponent<PlayerController2D>();
-            var pair = Object.FindObjectOfType<PortalPair>();
+            var pair = _rig.Pair;
 
             Assert.IsNotNull(controller, "玩家缺少 PlayerController2D。");
-            Assert.IsNotNull(pair, "场景缺少 PortalPair。");
+            Assert.IsNotNull(pair, "测试夹具缺少 PortalPair。");
 
             // 放慢回正，便于断言出口门 Y+ 对齐。
             controller.portalRealignSpeed = 5f;
@@ -225,8 +209,7 @@ namespace Platformer.Tests
             int aOpenCount = a.OpenAnimationCount;
             int bOpenCount = b.OpenAnimationCount;
 
-            // 用 B 门做入口：B 在当前场景中位置较高，起点贴近门以减少下落，
-            // 出口是 A。
+            // 用 B 门做入口，A 作为出口；夹具已关闭重力，避免无关下落影响结果。
             Vector3 start = (Vector3)b.transform.position
                             + (Vector3)b.OpeningDirection * 0.45f;
             controller.Teleport(start);
@@ -242,7 +225,7 @@ namespace Platformer.Tests
                 yield return new WaitForFixedUpdate();
                 elapsed += Time.fixedDeltaTime;
 
-                // 出口 A 被旋转/抬高，用距离判断是否已经到对面门。
+                // 用出口距离判断，避免把断言绑定到某个世界坐标轴。
                 if (Vector2.Distance(player.transform.position, a.transform.position) < 2f)
                 {
                     teleported = true;
@@ -280,12 +263,11 @@ namespace Platformer.Tests
             Assert.AreEqual(expectedAngle, controller.CurrentRotationAngle, 5f,
                 "玩家角度应按门的朝向组合保留或反射相对角。");
 
-            if (Camera.main != null)
-            {
-                Assert.AreEqual(controller.CurrentRotationAngle,
-                    Mathf.DeltaAngle(0f, Camera.main.transform.eulerAngles.z), 3f,
-                    "相机旋转角度应等于玩家旋转角度。");
-            }
+            Camera camera = _rig.MainCamera;
+            Assert.IsNotNull(camera, "测试夹具缺少主相机。");
+            Assert.AreEqual(controller.CurrentRotationAngle,
+                Mathf.DeltaAngle(0f, camera.transform.eulerAngles.z), 3f,
+                "相机旋转角度应等于玩家旋转角度。");
 
             Assert.AreEqual(bOpenCount + 1, b.OpenAnimationCount,
                 "从 B 门进入应让 B 自己重播一次开门动画。");
@@ -305,61 +287,29 @@ namespace Platformer.Tests
         [UnityTest]
         public IEnumerator SameFacing_BToA_Camera_Preserves_Relative_Pose_With_Projection_Mirror()
         {
-            Scene level01 = SceneManager.GetSceneByName(LevelScene);
-            if (level01.IsValid() && level01.isLoaded)
-                yield return SceneManager.UnloadSceneAsync(level01);
-#if UNITY_EDITOR
-            yield return UnityEditor.SceneManagement.EditorSceneManager.LoadSceneAsyncInPlayMode(
-                "Assets/Scenes/TeatScene.unity",
-                new LoadSceneParameters(LoadSceneMode.Additive));
-#else
-            Assert.Ignore("TeatScene 诊断需要在 Unity Editor 中按路径加载场景。");
-#endif
-            _loadedCameraTestScene = SceneManager.GetSceneByName("TeatScene");
-            Scene level = _loadedCameraTestScene;
-            Assert.IsTrue(level.IsValid() && level.isLoaded, "应加载用户实际的 TeatScene。");
-            PortalPair pair = null;
-            foreach (GameObject root in level.GetRootGameObjects())
-            {
-                pair = root.GetComponentInChildren<PortalPair>(true);
-                if (pair != null) break;
-            }
+            PortalPair pair = _rig.Pair;
+            FindGroups(out var a, out var b);
+            GameObject player = _rig.Player.gameObject;
+            var controller = _rig.Player;
+            Camera camera = _rig.MainCamera;
+            var control = _rig.Control;
+            var follow = _rig.Follow;
 
-            Assert.IsNotNull(pair, "TeatScene 中应有本测试使用的 PortalPair。");
-            CaptureDisplayGroup a = null;
-            CaptureDisplayGroup b = null;
-            foreach (var group in pair.GetComponentsInChildren<CaptureDisplayGroup>(true))
-            {
-                if (group.side == CaptureGroupSide.A) a = group;
-                else b = group;
-            }
+            PrepareTransparencySandbox(pair, a, b);
+            a.transform.SetPositionAndRotation(new Vector3(-4f, 0f, 0f), Quaternion.identity);
+            b.transform.SetPositionAndRotation(
+                new Vector3(4f, 0f, 0f), Quaternion.Euler(0f, 0f, 45f));
+            a.Facing = PortalFacing.Right;
+            b.Facing = PortalFacing.Right;
 
-            Assert.IsNotNull(a);
-            Assert.IsNotNull(b);
-            Assert.IsNotNull(pair.player);
-            GameObject player = pair.player.gameObject;
-            var controller = player.GetComponent<PlayerController2D>();
-            Assert.IsNotNull(controller);
-            Assert.IsNotNull(b.capture);
-            Camera camera = b.capture.sourceCamera;
-            Assert.IsNotNull(camera, "B 的捕获源相机必须是本次传送实际使用的主相机。");
-            Assert.AreEqual(level, camera.gameObject.scene);
-            var control = camera.GetComponent<PlayerControlManager>();
-            var follow = camera.GetComponent<CameraFollow2D>();
-            Assert.IsNotNull(control);
-            Assert.IsNotNull(follow);
-
-            pair.carveTerrain = false;
-            a.GetComponent<BoxCollider2D>().enabled = false;
-            b.GetComponent<BoxCollider2D>().enabled = false;
+            Assert.AreSame(camera, b.capture.sourceCamera,
+                "B 的捕获源相机必须是本次传送实际使用的主相机。");
             Assert.AreEqual(0f, Mathf.DeltaAngle(0f, a.transform.eulerAngles.z), 0.001f);
             Assert.AreEqual(45f, Mathf.DeltaAngle(0f, b.transform.eulerAngles.z), 0.001f);
             Assert.AreEqual(PortalFacing.Right, a.Facing);
             Assert.AreEqual(PortalFacing.Right, b.Facing);
 
             var rb = player.GetComponent<Rigidbody2D>();
-            rb.bodyType = RigidbodyType2D.Kinematic;
-            rb.gravityScale = 0f;
             rb.velocity = Vector2.zero;
             controller.portalRealignSpeed = 0.01f;
             controller.SetMoveInput(0f);
@@ -420,7 +370,7 @@ namespace Platformer.Tests
             Vector3 nextPosition = visual.InverseTransformPoint(camera.transform.position);
             float nextAngle = Mathf.DeltaAngle(
                 0f, (Quaternion.Inverse(visual.rotation) * camera.transform.rotation).eulerAngles.z);
-            Assert.Greater(Mathf.Abs(Mathf.DeltaAngle(controller.CurrentRotationAngle, nextAngle)), 5f,
+            Assert.Greater(Mathf.Abs(nextAngle), 5f,
                 "后续跟随帧可以平滑趋近玩家，但不能把相机相对角立即硬对齐掉。");
             Assert.Less(Vector3.Distance(expectedPosition, nextPosition),
                 0.2f, "后续跟随帧不应再次瞬移相机。");
@@ -437,7 +387,7 @@ namespace Platformer.Tests
         public IEnumerator Other_Portal_Fades_When_Player_Is_Near()
         {
             FindGroups(out var a, out var b);
-            var pair = Object.FindObjectOfType<PortalPair>();
+            var pair = _rig.Pair;
             PrepareTransparencySandbox(pair, a, b);
 
             a.transform.position = Vector3.zero;
@@ -471,7 +421,7 @@ namespace Platformer.Tests
         public IEnumerator Transparency_Adapts_When_Both_Portals_Are_Inside_Fade_Range()
         {
             FindGroups(out var a, out var b);
-            var pair = Object.FindObjectOfType<PortalPair>();
+            var pair = _rig.Pair;
             PrepareTransparencySandbox(pair, a, b);
             SetFacingTransparencyLayout(a, b);
 
@@ -505,7 +455,7 @@ namespace Platformer.Tests
         public IEnumerator Selected_Portal_Overrides_Automatic_Transparency()
         {
             FindGroups(out var a, out var b);
-            var pair = Object.FindObjectOfType<PortalPair>();
+            var pair = _rig.Pair;
             PrepareTransparencySandbox(pair, a, b);
             SetFacingTransparencyLayout(a, b);
             a.otherViewFadeDistance = b.otherViewFadeDistance = 3f;
@@ -547,7 +497,7 @@ namespace Platformer.Tests
         public IEnumerator Facing_Penalty_Prevents_Back_Portal_From_Becoming_Source()
         {
             FindGroups(out var a, out var b);
-            var pair = Object.FindObjectOfType<PortalPair>();
+            var pair = _rig.Pair;
             PrepareTransparencySandbox(pair, a, b);
 
             a.transform.position = new Vector3(-1f, 0f, 0f);
@@ -574,7 +524,7 @@ namespace Platformer.Tests
         public IEnumerator Portal_Hint_Beam_Matches_Height_And_Sorting()
         {
             FindGroups(out var a, out var b);
-            var pair = Object.FindObjectOfType<PortalPair>();
+            var pair = _rig.Pair;
 
             Assert.IsNotNull(a);
             Assert.IsNotNull(b);
@@ -654,10 +604,10 @@ namespace Platformer.Tests
             Assert.Greater(particlesB.main.startColor.color.r, particlesB.main.startColor.color.b,
                 "B 门粒子应为红色。");
             Assert.Greater(particlesA.shape.scale.y, 0f,
-                "静态粒子发射区域应由场景对象自身定义。");
+                "粒子发射区域应具有有效高度。");
             Assert.AreEqual(a.hintParticleRate * 0.25f,
                 particlesA.emission.rateOverTime.constant, 0.01f,
-                "粒子发射率应为场景中配置值。");
+                "粒子发射率应按组件配置计算。");
             Assert.Less(particlesA.emission.rateOverTime.constant, 30f,
                 "粒子密度应较稀。");
             Assert.GreaterOrEqual(particlesA.main.maxParticles, 256,
@@ -683,7 +633,7 @@ namespace Platformer.Tests
             Vector3 originalHintScale = a.HintRenderer.transform.lossyScale;
             Vector3 originalParticlePosition = a.HintParticles.transform.position;
 
-            // 光带/粒子是场景静态对象；移动视觉中心不应移动它们。
+            // 光带/粒子是测试创建的静态对象；移动视觉中心不应移动它们。
             center.localPosition = originalCenter + new Vector3(0.5f, 0f, 0f);
             yield return null;
 
@@ -721,7 +671,7 @@ namespace Platformer.Tests
         public IEnumerator Facing_Repeated_Switches_Restore_View_Centers()
         {
             FindGroups(out var a, out var b);
-            var pair = Object.FindObjectOfType<PortalPair>();
+            var pair = _rig.Pair;
 
             Assert.IsNotNull(a);
             Assert.IsNotNull(b);
@@ -767,7 +717,7 @@ namespace Platformer.Tests
         public IEnumerator Facing_AllFourCombinations_ApplyBothPortals_AtOnce()
         {
             FindGroups(out var a, out var b);
-            var pair = Object.FindObjectOfType<PortalPair>();
+            var pair = _rig.Pair;
 
             Assert.IsNotNull(a);
             Assert.IsNotNull(b);

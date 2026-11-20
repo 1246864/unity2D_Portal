@@ -21,30 +21,22 @@ namespace Platformer.Tests
         [UnitySetUp]
         public IEnumerator SetUp()
         {
-            int groundLayer = LayerMask.NameToLayer("Ground");
-            Assert.AreNotEqual(-1, groundLayer,
-                "Layer 'Ground' is missing. Open Level 01 and check the project layer settings.");
-
             // 与模板使用的工程级重力保持一致，并在 TearDown 恢复，避免污染其他测试。
             _originalGravity = Physics2D.gravity;
             Physics2D.gravity = new Vector2(0f, -40f);
+
+            _controller = PlayTestFixtures.CreatePlayer(null, new Vector3(0f, 0.9f, 0f));
+            _player = _controller.gameObject;
+
+            int groundLayer = 0;
+            while ((_controller.groundMask.value & (1 << groundLayer)) == 0)
+                groundLayer++;
 
             _ground = new GameObject("TestGround");
             _ground.layer = groundLayer;
             _ground.transform.position = new Vector3(0f, -0.5f, 0f);
             var groundCollider = _ground.AddComponent<BoxCollider2D>();
             groundCollider.size = new Vector2(100f, 1f);
-
-#if UNITY_EDITOR
-            var prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
-                "Assets/Prefabs/Player.prefab");
-#else
-            GameObject prefab = null;
-#endif
-            Assert.IsNotNull(prefab, "Player prefab is missing at Assets/Prefabs/Player.prefab.");
-
-            _player = Object.Instantiate(prefab, new Vector3(0f, 0.9f, 0f), Quaternion.identity);
-            _controller = _player.GetComponent<PlayerController2D>();
 
             // 让胶囊在地面上稳定下来。
             for (int i = 0; i < 15; i++)
@@ -224,8 +216,8 @@ namespace Platformer.Tests
                 Matrix4x4 relative = targetGo.transform.worldToLocalMatrix *
                                      cameraGo.transform.localToWorldMatrix;
 
-                // 对应测试场景 B(45°) -> A(0°)：玩家出口角为 -45°。
-                targetGo.transform.position = new Vector3(-11.9f, 1f, 0f);
+                // 使用非零出口位置和 -45° 出口角，验证完整的相对位姿映射。
+                targetGo.transform.position = new Vector3(2f, 1f, 0f);
                 targetGo.transform.rotation = Quaternion.Euler(0f, 0f, -45f);
                 control.TeleportRelative(targetGo.transform, relative, true);
                 yield return null;
@@ -388,9 +380,9 @@ namespace Platformer.Tests
         public IEnumerator Camera_Mirror_Switching_Players_Restores_Both_Baselines()
         {
             bool originalFirstInput = _controller.IsHorizontalInputInverted;
-            var secondPlayer = Object.Instantiate(
-                _player, new Vector3(20f, 0.9f, 0f), Quaternion.identity);
-            var secondController = secondPlayer.GetComponent<PlayerController2D>();
+            var secondController = PlayTestFixtures.CreatePlayer(
+                null, new Vector3(20f, 0.9f, 0f));
+            var secondPlayer = secondController.gameObject;
             bool originalSecondInput = secondController.IsHorizontalInputInverted;
 
             _controller.SetHorizontalInputInverted(false);
@@ -625,7 +617,7 @@ namespace Platformer.Tests
         public IEnumerator Walks_Up_45_Degree_Slope()
         {
             var slope = new GameObject("TestSlope");
-            slope.layer = LayerMask.NameToLayer("Ground");
+            slope.layer = _ground.layer;
             slope.transform.position = new Vector3(3f, 0f, 0f);
             var poly = slope.AddComponent<PolygonCollider2D>();
             poly.points = new[]
