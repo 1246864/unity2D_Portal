@@ -467,11 +467,17 @@ namespace Platformer
                 : Matrix4x4.identity;
 
 
-            // 门间角度差叠加到玩家当前显示角；回正未完成时连续传送也不会跳回绝对角。
+            // 普通门保留玩家相对门切线的角度；同向门是镜像映射，相对角必须取反。
+            // 玩家 0° 从 B(45°) 到 A(0°) 时应为 +45°，而不是普通门公式得到的 -45°。
             float sourceAngle = Vector2.SignedAngle(Vector2.up, source.transform.up);
             float partnerAngle = Vector2.SignedAngle(Vector2.up, partner.transform.up);
-            float portalDelta = Mathf.DeltaAngle(sourceAngle, partnerAngle);
-            float exitAngle = Mathf.DeltaAngle(0f, controller.CurrentRotationAngle + portalDelta);
+            float playerRelativeAngle = Mathf.DeltaAngle(
+                sourceAngle, controller.CurrentRotationAngle);
+            float exitAngle = Mathf.DeltaAngle(
+                0f,
+                sameFacing
+                    ? partnerAngle - playerRelativeAngle
+                    : partnerAngle + playerRelativeAngle);
 
             // 进门前的速度/受力结果也按传送门坐标系一起变换：
             // 法线分量沿出口正面反向，切线分量保留。

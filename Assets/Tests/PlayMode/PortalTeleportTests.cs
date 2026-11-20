@@ -260,10 +260,15 @@ namespace Platformer.Tests
 
             Assert.IsTrue(teleported, "玩家走进门后应该被传送到另一扇门的正面。");
 
-            // 出口是 A、入口是 B：出口旋转 = A 角度 - B 角度。
-            // 当前场景 B 本身也旋转了 45°，所以不能假设 B 是水平门。
+            // 玩家进门时由 Teleport 复位为 0°；同向门反射相对角，普通门保留相对角。
+            float sourceAngle = Mathf.DeltaAngle(0f, b.transform.eulerAngles.z);
+            float partnerAngle = Mathf.DeltaAngle(0f, a.transform.eulerAngles.z);
+            float playerRelativeAngle = Mathf.DeltaAngle(sourceAngle, 0f);
             float expectedAngle = Mathf.DeltaAngle(
-                0f, a.transform.eulerAngles.z - b.transform.eulerAngles.z);
+                0f,
+                a.Facing == b.Facing
+                    ? partnerAngle - playerRelativeAngle
+                    : partnerAngle + playerRelativeAngle);
             Vector3 expectedUp = Quaternion.Euler(0f, 0f, expectedAngle) * Vector3.up;
 
             Transform visual = controller.VisualRoot != null
@@ -273,7 +278,7 @@ namespace Platformer.Tests
                     (Vector2)visual.up, (Vector2)expectedUp), 0.05f,
                 "出传送门后，玩家显示部分的 Y+ 应与出口旋转一致。");
             Assert.AreEqual(expectedAngle, controller.CurrentRotationAngle, 5f,
-                "玩家角度应等于出口门角度减入口门角度。");
+                "玩家角度应按门的朝向组合保留或反射相对角。");
 
             if (Camera.main != null)
             {
@@ -391,9 +396,9 @@ namespace Platformer.Tests
                 "连续回正应形成非零相对角，以覆盖 B→A 的方向相关偏差。");
 
             teleportMethod.Invoke(pair, new object[] { b, a });
-            float expectedExitAngle = Mathf.DeltaAngle(0f, oldPlayerAngle - 45f);
+            float expectedExitAngle = Mathf.DeltaAngle(0f, 45f - oldPlayerAngle);
             Assert.AreEqual(expectedExitAngle, controller.CurrentRotationAngle, 0.001f,
-                "B→A 只能在当前玩家角度上叠加一次 B(45°)→A(0°) 的角度差。");
+                "B→A 同向门应反射玩家相对 B 的角度，不能叠加普通门的角度差。");
             Assert.IsFalse(control.IsMirrored, "连续两次同向传送后应恢复原始投影。");
             yield return null;
 
@@ -419,6 +424,13 @@ namespace Platformer.Tests
                 "后续跟随帧可以平滑趋近玩家，但不能把相机相对角立即硬对齐掉。");
             Assert.Less(Vector3.Distance(expectedPosition, nextPosition),
                 0.2f, "后续跟随帧不应再次瞬移相机。");
+
+            // 固定玩家为 0° 直接走 B→A，精确覆盖本次 90° 偏差。
+            controller.Teleport((Vector2)(b.transform.position +
+                                          (Vector3)b.OpeningDirection * 0.45f));
+            teleportMethod.Invoke(pair, new object[] { b, a });
+            Assert.AreEqual(45f, controller.CurrentRotationAngle, 0.001f,
+                "玩家 0° 从 B(45°)→A(0°) 时应为 +45°；旧结果的 -45° 正好偏了 90°。");
         }
 
         [UnityTest]
