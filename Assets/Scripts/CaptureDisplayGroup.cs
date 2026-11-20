@@ -148,6 +148,22 @@ namespace Platformer
         [Tooltip("开门曲线：0 = 关闭，1 = 完全打开")]
         public AnimationCurve openCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
 
+        [Header("连接画面渐变")]
+        [Tooltip("单门纹理与双门捕获画面之间的渐变时长；与遮罩开门动画相互独立")]
+        [Min(0f)] public float connectionRevealDuration = 0.5f;
+
+        [Tooltip("连接渐变曲线：0 = 单门纹理，1 = 双门捕获画面")]
+        public AnimationCurve connectionRevealCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
+
+        [Tooltip("单门程序纹理的噪音缩放")]
+        [Min(0.01f)] public float closedNoiseScale = 7f;
+
+        [Tooltip("单门程序纹理的噪音流动速度")]
+        public float closedNoiseSpeed = 0.9f;
+
+        [Tooltip("单门程序纹理的纵向流光速度")]
+        public float closedFlowSpeed = 2.5f;
+
         /// <summary>门洞高度，由 PortalPair 统一配置的上下遮罩偏移算出。</summary>
         public float PortalHeight => Pair != null ? Pair.PortalHeight : 3f;
 
@@ -319,9 +335,16 @@ namespace Platformer
         SpriteRenderer _hint;
         ParticleSystem _particles;
         Material _beamMaterial;
+        Material _viewMaterial;
 
         static readonly Color HintBlue = new Color(0.35f, 0.65f, 1f, 1f);
         static readonly Color HintRed = new Color(1f, 0.35f, 0.35f, 1f);
+        static readonly int ConnectionRevealId = Shader.PropertyToID("_ConnectionReveal");
+        static readonly int OpenBrightnessId = Shader.PropertyToID("_OpenBrightness");
+        static readonly int PortalColorId = Shader.PropertyToID("_PortalColor");
+        static readonly int ClosedNoiseScaleId = Shader.PropertyToID("_ClosedNoiseScale");
+        static readonly int ClosedNoiseSpeedId = Shader.PropertyToID("_ClosedNoiseSpeed");
+        static readonly int ClosedFlowSpeedId = Shader.PropertyToID("_ClosedFlowSpeed");
         const string PortalLightBandLayer = "Portal light band";
         static Texture2D _hintTexture;
         static Sprite _hintSprite;
@@ -334,6 +357,12 @@ namespace Platformer
         float _openProgress = 1f;
         bool _isOpening;
 
+        float _connectionReveal;
+        float _connectionRevealElapsed;
+        float _connectionRevealStart;
+        float _connectionRevealTarget;
+        bool _isConnectionTransitioning;
+
         void Awake()
         {
             _lastFacing = facing;
@@ -341,6 +370,7 @@ namespace Platformer
 
             // 先解析本组自己的 View 结构，WireUp 需要 output 已就位。
             ResolveViewRig();
+            EnsureViewMaterial();
 
             // Pair 可能已提前处理未激活门并完成首次裁切；此时必须保留原始基准，
             // 不能把已经叠加过半屏偏移的局部位置重新记为基准。
@@ -361,11 +391,15 @@ namespace Platformer
 
         void OnEnable()
         {
-            // 门激活期间，把门洞矩形覆盖到的关卡地形碰撞剔除。
             PortalPair pair = Pair;
-            if (pair != null) pair.SetPortalTerrainState(this, true);
+            if (pair != null)
+            {
+                pair.SetPortalTerrainState(this, true);
+                pair.NotifyPortalStateChanged();
+            }
 
             // 首次激活、以及禁用后重新启用 GameObject/组件时都会触发，重播开门动画。
+            // 已激活的 partner 不会因此重播；双门连接渐变由 PortalPair 单独触发。
             PlayOpenAnimation();
 
             // playOnAwake=false 的粒子系统不会随物体重新启用而自动恢复播放。
@@ -374,15 +408,21 @@ namespace Platformer
 
         void OnDisable()
         {
-            // 门停用后恢复地形上被剔除的碰撞。
+            SetConnectionClosedImmediate();
+
             PortalPair pair = Pair;
-            if (pair != null) pair.SetPortalTerrainState(this, false);
+            if (pair != null)
+            {
+                pair.SetPortalTerrainState(this, false);
+                pair.NotifyPortalStateChanged();
+            }
         }
 
         void Start()
         {
             // 启动时再解析一次，兼容运行时动态创建/重命名的子对象。
             ResolveViewRig();
+            EnsureViewMaterial();
 
             // 获取本门显示精灵所在的游戏对象，并记住它在视觉中心下的初始局部位置。
             // ApplyHalfCrop 只在此基础上叠加 X 偏移，不能把 Portal View Center 的 Z 偏移覆盖掉。
@@ -574,6 +614,114 @@ namespace Platformer
                 _isOpening = false;
                 _openProgress = 1f;
             }
+        }
+
+        /// <summary>从当前画面状态渐变到双门捕获画面，不影响遮罩开门动画。</summary>
+        public void PlayConnectionReveal()
+        {
+            PlayConnectionTransition(1f);
+        }
+
+        /// <summary>从当前画面状态渐变回单门程序纹理。</summary>
+        public void PlayConnectionClose()
+        {
+            PlayConnectionTransition(0f);
+        }
+
+        /// <summary>立即恢复为单门程序纹理，供门停用或门对重置时调用。</summary>
+        public void SetConnectionClosedImmediate()
+        {
+            _connectionReveal = 0f;
+            _connectionRevealElapsed = 0f;
+            _connectionRevealStart = 0f;
+            _connectionRevealTarget = 0f;
+            _isConnectionTransitioning = false;
+            ApplyViewMaterialProperties();
+        }
+
+        /// <summary>传送发生时立即完成连接渐显，直接显示正常捕获画面。</summary>
+        public void CompleteConnectionReveal()
+        {
+            _connectionReveal = 1f;
+            _connectionRevealElapsed = 0f;
+            _connectionRevealStart = 1f;
+            _connectionRevealTarget = 1f;
+            _isConnectionTransitioning = false;
+            ApplyViewMaterialProperties();
+        }
+
+        void PlayConnectionTransition(float target)
+        {
+            if (_isConnectionTransitioning && Mathf.Approximately(_connectionRevealTarget, target))
+                return;
+            if (!_isConnectionTransitioning && Mathf.Approximately(_connectionReveal, target))
+                return;
+
+            _connectionRevealStart = _connectionReveal;
+            _connectionRevealTarget = target;
+            _connectionRevealElapsed = 0f;
+            _isConnectionTransitioning = connectionRevealDuration > 0f &&
+                                         !Mathf.Approximately(_connectionRevealStart, target);
+
+            if (_isConnectionTransitioning) return;
+
+            _connectionReveal = target;
+            ApplyViewMaterialProperties();
+        }
+
+        void AdvanceConnectionTransition()
+        {
+            if (!_isConnectionTransitioning) return;
+
+            _connectionRevealElapsed += Time.deltaTime;
+            float t = connectionRevealDuration > 0f
+                ? Mathf.Clamp01(_connectionRevealElapsed / connectionRevealDuration)
+                : 1f;
+            float eased = connectionRevealCurve != null
+                ? Mathf.Clamp01(connectionRevealCurve.Evaluate(t))
+                : t;
+            _connectionReveal = Mathf.Lerp(_connectionRevealStart, _connectionRevealTarget, eased);
+
+            if (t < 1f) return;
+
+            _isConnectionTransitioning = false;
+            _connectionReveal = _connectionRevealTarget;
+        }
+
+        void EnsureViewMaterial()
+        {
+            if (output == null) return;
+
+            if (_viewMaterial == null)
+            {
+                Shader shader = Shader.Find("Hidden/Platformer/PortalView");
+                if (shader == null)
+                {
+                    Debug.LogWarning("[CaptureDisplayGroup] 找不到 PortalView Shader。", this);
+                    return;
+                }
+
+                _viewMaterial = new Material(shader)
+                {
+                    hideFlags = HideFlags.DontSave
+                };
+            }
+
+            // 每扇门持有独立材质，连接进度和 A/B 颜色不会互相覆盖。
+            output.sharedMaterial = _viewMaterial;
+            ApplyViewMaterialProperties();
+        }
+
+        void ApplyViewMaterialProperties()
+        {
+            if (_viewMaterial == null) return;
+
+            _viewMaterial.SetFloat(ConnectionRevealId, Mathf.Clamp01(_connectionReveal));
+            _viewMaterial.SetFloat(OpenBrightnessId, Mathf.Clamp01(_openProgress));
+            _viewMaterial.SetColor(PortalColorId, side == CaptureGroupSide.A ? HintBlue : HintRed);
+            _viewMaterial.SetFloat(ClosedNoiseScaleId, Mathf.Max(0.01f, closedNoiseScale));
+            _viewMaterial.SetFloat(ClosedNoiseSpeedId, closedNoiseSpeed);
+            _viewMaterial.SetFloat(ClosedFlowSpeedId, closedFlowSpeed);
         }
 
         /// <summary>接收 PortalPair 下发的玩家实例。</summary>
@@ -790,6 +938,7 @@ namespace Platformer
         {
             if (_halfSprite != null) Destroy(_halfSprite);
             if (_beamMaterial != null) Destroy(_beamMaterial);
+            if (_viewMaterial != null) Destroy(_viewMaterial);
         }
 
         /// <summary>在 Scene 视图里实时画出开口方向（蓝/红）和门背后方向（灰）。</summary>
@@ -811,9 +960,11 @@ namespace Platformer
         void LateUpdate()
         {
             AdvanceOpenAnimation();
+            AdvanceConnectionTransition();
             ApplyHalfCrop();
             UpdateMasks();
             UpdateHint();
+            ApplyViewMaterialProperties();
         }
 
         void Update()
@@ -936,7 +1087,14 @@ namespace Platformer
         public void WireUp()
         {
             if (capture == null || output == null) return;
-            if (partner == null || partner.capture == null || partner.output == null) return;
+
+            // 没有可用 partner 时仍保留自己的输出引用，确保 RegionSnapshotCamera
+            // 能初始化 Sprite 网格；单门关闭纹理也依赖这个网格进行渲染。
+            if (partner == null || partner.capture == null || partner.output == null)
+            {
+                capture.output = output;
+                return;
+            }
 
             capture.output = partner.output;
             partner.capture.output = output;

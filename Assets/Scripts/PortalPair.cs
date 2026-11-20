@@ -90,6 +90,7 @@ namespace Platformer
 
         float _cooldown;
         bool _forceCapture;
+        bool _wasLinked;
         Transform _lastPlayer;
         CaptureDisplayGroup _automaticViewSource;
         CapsuleCollider2D _ignoredPlayerBody;
@@ -108,6 +109,14 @@ namespace Platformer
 
         /// <summary>当前是否处于传送冷却中。</summary>
         public bool IsTeleportCoolingDown => _cooldown > 0f;
+
+        /// <summary>A/B 两扇门均存在且处于激活状态时，传送门对才算已连接。</summary>
+        public bool IsLinked => IsPortalActive(_groupA) && IsPortalActive(_groupB);
+
+        static bool IsPortalActive(CaptureDisplayGroup group)
+        {
+            return group != null && group.gameObject.activeInHierarchy && group.isActiveAndEnabled;
+        }
 
         void Awake()
         {
@@ -129,6 +138,7 @@ namespace Platformer
             PushViewSettingsToGroups();
             IgnorePlayerBodyCollision();
             CaptureDisplayGroup.ApplyFacingStates(_groupA, _groupB);
+            SyncPortalLinkState();
             UpdateViewTransparency(true);
         }
 
@@ -136,19 +146,37 @@ namespace Platformer
         {
             // 重新启用后重新绑定玩家碰撞过滤；禁用时会恢复原始位。
             _lastPlayer = null;
+            SyncPortalLinkState();
             UpdateViewTransparency(true);
         }
 
         void OnDisable()
         {
             RestorePlayerBodyCollision();
-            if (_groupA != null) _groupA.SetViewAlpha(1f);
-            if (_groupB != null) _groupB.SetViewAlpha(1f);
+            SetGateActive(_gateA, false);
+            SetGateActive(_gateB, false);
+            SetCaptureActive(_groupA, false);
+            SetCaptureActive(_groupB, false);
+            if (_groupA != null)
+            {
+                _groupA.SetViewAlpha(1f);
+                _groupA.SetConnectionClosedImmediate();
+            }
+            if (_groupB != null)
+            {
+                _groupB.SetViewAlpha(1f);
+                _groupB.SetConnectionClosedImmediate();
+            }
+            if (_terrainCarver != null) _terrainCarver.enabled = false;
             _automaticViewSource = null;
+            _wasLinked = false;
+            _forceCapture = false;
         }
 
         void Update()
         {
+            SyncPortalLinkState();
+
             // 支持运行时换玩家：重新下发引用，并让新玩家的身体胶囊排除门层。
             if (_lastPlayer != player)
             {
@@ -215,6 +243,56 @@ namespace Platformer
             snapshot.captureHeight = Mathf.Max(0.01f, captureHeight);
         }
 
+        /// <summary>单门 OnEnable/OnDisable 时通知门对重新仲裁连接状态。</summary>
+        public void NotifyPortalStateChanged()
+        {
+            SyncPortalLinkState();
+        }
+
+        void SyncPortalLinkState()
+        {
+            if (_groupA == null && _groupB == null) return;
+
+            bool linked = IsLinked;
+            SetGateActive(_gateA, linked && IsPortalActive(_groupA));
+            SetGateActive(_gateB, linked && IsPortalActive(_groupB));
+            SetCaptureActive(_groupA, linked && IsPortalActive(_groupA));
+            SetCaptureActive(_groupB, linked && IsPortalActive(_groupB));
+
+            if (linked == _wasLinked) return;
+            _wasLinked = linked;
+
+            if (linked)
+            {
+                // 渐显前先拿到最新画面，避免第一帧露出旧纹理或空纹理。
+                RefreshCaptures();
+                _groupA.PlayConnectionReveal();
+                _groupB.PlayConnectionReveal();
+            }
+            else
+            {
+                if (IsPortalActive(_groupA)) _groupA.PlayConnectionClose();
+                else if (_groupA != null) _groupA.SetConnectionClosedImmediate();
+
+                if (IsPortalActive(_groupB)) _groupB.PlayConnectionClose();
+                else if (_groupB != null) _groupB.SetConnectionClosedImmediate();
+            }
+
+            SyncTerrainCarverPortals();
+            UpdateViewTransparency(true);
+        }
+
+        static void SetGateActive(BoxCollider2D gate, bool active)
+        {
+            if (gate != null) gate.enabled = active;
+        }
+
+        static void SetCaptureActive(CaptureDisplayGroup group, bool active)
+        {
+            if (group != null && group.capture != null)
+                group.capture.SetCaptureActive(active);
+        }
+
         /// <summary>选中一扇门作为接近基准，其搭档接收透明。</summary>
         public void SelectPortal(CaptureDisplayGroup portal)
         {
@@ -238,7 +316,7 @@ namespace Platformer
         /// </summary>
         void UpdateViewTransparency(bool force = false)
         {
-            if (player == null || _groupA == null || _groupB == null)
+            if (player == null || !IsLinked)
             {
                 if (_groupA != null) _groupA.SetViewAlpha(1f);
                 if (_groupB != null) _groupB.SetViewAlpha(1f);
@@ -299,8 +377,8 @@ namespace Platformer
         }
 
         /// <summary>
-        /// CaptureDisplayGroup 在 OnEnable/OnDisable 时调用：门激活期间在关卡地形上
-        /// 按门洞矩形开洞，门停用后恢复。传送碰撞箱本身不在这里处理。
+        /// CaptureDisplayGroup 在 OnEnable/OnDisable 时调用：双门连接期间在关卡地形上
+        /// 按门洞矩形开洞，单门或门停用后恢复。传送碰撞箱本身不在这里处理。
         /// </summary>
         public void SetPortalTerrainState(CaptureDisplayGroup group, bool open)
         {
@@ -308,12 +386,13 @@ namespace Platformer
             if (!gameObject.scene.IsValid() || !gameObject.scene.isLoaded) return;
 
             EnsureTerrainCarver();
-            if (_terrainCarver != null) _terrainCarver.SetPortal(group, open);
+            if (_terrainCarver != null)
+                _terrainCarver.SetPortal(group, open && IsLinked && IsPortalActive(group));
         }
 
         /// <summary>
         /// 地形开洞组件是运行时按需补上的，这样不用改场景也能生效。
-        /// 补上后把当前已激活的两扇门登记一次。
+        /// 补上后按当前双门连接状态登记门洞。
         /// </summary>
         void EnsureTerrainCarver()
         {
@@ -333,9 +412,27 @@ namespace Platformer
             _terrainCarver.enabled = true;
 
             if (_groupA != null)
-                _terrainCarver.SetPortal(_groupA, _groupA.isActiveAndEnabled);
+                _terrainCarver.SetPortal(_groupA, IsLinked && IsPortalActive(_groupA));
             if (_groupB != null)
-                _terrainCarver.SetPortal(_groupB, _groupB.isActiveAndEnabled);
+                _terrainCarver.SetPortal(_groupB, IsLinked && IsPortalActive(_groupB));
+        }
+
+        void SyncTerrainCarverPortals()
+        {
+            if (!carveTerrain)
+            {
+                if (_terrainCarver != null) _terrainCarver.enabled = false;
+                return;
+            }
+
+            if (_terrainCarver == null)
+            {
+                EnsureTerrainCarver();
+                return;
+            }
+
+            _terrainCarver.SetPortal(_groupA, IsLinked && IsPortalActive(_groupA));
+            _terrainCarver.SetPortal(_groupB, IsLinked && IsPortalActive(_groupB));
         }
 
         void SyncTerrainCarver()
@@ -363,9 +460,14 @@ namespace Platformer
             _terrainCarver.carveFrontMargin = frontMargin;
 
             if (!_terrainCarver.enabled)
-                _terrainCarver.enabled = true; // OnEnable 会恢复旧洞并按当前门状态重切。
+            {
+                _terrainCarver.enabled = true;
+                SyncTerrainCarverPortals();
+            }
             else if (parametersChanged)
+            {
                 _terrainCarver.RefreshNow();
+            }
         }
 
         /// <summary>
@@ -374,14 +476,19 @@ namespace Platformer
         /// </summary>
         public void OnGateHit(CaptureDisplayGroup source, Collision2D collision)
         {
-            if (source == null || _cooldown > 0f) return;
+            if (!isActiveAndEnabled || !IsPortalActive(source) || _cooldown > 0f) return;
             if (player == null) return;
 
             var controller = player.GetComponent<PlayerController2D>();
             if (controller == null || collision.collider != controller.CenterPoint) return;
 
             var partner = source.partner;
-            if (partner == null) return;
+            if (!IsPortalActive(partner)) return;
+
+            // 联通渐显期间如果已经触发有效传送，立即结束双门的画面渐变，
+            // 不再让单门纹理遮挡本次传送后的正常捕获画面。
+            if (_groupA != null) _groupA.CompleteConnectionReveal();
+            if (_groupB != null) _groupB.CompleteConnectionReveal();
 
             // 传送时先打断所有门正在执行的开门动画，避免上一次动画的进度/遮罩状态
             // 带到下一次传送。随后只让本次规则选中的门重新从 0 开始执行。
@@ -558,6 +665,7 @@ namespace Platformer
             gate.isTrigger = false;
             gate.offset = Vector2.zero;
             gate.size = new Vector2(gateThickness, group.PortalHeight);
+            gate.enabled = IsLinked && IsPortalActive(group);
 
             // 门碰撞箱放到 Snapshot 层，玩家身体胶囊用 excludeLayers 忽略该层。
             // 层过滤不会像 Physics2D.IgnoreCollision 那样在碰撞箱重新启用后被重置。

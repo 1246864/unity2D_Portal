@@ -52,6 +52,7 @@ namespace Platformer
         float _spriteWorldWidth;
         float _spriteWorldHeight;
         float _timer;
+        bool _captureActive = true;
         bool _renderingAvailable;
         bool _warnedTextureClamp;
         bool _warnedMissingSource;
@@ -80,11 +81,13 @@ namespace Platformer
             if (!EnsureResources()) return;
             captureCamera.targetTexture = _renderTexture;
             captureCamera.enabled = false;
-            Capture();
+            if (_captureActive) Capture();
         }
 
         void LateUpdate()
         {
+            if (!_captureActive) return;
+
             // 输出被门背面逻辑隐藏或对象未激活时，不做无效渲染与同步回读。
             if (output == null || !output.enabled || !output.gameObject.activeInHierarchy) return;
             if (!EnsureResources()) return;
@@ -104,6 +107,15 @@ namespace Platformer
             }
         }
 
+        /// <summary>开关持续捕获，但保留输出 Sprite 和已生成的纹理资源。</summary>
+        public void SetCaptureActive(bool active)
+        {
+            if (_captureActive == active) return;
+
+            _captureActive = active;
+            if (active) _timer = 0f;
+        }
+
         /// <summary>清空输出渲染器上的预览精灵。</summary>
         public void ClearOutput()
         {
@@ -113,7 +125,7 @@ namespace Platformer
         /// <summary>立即捕获一次（预览渲染也会用到）。</summary>
         public void CaptureNow()
         {
-            if (!isActiveAndEnabled) return;
+            if (!_captureActive || !isActiveAndEnabled) return;
             if (!_renderingAvailable && SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null) return;
             if (!EnsureResources()) return;
             Capture();
