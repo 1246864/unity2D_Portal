@@ -294,6 +294,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b8655ddb85a74406a0a26370202b1706, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  followPlayerTeleport: 1
   mirrorHorizontally: 0
 --- !u!1 &106582035
 GameObject:

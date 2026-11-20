@@ -7,7 +7,7 @@ namespace Platformer
     /// 位置和角度都独立平滑；角色回正时相机角度会滞后，不会硬锁定到角色角度。
     /// </summary>
     [RequireComponent(typeof(Camera))]
-    public class CameraFollow2D : MonoBehaviour
+    public class CameraFollow2D : CameraBehavior2D
     {
         [Tooltip("相机跟随的目标（一般是玩家）")]
         public Transform target;
@@ -35,7 +35,6 @@ namespace Platformer
         [Tooltip("前瞻偏移的平滑时间")]
         public float lookAheadSmoothTime = 0.4f;
 
-        Camera _camera;
         Transform _visual;
         Vector3 _followVelocity;
         float _lookAhead;
@@ -44,15 +43,8 @@ namespace Platformer
         float _cameraAngleVelocity;
         bool _initialized;
         bool _wasRealigning;
-        bool _pendingTeleport;
-        bool _pendingMirrorPosition;
-        Transform _pendingVisual;
-        Matrix4x4 _pendingRelative;
 
-        void Awake()
-        {
-            _camera = GetComponent<Camera>();
-        }
+        public override Transform Target => target;
 
         void Start()
         {
@@ -80,7 +72,7 @@ namespace Platformer
             _initialized = true;
         }
 
-        void LateUpdate()
+        protected override void Tick()
         {
             if (target == null) return;
 
@@ -94,21 +86,23 @@ namespace Platformer
             if (!_initialized) Initialize();
             if (_visual == null) return;
 
-            // 传送帧由 PortalPair 记录相对矩阵；等玩家这一帧最终位置确定后再映射。
-            if (_pendingTeleport)
-            {
-                ApplyPendingTeleport();
-                return;
-            }
-
             PlayerController2D controller = target.GetComponent<PlayerController2D>();
             bool realigning = controller != null && controller.IsRealigning;
 
             if (realigning)
             {
-                // 回正期间禁用前瞻，避免相机从玩家相对位置被拉开。
-                _lookAhead = 0f;
-                _lookAheadVelocity = 0f;
+                if (useLookAhead)
+                {
+                    // 回正期间不再产生新的前瞻，但保留已有惯性并平滑衰减。
+                    _lookAhead = Mathf.SmoothDamp(
+                        _lookAhead, 0f,
+                        ref _lookAheadVelocity, lookAheadSmoothTime);
+                }
+                else
+                {
+                    _lookAhead = 0f;
+                    _lookAheadVelocity = 0f;
+                }
             }
             else if (useLookAhead)
             {
@@ -181,53 +175,26 @@ namespace Platformer
             _wasRealigning = realigning;
         }
 
-        /// <summary>
-        /// 传送触发时调用：记录相机相对玩家显示节点的完整矩阵（位置/旋转/缩放）。
-        /// 真正应用延迟到 LateUpdate，等玩家最终位置确定后映射到绝对变换。
-        /// </summary>
-        public void TeleportRelative(Transform playerVisual, Matrix4x4 relativeTransform)
+        protected override void OnTeleported(CameraTeleportContext context)
         {
-            if (playerVisual == null) return;
-
-            _pendingVisual = playerVisual;
-            _pendingRelative = relativeTransform;
-            _pendingTeleport = true;
-            _pendingMirrorPosition = false;
-        }
-
-        /// <summary>
-        /// 后处理：在待应用的传送相机位置基础上，沿玩家相对 Y 轴镜像一次 X。
-        /// </summary>
-        public void MirrorPendingCameraPosition()
-        {
-            if (_pendingTeleport)
-                _pendingMirrorPosition = true;
-        }
-
-        void ApplyPendingTeleport()
-        {
-            _pendingTeleport = false;
-            if (_pendingVisual == null) return;
-
-            Matrix4x4 world = _pendingVisual.localToWorldMatrix * _pendingRelative;
-            Decompose2D(world, out Vector3 position, out Quaternion rotation, out Vector3 scale);
-
-            if (_pendingMirrorPosition)
+            _followVelocity = context.PlayerDeltaRotation * _followVelocity;
+            if (context.MirrorRelative)
             {
-                _pendingMirrorPosition = false;
-                Vector3 localPosition = _pendingVisual.InverseTransformPoint(position);
-                localPosition.x = -localPosition.x;
-                position = _pendingVisual.TransformPoint(localPosition);
+                // 与相机位置一致，沿传送后的相机局部 X 镜像位置速度。
+                Vector3 localVelocity = ControlledCamera.transform.InverseTransformVector(_followVelocity);
+                localVelocity.x = -localVelocity.x;
+                _followVelocity = ControlledCamera.transform.TransformVector(localVelocity);
+
+                // 角速度保持，不在传送时额外取反。
+                // 前瞻是相机局部水平状态，偏移及其平滑速度随局部 X 镜像。
+                _lookAhead = -_lookAhead;
+                _lookAheadVelocity = -_lookAheadVelocity;
             }
 
-            transform.SetPositionAndRotation(position, rotation);
-            transform.localScale = scale;
+            _visual = GetVisual();
+            if (_visual == null) _visual = context.PlayerVisual;
 
-            _cameraAngle = Mathf.DeltaAngle(0f, rotation.eulerAngles.z);
-            _cameraAngleVelocity = 0f;
-            _followVelocity = Vector3.zero;
-            _lookAhead = 0f;
-            _lookAheadVelocity = 0f;
+            _cameraAngle = Mathf.DeltaAngle(0f, ControlledCamera.transform.eulerAngles.z);
 
             // 如果新传送仍然处于回正阶段，下一帧不要再次执行“回正第一帧硬对齐”，
             // 否则会把刚映射好的相机角度重新拉向玩家，造成连续传送时卡顿。
@@ -238,21 +205,8 @@ namespace Platformer
             _initialized = true;
         }
 
-        /// <summary>从二维相机矩阵提取位置、Z 旋转和缩放。</summary>
-        public static void Decompose2D(
-            Matrix4x4 matrix, out Vector3 position, out Quaternion rotation, out Vector3 scale)
-        {
-            position = matrix.GetColumn(3);
-            scale = new Vector3(
-                matrix.GetColumn(0).magnitude,
-                matrix.GetColumn(1).magnitude,
-                matrix.GetColumn(2).magnitude);
-            float angle = Mathf.Atan2(matrix.m10, matrix.m00) * Mathf.Rad2Deg;
-            rotation = Quaternion.Euler(0f, 0f, angle);
-        }
-
         /// <summary>立即把相机对准目标（不做平滑），并同步旋转。</summary>
-        public void SnapToTarget()
+        public override void SnapToTarget()
         {
             if (target == null) return;
             if (!_initialized) Initialize();

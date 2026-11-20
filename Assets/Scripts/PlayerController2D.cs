@@ -412,6 +412,12 @@ namespace Platformer
             return appliedAngle;
         }
 
+        /// <summary>只在传送瞬间水平翻转精灵，不改变玩家的旋转、缩放或物理空间。</summary>
+        public void MirrorSpriteHorizontally()
+        {
+            if (_sr != null) _sr.flipX = !_sr.flipX;
+        }
+
         void TeleportCore(Vector2 position)
         {
             _rb.velocity = Vector2.zero;

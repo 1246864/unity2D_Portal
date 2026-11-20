@@ -4,25 +4,24 @@ namespace Platformer
 {
     /// <summary>
     /// 玩家输入与主相机控制门面。
-    /// 独占原始设备输入；玩家物理和相机跟随仍由各自组件执行。
+    /// 独占原始设备输入；玩家物理和激活相机行为仍由各自组件执行。
     /// </summary>
     [ExecuteAlways]
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Camera))]
-    public class PlayerControlManager : MonoBehaviour
+    public class PlayerControlManager : CameraController2D
     {
-        [Tooltip("开启时，玩家相机画面左右翻转（绕竖直轴 180°）。")]
-        public bool mirrorHorizontally = false;
-
-        [Tooltip("由本组件管理的玩家；留空时从 CameraFollow2D.target 解析")]
+        [Tooltip("由本组件管理的玩家；留空时从激活相机行为的 Target 解析")]
         public PlayerController2D player;
 
-        Camera _camera;
         PlayerController2D _player;
         bool _hasInputBaseline;
         bool _inputBaseline;
         bool _inputOverrideActive;
         bool _inputInverted;
+        bool _heldInputInverted;
+        bool _heldInputLeft;
+        bool _heldInputRight;
 
         Vector3 _previousMousePosition;
         bool _hasPreviousMousePosition;
@@ -30,7 +29,6 @@ namespace Platformer
         readonly bool[] _mousePressed = new bool[3];
         readonly bool[] _mouseReleased = new bool[3];
 
-        public bool IsMirrored => mirrorHorizontally;
         public Vector3 MousePosition { get; private set; }
         public Vector2 MouseDelta { get; private set; }
         public Vector2 MouseScrollDelta { get; private set; }
@@ -41,31 +39,29 @@ namespace Platformer
             get
             {
                 Vector3 screenPosition = MousePosition;
-                screenPosition.z = _camera != null ? Mathf.Abs(_camera.transform.position.z) : 0f;
+                Camera camera = ControlledCamera;
+                screenPosition.z = camera != null ? Mathf.Abs(camera.transform.position.z) : 0f;
                 return ScreenToWorldPoint(screenPosition);
             }
         }
 
-        void Awake()
+        protected override void Awake()
         {
-            _camera = GetComponent<Camera>();
+            base.Awake();
         }
 
-        void OnEnable()
+        protected override void OnEnable()
         {
-            _camera = GetComponent<Camera>();
+            base.OnEnable();
             _inputInverted = mirrorHorizontally;
-            Apply();
             SetPlayerInputInverted(_inputInverted);
         }
 
-        void OnDisable()
+        protected override void OnDisable()
         {
-            if (_camera != null)
-                _camera.ResetProjectionMatrix();
-
-            if (_player != null)
-                _player.ClearDeviceInput();
+            base.OnDisable();
+            ClearHeldInputInversion();
+            if (_player != null) _player.ClearDeviceInput();
             RestorePlayerInput();
             _hasPreviousMousePosition = false;
             MouseDelta = Vector2.zero;
@@ -76,13 +72,17 @@ namespace Platformer
             if (!Application.isPlaying) return;
 
             CaptureMouse();
+            bool leftHeld = Input.GetKey(KeyCode.A);
+            bool rightHeld = Input.GetKey(KeyCode.D);
+            UpdateHeldInputInversion(leftHeld, rightHeld);
 
             PlayerController2D target = FindPlayer();
             if (target == null) return;
 
             float horizontal = 0f;
-            if (Input.GetKey(KeyCode.A)) horizontal -= 1f;
-            if (Input.GetKey(KeyCode.D)) horizontal += 1f;
+            if (leftHeld) horizontal -= 1f;
+            if (rightHeld) horizontal += 1f;
+            if (_heldInputInverted) horizontal = -horizontal;
 
             target.SubmitDeviceInput(
                 horizontal,
@@ -90,16 +90,9 @@ namespace Platformer
                 Input.GetKeyUp(KeyCode.Space));
         }
 
-        void LateUpdate()
+        protected override void OnValidate()
         {
-            Apply();
-        }
-
-        void OnValidate()
-        {
-            if (_camera != null)
-                Apply();
-
+            base.OnValidate();
             if (Application.isPlaying)
             {
                 _inputInverted = mirrorHorizontally;
@@ -114,13 +107,6 @@ namespace Platformer
             SetPlayerInputInverted(inverted);
         }
 
-        /// <summary>独立设置相机镜像，不改变输入方向。</summary>
-        public void SetCameraMirrored(bool mirrored)
-        {
-            mirrorHorizontally = mirrored;
-            Apply();
-        }
-
         /// <summary>同时设置相机镜像和玩家水平输入方向。</summary>
         public void SetMirrorAndInput(bool mirrored)
         {
@@ -132,6 +118,57 @@ namespace Platformer
         public void ToggleMirrorAndInput()
         {
             SetMirrorAndInput(!mirrorHorizontally);
+        }
+
+        /// <summary>执行同向门传送的相机、输入与精灵镜像规则。</summary>
+        public void ApplySameFacingPortalTeleport(PlayerController2D controller)
+        {
+            if (controller == null) return;
+
+            if (followPlayerTeleport)
+            {
+                ToggleMirrorAndInput();
+                controller.MirrorSpriteHorizontally();
+                return;
+            }
+
+            // 相机不跟随传送时，投影、精灵和持久输入保持不变，只处理仍按住的设备方向。
+            ToggleHeldInputInversion();
+        }
+
+        void ToggleHeldInputInversion()
+        {
+            bool leftHeld = Input.GetKey(KeyCode.A);
+            bool rightHeld = Input.GetKey(KeyCode.D);
+            UpdateHeldInputInversion(leftHeld, rightHeld);
+
+            if (_heldInputInverted)
+            {
+                ClearHeldInputInversion();
+                return;
+            }
+
+            if (!leftHeld && !rightHeld) return;
+
+            _heldInputInverted = true;
+            _heldInputLeft = leftHeld;
+            _heldInputRight = rightHeld;
+        }
+
+        void UpdateHeldInputInversion(bool leftHeld, bool rightHeld)
+        {
+            if (!_heldInputInverted) return;
+
+            bool anyTriggerKeyHeld = (_heldInputLeft && leftHeld) ||
+                                     (_heldInputRight && rightHeld);
+            if (!anyTriggerKeyHeld) ClearHeldInputInversion();
+        }
+
+        void ClearHeldInputInversion()
+        {
+            _heldInputInverted = false;
+            _heldInputLeft = false;
+            _heldInputRight = false;
         }
 
         public void SetMoveInput(float horizontal)
@@ -178,47 +215,8 @@ namespace Platformer
         /// </summary>
         public Vector3 ScreenToWorldPoint(Vector3 screenPosition)
         {
-            if (_camera == null) _camera = GetComponent<Camera>();
-            return _camera != null ? _camera.ScreenToWorldPoint(screenPosition) : Vector3.zero;
-        }
-
-        /// <summary>传送门调用：登记相机的相对传送，具体应用仍由跟随组件负责。</summary>
-        public void TeleportRelative(Transform playerVisual, Matrix4x4 relativeTransform)
-        {
-            CameraFollow2D follow = GetComponent<CameraFollow2D>();
-            if (follow != null)
-            {
-                follow.TeleportRelative(playerVisual, relativeTransform);
-                return;
-            }
-
-            if (playerVisual == null || _camera == null) return;
-            Matrix4x4 world = playerVisual.localToWorldMatrix * relativeTransform;
-            CameraFollow2D.Decompose2D(world, out Vector3 position, out Quaternion rotation, out Vector3 scale);
-            _camera.transform.SetPositionAndRotation(position, rotation);
-            _camera.transform.localScale = scale;
-        }
-
-        /// <summary>传送门调用：登记或立即执行相机位置的水平镜像。</summary>
-        public void MirrorPendingCameraPosition(Transform playerVisual)
-        {
-            CameraFollow2D follow = GetComponent<CameraFollow2D>();
-            if (follow != null)
-            {
-                follow.MirrorPendingCameraPosition();
-                return;
-            }
-
-            if (playerVisual == null || _camera == null) return;
-            Vector3 localPosition = playerVisual.InverseTransformPoint(_camera.transform.position);
-            localPosition.x = -localPosition.x;
-            _camera.transform.position = playerVisual.TransformPoint(localPosition);
-        }
-
-        public void SnapCameraToTarget()
-        {
-            CameraFollow2D follow = GetComponent<CameraFollow2D>();
-            if (follow != null) follow.SnapToTarget();
+            Camera camera = ControlledCamera;
+            return camera != null ? camera.ScreenToWorldPoint(screenPosition) : Vector3.zero;
         }
 
         void CaptureMouse()
@@ -243,10 +241,10 @@ namespace Platformer
             if (player != null) return player;
             if (_player != null) return _player;
 
-            var follow = GetComponent<CameraFollow2D>();
-            if (follow != null && follow.target != null)
+            Transform behaviorTarget = ActiveBehavior != null ? ActiveBehavior.Target : null;
+            if (behaviorTarget != null)
             {
-                var followedPlayer = follow.target.GetComponent<PlayerController2D>();
+                var followedPlayer = behaviorTarget.GetComponent<PlayerController2D>();
                 if (followedPlayer != null) return followedPlayer;
             }
 
@@ -261,6 +259,7 @@ namespace Platformer
 
             if (target != previous)
             {
+                ClearHeldInputInversion();
                 if (previous != null && _inputOverrideActive && _hasInputBaseline)
                     previous.SetHorizontalInputInverted(_inputBaseline);
 
@@ -288,19 +287,6 @@ namespace Platformer
 
             _inputOverrideActive = false;
             _hasInputBaseline = false;
-        }
-
-        void Apply()
-        {
-            if (_camera == null) return;
-
-            // 先恢复相机的原始投影，避免每帧在已经镜像的矩阵上重复取反。
-            _camera.ResetProjectionMatrix();
-            if (!mirrorHorizontally) return;
-
-            Matrix4x4 projection = _camera.projectionMatrix;
-            projection.m00 = -projection.m00;
-            _camera.projectionMatrix = projection;
         }
     }
 }

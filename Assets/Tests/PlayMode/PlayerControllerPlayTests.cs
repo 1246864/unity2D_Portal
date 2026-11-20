@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -128,6 +129,214 @@ namespace Platformer.Tests
 
             Debug.Log($"[Test] Camera follow error: {error:F3} units");
             Assert.Less(error, 1.5f, $"Camera should stay close to the player, error was {error:F2}.");
+        }
+
+        [UnityTest]
+        public IEnumerator Camera_Teleport_Preserves_And_Rotates_Momentum()
+        {
+            var targetGo = new GameObject("RotationMomentumTarget");
+            var cameraGo = new GameObject("RotationMomentumCamera");
+            cameraGo.SetActive(false);
+            cameraGo.transform.position = new Vector3(0f, 1.2f, -10f);
+            var camera = cameraGo.AddComponent<Camera>();
+            camera.orthographic = true;
+            var control = cameraGo.AddComponent<PlayerControlManager>();
+            control.player = _controller;
+            var follow = cameraGo.AddComponent<CameraFollow2D>();
+            follow.target = targetGo.transform;
+            cameraGo.SetActive(true);
+
+            try
+            {
+                SetCameraMomentum(follow, new Vector3(1f, 0f, 0f), 12f, 0.75f, -3f);
+                Matrix4x4 relative = targetGo.transform.worldToLocalMatrix *
+                                     cameraGo.transform.localToWorldMatrix;
+
+                targetGo.transform.rotation = Quaternion.Euler(0f, 0f, 90f);
+                control.TeleportRelative(targetGo.transform, relative, false);
+                yield return null;
+
+                AssertCameraMomentum(follow, new Vector3(0f, 1f, 0f), 12f, 0.75f, -3f);
+            }
+            finally
+            {
+                if (control != null) control.enabled = false;
+                Object.Destroy(cameraGo);
+                Object.Destroy(targetGo);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Camera_Mirrored_Teleport_Transforms_Momentum()
+        {
+            var targetGo = new GameObject("MirrorMomentumTarget");
+            var cameraGo = new GameObject("MirrorMomentumCamera");
+            cameraGo.SetActive(false);
+            cameraGo.transform.position = new Vector3(0f, 1.2f, -10f);
+            var camera = cameraGo.AddComponent<Camera>();
+            camera.orthographic = true;
+            var control = cameraGo.AddComponent<PlayerControlManager>();
+            control.player = _controller;
+            var follow = cameraGo.AddComponent<CameraFollow2D>();
+            follow.target = targetGo.transform;
+            cameraGo.SetActive(true);
+
+            try
+            {
+                SetCameraMomentum(follow, new Vector3(1f, 0f, 0f), 12f, 0.75f, -3f);
+                Matrix4x4 relative = targetGo.transform.worldToLocalMatrix *
+                                     cameraGo.transform.localToWorldMatrix;
+
+                targetGo.transform.rotation = Quaternion.Euler(0f, 0f, 90f);
+                control.TeleportRelative(targetGo.transform, relative, true);
+                yield return null;
+
+                AssertCameraMomentum(follow, new Vector3(0f, -1f, 0f), 12f, -0.75f, 3f);
+            }
+            finally
+            {
+                if (control != null) control.enabled = false;
+                Object.Destroy(cameraGo);
+                Object.Destroy(targetGo);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Camera_SameFacing_Teleport_Mirrors_Relative_Pose()
+        {
+            var targetGo = new GameObject("MirrorRelativePoseTarget");
+            var cameraGo = new GameObject("MirrorRelativePoseCamera");
+            cameraGo.SetActive(false);
+
+            Vector3 oldRelativePosition = new Vector3(2.4f, 1.1f, -10f);
+            Quaternion oldRelativeRotation = Quaternion.Euler(0f, 0f, 30f);
+            cameraGo.transform.position = targetGo.transform.TransformPoint(oldRelativePosition);
+            cameraGo.transform.rotation = oldRelativeRotation;
+
+            var camera = cameraGo.AddComponent<Camera>();
+            camera.orthographic = true;
+            var control = cameraGo.AddComponent<PlayerControlManager>();
+            control.player = _controller;
+            cameraGo.SetActive(true);
+
+            try
+            {
+                Matrix4x4 relative = targetGo.transform.worldToLocalMatrix *
+                                     cameraGo.transform.localToWorldMatrix;
+
+                // 对应测试场景 B(45°) -> A(0°)：玩家出口角为 -45°。
+                targetGo.transform.position = new Vector3(-11.9f, 1f, 0f);
+                targetGo.transform.rotation = Quaternion.Euler(0f, 0f, -45f);
+                control.TeleportRelative(targetGo.transform, relative, true);
+                yield return null;
+
+                Vector3 actualLocalPosition = targetGo.transform.InverseTransformPoint(
+                    cameraGo.transform.position);
+                Vector3 cameraLocalPosition = Quaternion.Inverse(oldRelativeRotation) * oldRelativePosition;
+                cameraLocalPosition.x = -cameraLocalPosition.x;
+                Vector3 expectedLocalPosition = oldRelativeRotation * cameraLocalPosition;
+                Assert.Less(Vector3.Distance(expectedLocalPosition, actualLocalPosition), 0.0001f,
+                    "同向门应沿旧相机局部 X 镜像相对位置，再映射到出口玩家空间。");
+
+                Quaternion localRotation = Quaternion.Inverse(targetGo.transform.rotation) *
+                                           cameraGo.transform.rotation;
+                float actualLocalAngle = Mathf.DeltaAngle(0f, localRotation.eulerAngles.z);
+                Assert.AreEqual(30f, actualLocalAngle, 0.0001f,
+                    "投影已负责画面镜像，同向门不应再次取反相机的旧玩家相对角度。");
+            }
+            finally
+            {
+                if (control != null) control.enabled = false;
+                Object.Destroy(cameraGo);
+                Object.Destroy(targetGo);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator SameFacing_Teleport_Flips_Sprite_Without_Mirroring_Player_Space()
+        {
+            var cameraGo = new GameObject("SameFacingSpriteCamera");
+            cameraGo.SetActive(false);
+            cameraGo.AddComponent<Camera>();
+            var control = cameraGo.AddComponent<PlayerControlManager>();
+            control.player = _controller;
+            cameraGo.SetActive(true);
+
+            var sprite = _controller.VisualRoot.GetComponent<SpriteRenderer>();
+            Assert.IsNotNull(sprite);
+            _controller.SetMoveInput(0f);
+            sprite.flipX = false;
+            Vector3 originalScale = _controller.VisualRoot.localScale;
+            Quaternion originalRotation = _controller.VisualRoot.localRotation;
+            Vector3 originalCameraPosition = cameraGo.transform.position;
+            Quaternion originalCameraRotation = cameraGo.transform.rotation;
+
+            try
+            {
+                control.ApplySameFacingPortalTeleport(_controller);
+                Assert.IsTrue(sprite.flipX, "第一次同向传送应水平翻转一次精灵。");
+                Assert.Less(Vector3.Distance(originalCameraPosition, cameraGo.transform.position), 0.0001f,
+                    "没有待传送请求时，同向门状态切换不应直接移动相机。");
+                Assert.Less(Quaternion.Angle(originalCameraRotation, cameraGo.transform.rotation), 0.0001f,
+                    "没有待传送请求时，同向门状态切换不应直接旋转相机。");
+                Assert.AreEqual(originalScale, _controller.VisualRoot.localScale,
+                    "精灵镜像不能通过缩放玩家显示空间实现。");
+                Assert.AreEqual(originalRotation, _controller.VisualRoot.localRotation,
+                    "精灵镜像不能改变玩家显示空间的旋转。");
+
+                control.ApplySameFacingPortalTeleport(_controller);
+                Assert.IsFalse(sprite.flipX, "第二次同向传送应再次翻转精灵并恢复朝向。");
+                Assert.Less(Vector3.Distance(originalCameraPosition, cameraGo.transform.position), 0.0001f);
+                Assert.Less(Quaternion.Angle(originalCameraRotation, cameraGo.transform.rotation), 0.0001f);
+                Assert.AreEqual(originalScale, _controller.VisualRoot.localScale);
+                Assert.AreEqual(originalRotation, _controller.VisualRoot.localRotation);
+            }
+            finally
+            {
+                if (control != null) control.enabled = false;
+                Object.Destroy(cameraGo);
+            }
+
+            yield return null;
+        }
+
+        static void SetCameraMomentum(
+            CameraFollow2D follow,
+            Vector3 followVelocity,
+            float cameraAngleVelocity,
+            float lookAhead,
+            float lookAheadVelocity)
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            System.Type type = typeof(CameraFollow2D);
+            type.GetField("_followVelocity", flags).SetValue(follow, followVelocity);
+            type.GetField("_cameraAngleVelocity", flags).SetValue(follow, cameraAngleVelocity);
+            type.GetField("_lookAhead", flags).SetValue(follow, lookAhead);
+            type.GetField("_lookAheadVelocity", flags).SetValue(follow, lookAheadVelocity);
+        }
+
+        static void AssertCameraMomentum(
+            CameraFollow2D follow,
+            Vector3 expectedFollowVelocity,
+            float expectedCameraAngleVelocity,
+            float expectedLookAhead,
+            float expectedLookAheadVelocity)
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            System.Type type = typeof(CameraFollow2D);
+            var followVelocity = (Vector3)type.GetField("_followVelocity", flags).GetValue(follow);
+            float cameraAngleVelocity = (float)type.GetField("_cameraAngleVelocity", flags).GetValue(follow);
+            float lookAhead = (float)type.GetField("_lookAhead", flags).GetValue(follow);
+            float lookAheadVelocity = (float)type.GetField("_lookAheadVelocity", flags).GetValue(follow);
+
+            Assert.Less(Vector3.Distance(expectedFollowVelocity, followVelocity), 0.0001f,
+                $"位置动量应为 {expectedFollowVelocity}，实际为 {followVelocity}。");
+            Assert.AreEqual(expectedCameraAngleVelocity, cameraAngleVelocity, 0.0001f,
+                "传送后的角度动量不符合旋转/镜像规则。");
+            Assert.AreEqual(expectedLookAhead, lookAhead, 0.0001f,
+                "传送后的前瞻偏移不符合旋转/镜像规则。");
+            Assert.AreEqual(expectedLookAheadVelocity, lookAheadVelocity, 0.0001f,
+                "传送后的前晃动量不符合旋转/镜像规则。");
         }
 
         [UnityTest]

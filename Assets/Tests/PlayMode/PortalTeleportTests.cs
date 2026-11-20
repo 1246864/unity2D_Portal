@@ -12,6 +12,7 @@ namespace Platformer.Tests
     public class PortalTeleportTests
     {
         const string LevelScene = "Level01";
+        Scene _loadedCameraTestScene;
 
         [UnitySetUp]
         public IEnumerator SetUp()
@@ -26,6 +27,10 @@ namespace Platformer.Tests
             Scene scene = SceneManager.GetSceneByName(LevelScene);
             if (scene.IsValid() && scene.isLoaded)
                 yield return SceneManager.UnloadSceneAsync(scene);
+
+            if (_loadedCameraTestScene.IsValid() && _loadedCameraTestScene.isLoaded)
+                yield return SceneManager.UnloadSceneAsync(_loadedCameraTestScene);
+            _loadedCameraTestScene = default;
         }
 
         static GameObject FindPlayer()
@@ -290,6 +295,130 @@ namespace Platformer.Tests
             float safe = pair.gateThickness * 0.5f + controller.centerPointRadius + pair.exitMargin;
             Assert.GreaterOrEqual(distance, safe - 0.02f,
                 "传送后玩家中心不应该停在对方门的碰撞箱里。");
+        }
+
+        [UnityTest]
+        public IEnumerator SameFacing_BToA_Camera_Preserves_Relative_Pose_With_Projection_Mirror()
+        {
+            Scene level01 = SceneManager.GetSceneByName(LevelScene);
+            if (level01.IsValid() && level01.isLoaded)
+                yield return SceneManager.UnloadSceneAsync(level01);
+#if UNITY_EDITOR
+            yield return UnityEditor.SceneManagement.EditorSceneManager.LoadSceneAsyncInPlayMode(
+                "Assets/Scenes/TeatScene.unity",
+                new LoadSceneParameters(LoadSceneMode.Additive));
+#else
+            Assert.Ignore("TeatScene 诊断需要在 Unity Editor 中按路径加载场景。");
+#endif
+            _loadedCameraTestScene = SceneManager.GetSceneByName("TeatScene");
+            Scene level = _loadedCameraTestScene;
+            Assert.IsTrue(level.IsValid() && level.isLoaded, "应加载用户实际的 TeatScene。");
+            PortalPair pair = null;
+            foreach (GameObject root in level.GetRootGameObjects())
+            {
+                pair = root.GetComponentInChildren<PortalPair>(true);
+                if (pair != null) break;
+            }
+
+            Assert.IsNotNull(pair, "TeatScene 中应有本测试使用的 PortalPair。");
+            CaptureDisplayGroup a = null;
+            CaptureDisplayGroup b = null;
+            foreach (var group in pair.GetComponentsInChildren<CaptureDisplayGroup>(true))
+            {
+                if (group.side == CaptureGroupSide.A) a = group;
+                else b = group;
+            }
+
+            Assert.IsNotNull(a);
+            Assert.IsNotNull(b);
+            Assert.IsNotNull(pair.player);
+            GameObject player = pair.player.gameObject;
+            var controller = player.GetComponent<PlayerController2D>();
+            Assert.IsNotNull(controller);
+            Assert.IsNotNull(b.capture);
+            Camera camera = b.capture.sourceCamera;
+            Assert.IsNotNull(camera, "B 的捕获源相机必须是本次传送实际使用的主相机。");
+            Assert.AreEqual(level, camera.gameObject.scene);
+            var control = camera.GetComponent<PlayerControlManager>();
+            var follow = camera.GetComponent<CameraFollow2D>();
+            Assert.IsNotNull(control);
+            Assert.IsNotNull(follow);
+
+            pair.carveTerrain = false;
+            a.GetComponent<BoxCollider2D>().enabled = false;
+            b.GetComponent<BoxCollider2D>().enabled = false;
+            Assert.AreEqual(0f, Mathf.DeltaAngle(0f, a.transform.eulerAngles.z), 0.001f);
+            Assert.AreEqual(45f, Mathf.DeltaAngle(0f, b.transform.eulerAngles.z), 0.001f);
+            Assert.AreEqual(PortalFacing.Right, a.Facing);
+            Assert.AreEqual(PortalFacing.Right, b.Facing);
+
+            var rb = player.GetComponent<Rigidbody2D>();
+            rb.bodyType = RigidbodyType2D.Kinematic;
+            rb.gravityScale = 0f;
+            rb.velocity = Vector2.zero;
+            controller.portalRealignSpeed = 0.01f;
+            controller.SetMoveInput(0f);
+            controller.Teleport((Vector2)(a.transform.position +
+                                          (Vector3)a.OpeningDirection * 0.45f));
+            control.SetMirrorAndInput(false);
+            follow.SnapToTarget();
+            yield return null;
+
+            var teleportMethod = typeof(PortalPair).GetMethod(
+                "Teleport", System.Reflection.BindingFlags.Instance |
+                            System.Reflection.BindingFlags.NonPublic);
+
+            // 先走一次实际正常的 A→B，再让回正真实推进，形成非零相机相对角。
+            teleportMethod.Invoke(pair, new object[] { a, b });
+            Assert.AreEqual(45f, controller.CurrentRotationAngle, 0.001f);
+            yield return null;
+            Assert.AreEqual(45f, Mathf.DeltaAngle(0f, camera.transform.eulerAngles.z), 0.1f,
+                "A→B 的初始相对角为 0，相机视野不应受本次修正影响。");
+            Assert.IsTrue(control.IsMirrored);
+
+            controller.portalRealignSpeed = 80f;
+            yield return new WaitForSeconds(0.2f);
+            controller.portalRealignSpeed = 0.01f;
+
+            Transform visual = controller.VisualRoot;
+            float oldPlayerAngle = controller.CurrentRotationAngle;
+            float oldCameraAngle = Mathf.DeltaAngle(0f, camera.transform.eulerAngles.z);
+            Matrix4x4 oldRelative = visual.worldToLocalMatrix *
+                                    camera.transform.localToWorldMatrix;
+            CameraController2D.Decompose2D(
+                oldRelative, out Vector3 oldPosition, out Quaternion oldRotation, out _);
+            float oldAngle = Mathf.DeltaAngle(0f, oldRotation.eulerAngles.z);
+            Assert.Greater(Mathf.Abs(oldAngle), 0.1f,
+                "连续回正应形成非零相对角，以覆盖 B→A 的方向相关偏差。");
+
+            teleportMethod.Invoke(pair, new object[] { b, a });
+            float expectedExitAngle = Mathf.DeltaAngle(0f, oldPlayerAngle - 45f);
+            Assert.AreEqual(expectedExitAngle, controller.CurrentRotationAngle, 0.001f,
+                "B→A 只能在当前玩家角度上叠加一次 B(45°)→A(0°) 的角度差。");
+            Assert.IsFalse(control.IsMirrored, "连续两次同向传送后应恢复原始投影。");
+            yield return null;
+
+            Vector3 oldCameraLocalPosition = Quaternion.Inverse(oldRotation) * oldPosition;
+            oldCameraLocalPosition.x = -oldCameraLocalPosition.x;
+            Vector3 expectedPosition = oldRotation * oldCameraLocalPosition;
+            Vector3 actualPosition = visual.InverseTransformPoint(camera.transform.position);
+            Assert.Greater(Vector3.Distance(
+                    expectedPosition, new Vector3(-oldPosition.x, oldPosition.y, oldPosition.z)),
+                0.1f, "本用例必须能区分相机局部镜像与旧的玩家局部镜像。");
+            Assert.Less(Vector3.Distance(expectedPosition, actualPosition),
+                0.001f, "完整 B→A 链路应沿旧相机局部 X 镜像相机相对位置。");
+
+            float playerDelta = Mathf.DeltaAngle(oldPlayerAngle, expectedExitAngle);
+            float expectedCameraAngle = Mathf.DeltaAngle(0f, oldCameraAngle - playerDelta);
+            float actualCameraAngle = Mathf.DeltaAngle(0f, camera.transform.eulerAngles.z);
+            Assert.AreEqual(expectedCameraAngle, actualCameraAngle, 0.001f,
+                "B→A 的旧投影已镜像，相机应减去玩家旋转增量，而不是保留旧相对角。");
+
+            yield return null;
+            float nextAngle = Mathf.DeltaAngle(
+                0f, (Quaternion.Inverse(visual.rotation) * camera.transform.rotation).eulerAngles.z);
+            Assert.Greater(Mathf.Abs(Mathf.DeltaAngle(controller.CurrentRotationAngle, nextAngle)), 5f,
+                "后续跟随帧可以平滑趋近玩家，但不能把相机相对角立即硬对齐掉。");
         }
 
         [UnityTest]

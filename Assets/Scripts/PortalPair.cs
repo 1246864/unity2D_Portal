@@ -451,18 +451,19 @@ namespace Platformer
                              (Vector3)(exitDirection * front) +
                              (Vector3)(partnerTangent * tangentOffset);
 
-            // 传送前记录相机在玩家显示空间中的全部相对变换（位置 + 旋转）。
+            // 先解析实际执行传送的总控，再从它所在的相机记录相对位姿。
             Camera followCamera = source.capture != null ? source.capture.sourceCamera : null;
             if (followCamera == null) followCamera = Camera.main;
             PlayerControlManager control = ResolvePlayerControl(followCamera);
+            Camera controlledCamera = control != null ? control.GetComponent<Camera>() : null;
 
             Transform playerVisual = controller.VisualRoot != null
                 ? controller.VisualRoot
                 : player;
 
-            // 完整相对空间：位置、旋转、缩放都包含在矩阵里。
-            Matrix4x4 cameraRelative = followCamera != null
-                ? playerVisual.worldToLocalMatrix * followCamera.transform.localToWorldMatrix
+            // 记录来源和后续移动目标必须是同一台相机；缺失时不提交伪单位矩阵。
+            Matrix4x4 cameraRelative = controlledCamera != null
+                ? playerVisual.worldToLocalMatrix * controlledCamera.transform.localToWorldMatrix
                 : Matrix4x4.identity;
 
 
@@ -482,9 +483,9 @@ namespace Platformer
             if (preserveVelocity && rb != null)
                 rb.velocity = velocity;
 
-            // 玩家已经完成瞬移和旋转；相机具体映射由总控交给跟随组件执行。
-            if (control != null)
-                control.TeleportRelative(playerVisual, cameraRelative);
+            // 玩家已经完成瞬移和旋转；一次性传全相对位姿与同向镜像规则。
+            if (controlledCamera != null)
+                control.TeleportRelative(playerVisual, cameraRelative, sameFacing);
 
 
             // 一对门共享一个冷却，避免刚落地就被另一扇门立刻传回去。
@@ -493,12 +494,9 @@ namespace Platformer
             // 本帧 LateUpdate 里强制两扇门各捕获一次，并重新生成半屏画面。
             _forceCapture = true;
 
-            // 同向传送仍由 PortalPair 决定联动规则，总控只执行状态和相机指令。
+            // 同向传送仍由 PortalPair 判定，总控协调相机、输入和一次性精灵镜像。
             if (sameFacing && control != null)
-            {
-                control.ToggleMirrorAndInput();
-                control.MirrorPendingCameraPosition(playerVisual);
-            }
+                control.ApplySameFacingPortalTeleport(controller);
 
             // 出口门必须当帧恢复不透明，目标交换不等待下一次 LateUpdate。
             UpdateViewTransparency(true);

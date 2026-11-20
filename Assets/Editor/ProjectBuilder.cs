@@ -529,6 +529,10 @@ namespace Platformer.EditorTools
             follow.lookAheadDistance = 1.5f;
             follow.lookAheadSpeedReference = 9f;
 
+            var control = camGo.AddComponent<PlayerControlManager>();
+            control.player = player.GetComponent<PlayerController2D>();
+            control.followPlayerTeleport = true;
+
             return cam;
         }
 
@@ -541,6 +545,7 @@ namespace Platformer.EditorTools
             // 门对控制器：保存玩家引用，供画面遮罩使用。
             var pairControl = pair.AddComponent<PortalPair>();
             pairControl.player = player.transform;
+            pairControl.playerControl = mainCamera.GetComponent<PlayerControlManager>();
 
             CreateCaptureGroup("Portal A", pair.transform, new Vector3(0.83f, -1.46f, 0f), CaptureGroupSide.A, mainCamera);
             CreateCaptureGroup("Portal B", pair.transform, new Vector3(-14.89f, -1.48f, 0f), CaptureGroupSide.B, mainCamera);
