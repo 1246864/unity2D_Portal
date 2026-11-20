@@ -29,18 +29,15 @@ namespace Platformer
             public Transform PlayerVisual { get; }
             public Matrix4x4 RelativeTransform { get; }
             public bool MirrorRelative { get; }
-            public bool WasMirrored { get; }
 
             public CameraTeleportRequest(
                 Transform playerVisual,
                 Matrix4x4 relativeTransform,
-                bool mirrorRelative,
-                bool wasMirrored)
+                bool mirrorRelative)
             {
                 PlayerVisual = playerVisual;
                 RelativeTransform = relativeTransform;
                 MirrorRelative = mirrorRelative;
-                WasMirrored = wasMirrored;
             }
         }
 
@@ -146,9 +143,8 @@ namespace Platformer
                 return;
             }
 
-            // 必须在 PortalPair 切换投影前记录旧状态，供 LateUpdate 判断旋转方向。
             _pendingTeleport = new CameraTeleportRequest(
-                playerVisual, relativeTransform, mirrorRelative, mirrorHorizontally);
+                playerVisual, relativeTransform, mirrorRelative);
         }
 
         internal bool TryApplyPendingTeleport(out CameraTeleportContext context)
@@ -186,16 +182,10 @@ namespace Platformer
                 relativePosition = relativeRotation * cameraLocalPosition;
             }
 
+            // 相对角度随玩家旋转增量映射，避免与投影镜像重复。
             Matrix4x4 relative = Matrix4x4.TRS(relativePosition, relativeRotation, relativeScale);
             Matrix4x4 world = playerVisual.localToWorldMatrix * relative;
-            Decompose2D(world, out Vector3 position, out _, out Vector3 scale);
-
-            // 从已镜像的视野返回正常投影时，玩家旋转增量对相机的作用方向相反。
-            // A→B 旧投影未镜像，仍加 +45°；B→A 旧投影已镜像，减去 -45°。
-            Quaternion cameraDeltaRotation = mirrorRelative && request.WasMirrored
-                ? Quaternion.Inverse(playerDeltaRotation)
-                : playerDeltaRotation;
-            Quaternion rotation = cameraDeltaRotation * cameraTransform.rotation;
+            Decompose2D(world, out Vector3 position, out Quaternion rotation, out Vector3 scale);
 
             cameraTransform.SetPositionAndRotation(position, rotation);
             cameraTransform.localScale = scale;

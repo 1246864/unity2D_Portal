@@ -382,7 +382,6 @@ namespace Platformer.Tests
 
             Transform visual = controller.VisualRoot;
             float oldPlayerAngle = controller.CurrentRotationAngle;
-            float oldCameraAngle = Mathf.DeltaAngle(0f, camera.transform.eulerAngles.z);
             Matrix4x4 oldRelative = visual.worldToLocalMatrix *
                                     camera.transform.localToWorldMatrix;
             CameraController2D.Decompose2D(
@@ -402,23 +401,24 @@ namespace Platformer.Tests
             oldCameraLocalPosition.x = -oldCameraLocalPosition.x;
             Vector3 expectedPosition = oldRotation * oldCameraLocalPosition;
             Vector3 actualPosition = visual.InverseTransformPoint(camera.transform.position);
+            Quaternion actualRotation = Quaternion.Inverse(visual.rotation) * camera.transform.rotation;
+            float actualAngle = Mathf.DeltaAngle(0f, actualRotation.eulerAngles.z);
             Assert.Greater(Vector3.Distance(
                     expectedPosition, new Vector3(-oldPosition.x, oldPosition.y, oldPosition.z)),
                 0.1f, "本用例必须能区分相机局部镜像与旧的玩家局部镜像。");
             Assert.Less(Vector3.Distance(expectedPosition, actualPosition),
                 0.001f, "完整 B→A 链路应沿旧相机局部 X 镜像相机相对位置。");
-
-            float playerDelta = Mathf.DeltaAngle(oldPlayerAngle, expectedExitAngle);
-            float expectedCameraAngle = Mathf.DeltaAngle(0f, oldCameraAngle - playerDelta);
-            float actualCameraAngle = Mathf.DeltaAngle(0f, camera.transform.eulerAngles.z);
-            Assert.AreEqual(expectedCameraAngle, actualCameraAngle, 0.001f,
-                "B→A 的旧投影已镜像，相机应减去玩家旋转增量，而不是保留旧相对角。");
+            Assert.AreEqual(oldAngle, actualAngle, 0.001f,
+                "投影切换已负责画面镜像，相机 Transform 不应再把旧相对角取反。");
 
             yield return null;
+            Vector3 nextPosition = visual.InverseTransformPoint(camera.transform.position);
             float nextAngle = Mathf.DeltaAngle(
                 0f, (Quaternion.Inverse(visual.rotation) * camera.transform.rotation).eulerAngles.z);
             Assert.Greater(Mathf.Abs(Mathf.DeltaAngle(controller.CurrentRotationAngle, nextAngle)), 5f,
                 "后续跟随帧可以平滑趋近玩家，但不能把相机相对角立即硬对齐掉。");
+            Assert.Less(Vector3.Distance(expectedPosition, nextPosition),
+                0.2f, "后续跟随帧不应再次瞬移相机。");
         }
 
         [UnityTest]

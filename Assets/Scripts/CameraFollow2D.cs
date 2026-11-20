@@ -185,7 +185,7 @@ namespace Platformer
                 localVelocity.x = -localVelocity.x;
                 _followVelocity = ControlledCamera.transform.TransformVector(localVelocity);
 
-                // 角速度保持，不在传送时额外取反。
+                // 世界 Z 角速度在 Q1 = ΔR * Q0 下保持，不因投影镜像重复补偿。
                 // 前瞻是相机局部水平状态，偏移及其平滑速度随局部 X 镜像。
                 _lookAhead = -_lookAhead;
                 _lookAheadVelocity = -_lookAheadVelocity;

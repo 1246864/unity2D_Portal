@@ -10,7 +10,7 @@ namespace Platformer
         /// <summary>玩家传送前后的世界旋转增量。</summary>
         public Quaternion PlayerDeltaRotation { get; }
 
-        /// <summary>同向门传送：镜像相机局部水平状态，并按旧投影状态映射相机角度。</summary>
+        /// <summary>沿相机局部 X 镜像相对位置，不镜像 VisualRoot 缩放或相对角。</summary>
         public bool MirrorRelative { get; }
 
         public CameraTeleportContext(
