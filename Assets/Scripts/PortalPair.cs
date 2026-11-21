@@ -590,8 +590,12 @@ namespace Platformer
             // 法线分量沿出口正面反向，切线分量保留。
             Vector2 velocity = TransformPortalVelocity(
                 controller.VelocityBeforePhysics, source, partner);
+            Vector2 variableJumpDirection = TransformPortalVelocity(
+                controller.VariableJumpDirection, source, partner);
 
-            controller.TeleportWithPortalRotation(target, exitAngle);
+            // 剩余长按跳跃与速度走同一套门坐标变换，斜向门不会把它强行折回世界 Y 轴。
+            controller.TeleportWithPortalRotation(
+                target, exitAngle, variableJumpDirection, preserveVelocity);
 
             if (preserveVelocity && rb != null)
                 rb.velocity = velocity;

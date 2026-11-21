@@ -292,7 +292,7 @@ namespace Platformer.Tests
         public static PlayerController2D CreatePlayer(
             Transform parent,
             Vector3 position,
-            float gravityScale = 1f)
+            float gravityScale = 4f)
         {
             var player = CreateChild(parent, "Test Player");
             player.SetActive(false);
@@ -306,6 +306,12 @@ namespace Platformer.Tests
 
             var capsule = player.AddComponent<CapsuleCollider2D>();
             capsule.size = new Vector2(0.72f, 1.5f);
+            capsule.sharedMaterial = new PhysicsMaterial2D("Test Player Zero Friction")
+            {
+                friction = 0f,
+                bounciness = 0f,
+                hideFlags = HideFlags.DontSave
+            };
 
             var renderer = player.AddComponent<SpriteRenderer>();
             renderer.sortingOrder = 100;

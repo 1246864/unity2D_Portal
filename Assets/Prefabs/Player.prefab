@@ -102,7 +102,7 @@ Rigidbody2D:
   m_Mass: 1
   m_LinearDrag: 0
   m_AngularDrag: 0.05
-  m_GravityScale: 1
+  m_GravityScale: 4
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
@@ -162,17 +162,27 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   moveSpeed: 9
-  groundAcceleration: 115
-  groundDeceleration: 150
-  airAcceleration: 70
-  airDeceleration: 45
-  jumpHeight: 6
+  groundAcceleration: 100
+  groundDeceleration: 100
+  airAcceleration: 65
+  airDeceleration: 65
+  overSpeedDeceleration: 40
+  jumpHeight: 6.2
   playerHeight: 1.5
   coyoteTime: 0.1
   jumpBufferTime: 0.12
-  fallGravityMultiplier: 1.6
-  maxFallSpeed: 30
-  jumpCutMultiplier: 0.45
+  variableJumpTime: 0.2
+  riseGravityMultiplier: 0.85
+  jumpHorizontalBoost: 4
+  apexVelocityThreshold: 8.5
+  apexGravityMultiplier: 0.5
+  fallGravityMultiplier: 0.75
+  maxFallSpeed: 24
+  wallCheckDistance: 0.12
+  wallJumpHeight: 4.8
+  wallSlideStartSpeed: 4
+  wallSlideTime: 1.2
+  wallJumpForceTime: 0.24
   groundMask:
     serializedVersion: 2
     m_Bits: 64

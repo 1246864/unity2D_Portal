@@ -62,7 +62,7 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
-        public IEnumerator Jump_Reaches_Six_Cell_Height()
+        public IEnumerator Jump_Reaches_Target_Cell_Height()
         {
             float groundY = _player.transform.position.y;
 
@@ -78,8 +78,60 @@ namespace Platformer.Tests
 
             float measured = peakY - groundY;
             Debug.Log($"[Test] Jump apex measured: {measured:F3} cells");
-            Assert.AreEqual(6f, measured, 0.25f,
-                $"Expected a 6-cell jump, measured {measured:F2} cells.");
+            Assert.AreEqual(6.2f, measured, 0.2f,
+                $"Expected a 6.2-cell jump, measured {measured:F2} cells.");
+        }
+
+        [UnityTest]
+        public IEnumerator Portal_Preserves_Held_Jump_Progress()
+        {
+            float groundY = _player.transform.position.y;
+            _controller.SetMoveInput(0f);
+            _controller.JumpPressed();
+            for (int i = 0; i < 3; i++)
+                yield return new WaitForFixedUpdate();
+
+            var body = _player.GetComponent<Rigidbody2D>();
+            Vector2 exitVelocity = _controller.Velocity;
+            _controller.TeleportWithPortalRotation(_player.transform.position, 0f);
+            body.velocity = exitVelocity;
+
+            float peakY = groundY;
+            for (int i = 0; i < 150; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                peakY = Mathf.Max(peakY, _player.transform.position.y);
+            }
+            _controller.JumpReleased();
+
+            float measured = peakY - groundY;
+            Assert.AreEqual(6.2f, measured, 0.2f,
+                $"传送不应清除剩余长按跳跃，实测高度 {measured:F2} 格。");
+        }
+
+        [UnityTest]
+        public IEnumerator Diagonal_Portal_Maintains_Jump_Along_Exit_Tangent()
+        {
+            _controller.SetMoveInput(0f);
+            _controller.JumpPressed();
+            for (int i = 0; i < 3; i++)
+                yield return new WaitForFixedUpdate();
+
+            Vector2 exitTangent = new Vector2(-1f, 1f).normalized;
+            float directionalSpeed = _controller.Velocity.y;
+            var body = _player.GetComponent<Rigidbody2D>();
+            _controller.TeleportWithPortalRotation(
+                _player.transform.position, 45f, exitTangent, true);
+            body.velocity = exitTangent * directionalSpeed;
+
+            yield return new WaitForFixedUpdate();
+
+            Assert.Less(Vector2.Distance(exitTangent, _controller.VariableJumpDirection), 0.001f,
+                "斜向门应保留变换后的跳跃推进方向。");
+            Assert.AreEqual(directionalSpeed,
+                Vector2.Dot(_controller.Velocity, exitTangent), 0.15f,
+                "剩余长按应沿出口切线维持，而不是强制恢复世界 Y 轴速度。");
+            _controller.JumpReleased();
         }
 
         [UnityTest]
@@ -94,6 +146,304 @@ namespace Platformer.Tests
             Assert.Greater(_player.transform.position.x - startX, 4f,
                 "Player should have moved at least 4 units to the right in 1 second.");
             _controller.SetMoveInput(0f);
+        }
+
+        [UnityTest]
+        public IEnumerator Running_Jump_Preserves_Horizontal_Boost()
+        {
+            _controller.SetMoveInput(1f);
+            for (int i = 0; i < 6; i++)
+                yield return new WaitForFixedUpdate();
+
+            Assert.AreEqual(9f, _controller.Velocity.x, 0.1f);
+            _controller.JumpPressed();
+            yield return new WaitForFixedUpdate();
+            Assert.Greater(_controller.Velocity.x, 12f, "跑跳应获得水平助推。");
+
+            for (int i = 0; i < 4; i++)
+                yield return new WaitForFixedUpdate();
+
+            Assert.Greater(_controller.Velocity.x, 9.5f,
+                "空中同向超速应缓慢衰减，而不是立即压回跑速。");
+            _controller.JumpReleased();
+        }
+
+        [UnityTest]
+        public IEnumerator Same_Frame_Press_And_Release_Produces_Short_Jump()
+        {
+            float groundY = _player.transform.position.y;
+            _controller.SetMoveInput(0f);
+            _controller.JumpPressed();
+            _controller.JumpReleased();
+
+            float peakY = groundY;
+            for (int i = 0; i < 60; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                peakY = Mathf.Max(peakY, _player.transform.position.y);
+            }
+
+            float measured = peakY - groundY;
+            Debug.Log($"[Test] Same-frame short jump apex: {measured:F3} cells");
+            Assert.Greater(measured, 0.5f, "同帧点放不能丢失跳跃。");
+            Assert.Less(measured, 2.2f, "同帧点放应保持为短跳。");
+        }
+
+        [UnityTest]
+        public IEnumerator Jump_Buffer_Triggers_After_Landing()
+        {
+            _controller.SetMoveInput(0f);
+            _controller.Teleport(new Vector2(0f, 4f));
+
+            bool pressed = false;
+            for (int i = 0; i < 100 && !pressed; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                if (i >= 6 && _player.transform.position.y <= 2f)
+                {
+                    _controller.JumpPressed();
+                    _controller.JumpReleased();
+                    pressed = true;
+                }
+            }
+
+            Assert.IsTrue(pressed, "未能在落地前提交测试跳跃输入。");
+            bool jumped = false;
+            float jumpY = float.PositiveInfinity;
+            for (int i = 0; i < 40; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                if (!_controller.IsGrounded && _controller.Velocity.y > 1f)
+                {
+                    jumped = true;
+                    jumpY = _player.transform.position.y;
+                    break;
+                }
+            }
+
+            Assert.IsTrue(jumped, "落地前的跳跃预输入应在接地时自动起跳。");
+            Assert.Less(jumpY, 1.5f, "预输入应在地面附近触发，而不是在空中提前起跳。");
+        }
+
+        [UnityTest]
+        public IEnumerator Coyote_Time_Allows_Jump_After_Leaving_Ground()
+        {
+            _controller.SetMoveInput(0f);
+            _controller.Teleport(new Vector2(60f, 0.9f));
+            for (int i = 0; i < 2; i++)
+                yield return new WaitForFixedUpdate();
+
+            Assert.IsFalse(_controller.IsGrounded);
+            _controller.JumpPressed();
+            _controller.JumpReleased();
+            yield return new WaitForFixedUpdate();
+
+            Assert.Greater(_controller.Velocity.y, 1f,
+                "离开平台后的土狼时间内仍应允许起跳。");
+        }
+
+        [UnityTest]
+        public IEnumerator High_Friction_Ground_Does_Not_Change_Movement()
+        {
+            var highFriction = new PhysicsMaterial2D("Test High Friction Ground")
+            {
+                friction = 1f,
+                bounciness = 0f,
+                hideFlags = HideFlags.DontSave
+            };
+            _ground.GetComponent<Collider2D>().sharedMaterial = highFriction;
+
+            var playerMaterial = _player.GetComponent<CapsuleCollider2D>().sharedMaterial;
+            Assert.IsNotNull(playerMaterial);
+            Assert.AreEqual(0f, playerMaterial.friction, 0.0001f);
+
+            _controller.SetMoveInput(1f);
+            for (int i = 0; i < 30; i++)
+                yield return new WaitForFixedUpdate();
+            Assert.AreEqual(9f, _controller.Velocity.x, 0.1f,
+                "高摩擦地形不应降低显式控制的跑速。");
+
+            _controller.SetMoveInput(0f);
+            for (int i = 0; i < 5; i++)
+                yield return new WaitForFixedUpdate();
+            Assert.AreEqual(0f, _controller.Velocity.x, 0.1f,
+                "高摩擦地形不应改变停止时间。");
+        }
+
+        [UnityTest]
+        public IEnumerator Falling_Uses_Softer_Gravity_And_Terminal_Speed()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _ground.SetActive(false);
+            _controller.fallLimitY = -100f;
+            _controller.Teleport(new Vector2(0f, 20f));
+            _controller.SetMoveInput(0f);
+
+            try
+            {
+                for (int i = 0; i < 4; i++)
+                    yield return new WaitForFixedUpdate();
+
+                float expectedSpeed = 40f * 4f * 0.75f * Time.fixedDeltaTime * 4f;
+                Assert.AreEqual(expectedSpeed, -_controller.Velocity.y, 0.2f,
+                    "下落前几步应使用较低的下落重力，而不是完整基础重力。");
+
+                for (int i = 0; i < 20; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.AreEqual(24f, -_controller.Velocity.y, 0.05f,
+                    "下落应稳定在调整后的终端速度。");
+            }
+            finally
+            {
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Wall_Slide_Slows_Then_Gradually_Restores_Fall_Speed()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _ground.SetActive(false);
+            _controller.fallLimitY = -100f;
+            var wall = new GameObject("TestWallSlide");
+            wall.layer = _ground.layer;
+            wall.transform.position = new Vector3(1f, 0f, 0f);
+            wall.AddComponent<BoxCollider2D>().size = new Vector2(1f, 100f);
+
+            try
+            {
+                _controller.Teleport(new Vector2(0.14f, 4f));
+                _controller.SetMoveInput(1f);
+                for (int i = 0; i < 12 && !_controller.IsWallSliding; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.IsTrue(_controller.IsWallSliding, "推向墙面时应进入贴墙下落。");
+                for (int i = 0; i < 10; i++)
+                    yield return new WaitForFixedUpdate();
+
+                float earlyFallSpeed = -_controller.Velocity.y;
+                Debug.Log($"[Test] Early wall-slide fall speed: {earlyFallSpeed:F3}");
+                Assert.Greater(earlyFallSpeed, 3f);
+                Assert.Less(earlyFallSpeed, 12f, "贴墙下落开始时应明显减速。");
+
+                for (int i = 0; i < 55; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.Greater(-_controller.Velocity.y, 20f,
+                    "持续滑墙后下落上限应逐渐恢复，不能无限缓慢悬挂。");
+
+                _controller.SetMoveInput(0f);
+                yield return new WaitForFixedUpdate();
+                Assert.IsFalse(_controller.IsWallSliding, "松开推墙方向应立即退出贴墙下落。");
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+                Object.Destroy(wall);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Wall_Jump_Pushes_Away_And_Locks_Input_Briefly()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _ground.SetActive(false);
+            _controller.fallLimitY = -100f;
+            var wall = new GameObject("TestWallJump");
+            wall.layer = _ground.layer;
+            wall.transform.position = new Vector3(1f, 0f, 0f);
+            wall.AddComponent<BoxCollider2D>().size = new Vector2(1f, 100f);
+
+            try
+            {
+                _controller.Teleport(new Vector2(0.14f, 4f));
+                _controller.SetMoveInput(1f);
+                for (int i = 0; i < 8; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.IsTrue(_controller.IsWallSliding);
+                float jumpStartY = _player.transform.position.y;
+                _controller.JumpPressed();
+                yield return new WaitForFixedUpdate();
+
+                Assert.Less(_controller.Velocity.x, -10f, "墙跳应施加背离墙面的水平速度。");
+                Assert.Greater(_controller.Velocity.y, 10f, "墙跳应使用独立的垂直初速度。");
+
+                for (int i = 0; i < 5; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.Less(_controller.Velocity.x, -9f,
+                    "方向锁期间，持续推向原墙也不能立刻把玩家拉回去。");
+
+                float peakY = _player.transform.position.y;
+                for (int i = 0; i < 60; i++)
+                {
+                    yield return new WaitForFixedUpdate();
+                    peakY = Mathf.Max(peakY, _player.transform.position.y);
+                }
+                float measuredHeight = peakY - jumpStartY;
+                Assert.AreEqual(4.8f, measuredHeight, 0.25f,
+                    $"墙跳应使用较低的独立高度，实测 {measuredHeight:F2} 格。");
+            }
+            finally
+            {
+                _controller.JumpReleased();
+                _controller.SetMoveInput(0f);
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+                Object.Destroy(wall);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Same_Wall_Return_Is_Lower_Than_Wall_Jump_Start()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _ground.SetActive(false);
+            _controller.fallLimitY = -100f;
+            var wall = new GameObject("TestSameWallReturn");
+            wall.layer = _ground.layer;
+            wall.transform.position = new Vector3(1f, 0f, 0f);
+            wall.AddComponent<BoxCollider2D>().size = new Vector2(1f, 100f);
+
+            try
+            {
+                _controller.Teleport(new Vector2(0.14f, 4f));
+                _controller.SetMoveInput(1f);
+                for (int i = 0; i < 8; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.IsTrue(_controller.IsWallSliding);
+                float jumpStartY = _player.transform.position.y;
+                _controller.JumpPressed();
+                yield return new WaitForFixedUpdate();
+
+                bool returnedToWall = false;
+                for (int i = 0; i < 180; i++)
+                {
+                    yield return new WaitForFixedUpdate();
+                    if (_controller.IsWallSliding)
+                    {
+                        returnedToWall = true;
+                        break;
+                    }
+                }
+
+                Assert.IsTrue(returnedToWall, "持续推向原墙时应能自然返回并重新贴墙。");
+                float returnY = _player.transform.position.y;
+                Debug.Log($"[Test] Same-wall return height delta: {returnY - jumpStartY:F3}");
+                Assert.Less(returnY, jumpStartY - 0.1f,
+                    $"返回同墙时应低于墙跳起点；起跳 {jumpStartY:F2}，返回 {returnY:F2}。");
+            }
+            finally
+            {
+                _controller.JumpReleased();
+                _controller.SetMoveInput(0f);
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+                Object.Destroy(wall);
+            }
         }
 
         [UnityTest]

@@ -285,6 +285,27 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Diagonal_Portal_Transforms_Jump_Direction_With_Portal_Axes()
+        {
+            PortalPair pair = _rig.Pair;
+            FindGroups(out var a, out var b);
+            a.Facing = PortalFacing.Right;
+            b.Facing = PortalFacing.Left;
+            a.transform.rotation = Quaternion.identity;
+            b.transform.rotation = Quaternion.Euler(0f, 0f, 45f);
+
+            var teleportMethod = typeof(PortalPair).GetMethod(
+                "Teleport", System.Reflection.BindingFlags.Instance |
+                            System.Reflection.BindingFlags.NonPublic);
+            teleportMethod.Invoke(pair, new object[] { a, b });
+
+            Vector2 expected = ((Vector2)b.transform.up).normalized;
+            Assert.Less(Vector2.Distance(expected, _rig.Player.VariableJumpDirection), 0.001f,
+                "斜向出口应使用门的切线变换跳跃方向，不能固定保留世界 Y 轴。");
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator SameFacing_BToA_Camera_Preserves_Relative_Pose_With_Projection_Mirror()
         {
             PortalPair pair = _rig.Pair;
