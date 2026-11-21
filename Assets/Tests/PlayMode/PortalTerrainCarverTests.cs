@@ -185,5 +185,57 @@ namespace Platformer.Tests
             Assert.IsNull(Physics2D.OverlapPoint(newInside, _groundMask),
                 "移动后，新位置的门洞内部应该没有地面碰撞。");
         }
+
+        [UnityTest]
+        public IEnumerator Local_Carve_Updates_Reuse_Residual_Colliders()
+        {
+            CaptureDisplayGroup groupA = _rig.A;
+            GameObject terrainGo = _rig.Terrain.TerrainObject;
+
+            PolygonCollider2D[] Before()
+            {
+                var residuals = new System.Collections.Generic.List<PolygonCollider2D>();
+                foreach (var collider in terrainGo.GetComponentsInChildren<PolygonCollider2D>(true))
+                {
+                    if (collider.name.StartsWith("Carved Collider ")) residuals.Add(collider);
+                }
+                return residuals.ToArray();
+            }
+
+            PolygonCollider2D[] original = Before();
+            Assert.Greater(original.Length, 0);
+
+            // 沿门洞长度方向小位移，不改变扩大一格后的 broadphase 集合。
+            groupA.transform.position += Vector3.right * 0.05f;
+            yield return new WaitForFixedUpdate();
+            yield return null;
+
+            PolygonCollider2D[] updated = Before();
+            CollectionAssert.AreEquivalent(original, updated,
+                "门洞仍覆盖同一组格子时，不应销毁并新建残余 PolygonCollider2D。");
+            foreach (PolygonCollider2D collider in updated)
+                Assert.IsTrue(collider.enabled && collider.gameObject.activeSelf);
+
+            Vector2 inside = (Vector2)groupA.transform.position + groupA.BackDirection * 0.2f;
+            Assert.IsNull(Physics2D.OverlapPoint(inside, _groundMask),
+                "复用残余碰撞器后，新门洞仍应正确切除地形。");
+        }
+
+        [UnityTest]
+        public IEnumerator Rotated_Carve_Uses_Current_Portal_Axes()
+        {
+            CaptureDisplayGroup groupA = _rig.A;
+            groupA.transform.rotation = Quaternion.Euler(0f, 0f, 35f);
+            yield return new WaitForFixedUpdate();
+            yield return null;
+
+            Vector2 inside = (Vector2)groupA.transform.position + groupA.BackDirection * 0.2f;
+            Vector2 outside = (Vector2)groupA.transform.position +
+                              groupA.BackDirection * (_rig.Pair.carveWidth + 0.2f);
+            Assert.IsNull(Physics2D.OverlapPoint(inside, _groundMask),
+                "旋转门的背向矩形内部应被切除。");
+            Assert.IsNotNull(Physics2D.OverlapPoint(outside, _groundMask),
+                "旋转门背向矩形之外的地形应保留。");
+        }
     }
 }

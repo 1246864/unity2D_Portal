@@ -10,6 +10,7 @@ namespace Platformer
     /// 传送业务统一在这里管理：门的薄碰撞箱、碰撞触发、位移/速度/相机、冷却，
     /// 以及传送后的双门成像刷新。CaptureDisplayGroup 只负责画面显示与把碰撞转发过来。
     /// </summary>
+    [DefaultExecutionOrder(-100)]
     public class PortalPair : MonoBehaviour
     {
         [Header("玩家")]
@@ -96,6 +97,68 @@ namespace Platformer
         CapsuleCollider2D _ignoredPlayerBody;
         int _originalBodyExcludeLayers;
 
+        Rigidbody2D _gateBodyA;
+        Rigidbody2D _gateBodyB;
+        PortalMotion _motionA;
+        PortalMotion _motionB;
+        Vector2 _previousPlayerPosition;
+        int _observedPlayerRevision;
+        bool _hasPlayerBaseline;
+
+        /// <summary>一个物理步内的门位姿与速度；角度始终使用物理根节点的 Z 旋转。</summary>
+        struct PortalFrameState
+        {
+            public Vector2 Position;
+            public float Angle;
+            public float FacingSign;
+            public Vector2 LinearVelocity;
+            public float AngularVelocity;
+
+            public Vector2 Tangent => DirectionFromUp(Angle);
+            public Vector2 Opening => DirectionFromUp(Angle + FacingSign * -90f);
+
+            static Vector2 DirectionFromUp(float angle)
+            {
+                float radians = angle * Mathf.Deg2Rad;
+                return new Vector2(-Mathf.Sin(radians), Mathf.Cos(radians));
+            }
+
+            public static PortalFrameState Lerp(
+                PortalFrameState from, PortalFrameState to, float t)
+            {
+                return new PortalFrameState
+                {
+                    Position = Vector2.LerpUnclamped(from.Position, to.Position, t),
+                    Angle = Mathf.LerpAngle(from.Angle, to.Angle, t),
+                    FacingSign = t < 0.5f ? from.FacingSign : to.FacingSign,
+                    LinearVelocity = Vector2.LerpUnclamped(
+                        from.LinearVelocity, to.LinearVelocity, t),
+                    AngularVelocity = Mathf.LerpUnclamped(
+                        from.AngularVelocity, to.AngularVelocity, t)
+                };
+            }
+
+            public Vector2 PointVelocity(Vector2 point)
+            {
+                Vector2 offset = point - Position;
+                float radiansPerSecond = AngularVelocity * Mathf.Deg2Rad;
+                return LinearVelocity + new Vector2(
+                    -radiansPerSecond * offset.y,
+                    radiansPerSecond * offset.x);
+            }
+        }
+
+        sealed class PortalMotion
+        {
+            public CaptureDisplayGroup Group;
+            public Rigidbody2D Body;
+            public PortalFrameState Previous;
+            public PortalFrameState Current;
+            public bool HasPrevious;
+            public bool RelocationPending;
+            public bool DiscontinuousThisStep;
+        }
+
         /// <summary>门碰撞箱所在层（复用 Snapshot 层，玩家身体胶囊会排除该层）。</summary>
         const int GateLayer = 8;
 
@@ -148,6 +211,7 @@ namespace Platformer
             _lastPlayer = null;
             SyncPortalLinkState();
             UpdateViewTransparency(true);
+            ResetMotionTracking();
         }
 
         void OnDisable()
@@ -171,6 +235,361 @@ namespace Platformer
             _automaticViewSource = null;
             _wasLinked = false;
             _forceCapture = false;
+            ResetMotionTracking();
+        }
+
+        void FixedUpdate()
+        {
+            EnsureMotionStates();
+
+            float dt = Mathf.Max(0.000001f, Time.fixedDeltaTime);
+            SampleMotion(_motionA, dt);
+            SampleMotion(_motionB, dt);
+
+            bool gatePoseChanged = SyncGateBody(_motionA);
+            gatePoseChanged |= SyncGateBody(_motionB);
+            if (gatePoseChanged) Physics2D.SyncTransforms();
+            if (_terrainCarver != null && _terrainCarver.enabled)
+                _terrainCarver.RefreshNow();
+
+            if (player == null || !IsLinked)
+            {
+                _hasPlayerBaseline = false;
+                return;
+            }
+
+            var controller = player.GetComponent<PlayerController2D>();
+            var rb = player.GetComponent<Rigidbody2D>();
+            if (controller == null || rb == null)
+            {
+                _hasPlayerBaseline = false;
+                return;
+            }
+
+            Vector2 currentPlayerPosition = rb.position;
+            int currentRevision = controller.PositionRevision;
+            if (!_hasPlayerBaseline || _observedPlayerRevision != currentRevision)
+            {
+                // 重生、测试 Teleport 和上一次传送都是显式跳变，不能扫成一条走廊。
+                _previousPlayerPosition = currentPlayerPosition;
+                _observedPlayerRevision = currentRevision;
+                _hasPlayerBaseline = true;
+                return;
+            }
+
+            if (_cooldown <= 0f)
+            {
+                TrySweepingPortals(
+                    controller, _previousPlayerPosition, currentPlayerPosition);
+            }
+
+            // 如果刚才发生传送，这里记录的是出口位置与新版本号。
+            _previousPlayerPosition = rb.position;
+            _observedPlayerRevision = controller.PositionRevision;
+            _hasPlayerBaseline = true;
+        }
+
+        /// <summary>
+        /// 通知门对：某扇门刚才发生了瞬移，而不是连续运动。
+        /// 下一物理步只检查新门洞，不连接瞬移前后的位置做扫掠。
+        /// </summary>
+        public void NotifyPortalRelocated(CaptureDisplayGroup portal)
+        {
+            EnsureMotionStates();
+            if (portal == _groupA && _motionA != null) _motionA.RelocationPending = true;
+            if (portal == _groupB && _motionB != null) _motionB.RelocationPending = true;
+        }
+
+        /// <summary>把 A/B 两门都标记为刚刚瞬移。</summary>
+        public void NotifyPortalsRelocated()
+        {
+            NotifyPortalRelocated(_groupA);
+            NotifyPortalRelocated(_groupB);
+        }
+
+        void EnsureMotionStates()
+        {
+            if (_motionA == null) _motionA = new PortalMotion();
+            if (_motionB == null) _motionB = new PortalMotion();
+            _motionA.Group = _groupA;
+            _motionA.Body = _gateBodyA;
+            _motionB.Group = _groupB;
+            _motionB.Body = _gateBodyB;
+        }
+
+        static PortalFrameState ReadFrameState(CaptureDisplayGroup group)
+        {
+            return new PortalFrameState
+            {
+                Position = group.transform.position,
+                Angle = group.transform.eulerAngles.z,
+                FacingSign = group.FacingSign,
+                LinearVelocity = Vector2.zero,
+                AngularVelocity = 0f
+            };
+        }
+
+        static void SampleMotion(PortalMotion motion, float dt)
+        {
+            if (motion == null || motion.Group == null) return;
+
+            PortalFrameState next = ReadFrameState(motion.Group);
+            if (!motion.HasPrevious)
+            {
+                motion.Previous = next;
+                motion.Current = next;
+                motion.HasPrevious = true;
+                motion.RelocationPending = false;
+                motion.DiscontinuousThisStep = true;
+                return;
+            }
+
+            motion.Previous = motion.Current;
+            motion.Current = next;
+
+            // 未走显式通知的跨地图 Transform 改写，用单步位移上限兜底识别。
+            // 正常高速运动由线段扫掠处理，不需要靠提高碰撞箱厚度兜底。
+            float relocationDistance = Mathf.Max(8f, motion.Group.PortalHeight * 4f);
+            motion.DiscontinuousThisStep = motion.RelocationPending ||
+                Vector2.Distance(motion.Previous.Position, next.Position) > relocationDistance;
+            motion.RelocationPending = false;
+
+            if (motion.DiscontinuousThisStep)
+            {
+                motion.Previous = next;
+                motion.Current.LinearVelocity = Vector2.zero;
+                motion.Current.AngularVelocity = 0f;
+                return;
+            }
+
+            motion.Current.LinearVelocity =
+                (motion.Current.Position - motion.Previous.Position) / dt;
+            motion.Current.AngularVelocity = Mathf.DeltaAngle(
+                motion.Previous.Angle, motion.Current.Angle) / dt;
+        }
+
+        static bool SyncGateBody(PortalMotion motion)
+        {
+            if (motion == null || motion.Body == null || motion.Group == null) return false;
+
+            PortalFrameState current = motion.Current;
+            bool changed = Vector2.Distance(motion.Body.position, current.Position) > 0.000001f ||
+                           Mathf.Abs(Mathf.DeltaAngle(
+                               motion.Body.rotation, current.Angle)) > 0.0001f;
+            if (!changed) return false;
+
+            motion.Body.position = current.Position;
+            motion.Body.rotation = current.Angle;
+            return true;
+        }
+
+        PortalFrameState CurrentFrameState(CaptureDisplayGroup group)
+        {
+            PortalMotion motion = group == _groupA ? _motionA : _motionB;
+            return motion != null && motion.Group == group && motion.HasPrevious
+                ? motion.Current
+                : ReadFrameState(group);
+        }
+
+        void TrySweepingPortals(
+            PlayerController2D controller,
+            Vector2 previousPlayer,
+            Vector2 currentPlayer)
+        {
+            CaptureDisplayGroup hitSource = null;
+            PortalFrameState hitSourceState = default;
+            Vector2 hitPoint = currentPlayer;
+            float earliest = float.MaxValue;
+
+            TrySweepingPortal(
+                _motionA, previousPlayer, currentPlayer, controller.centerPointRadius,
+                ref hitSource, ref hitSourceState, ref hitPoint, ref earliest);
+            TrySweepingPortal(
+                _motionB, previousPlayer, currentPlayer, controller.centerPointRadius,
+                ref hitSource, ref hitSourceState, ref hitPoint, ref earliest);
+
+            if (hitSource == null) return;
+            CaptureDisplayGroup partner = hitSource.partner;
+            if (!IsPortalActive(partner)) return;
+
+            PlayGateHitAnimations(hitSource);
+            TeleportAt(
+                hitSource,
+                partner,
+                hitSourceState,
+                CurrentFrameState(partner),
+                hitPoint,
+                controller.VelocityBeforePhysics);
+        }
+
+        void TrySweepingPortal(
+            PortalMotion motion,
+            Vector2 previousPlayer,
+            Vector2 currentPlayer,
+            float radius,
+            ref CaptureDisplayGroup hitSource,
+            ref PortalFrameState hitSourceState,
+            ref Vector2 hitPoint,
+            ref float earliest)
+        {
+            if (motion == null || !IsPortalActive(motion.Group) || !motion.HasPrevious) return;
+
+            if (TryGateCrossing(
+                    motion, previousPlayer, currentPlayer, radius,
+                    out float crossingTime, out Vector2 crossingPoint) &&
+                crossingTime < earliest)
+            {
+                earliest = crossingTime;
+                hitSource = motion.Group;
+                hitSourceState = PortalFrameState.Lerp(
+                    motion.Previous, motion.Current, crossingTime);
+                // 位姿按命中时刻插值，速度使用本步测得的瞬时速度，不能随命中时间衰减。
+                hitSourceState.LinearVelocity = motion.Current.LinearVelocity;
+                hitSourceState.AngularVelocity = motion.Current.AngularVelocity;
+                hitPoint = crossingPoint;
+            }
+        }
+
+        bool TryGateCrossing(
+            PortalMotion motion,
+            Vector2 previousPlayer,
+            Vector2 currentPlayer,
+            float radius,
+            out float crossingTime,
+            out Vector2 crossingPoint)
+        {
+            // 瞬移门不连接旧位置；但新门洞直接罩住玩家时仍然触发。
+            if (motion.DiscontinuousThisStep)
+            {
+                if (SegmentIntersectsGate(
+                        currentPlayer, currentPlayer, motion.Current,
+                        motion.Group.PortalHeight, radius, out _))
+                {
+                    crossingTime = 1f;
+                    crossingPoint = currentPlayer;
+                    return true;
+                }
+
+                crossingTime = 0f;
+                crossingPoint = currentPlayer;
+                return false;
+            }
+
+            float angleDelta = Mathf.Abs(Mathf.DeltaAngle(
+                motion.Previous.Angle, motion.Current.Angle));
+            int steps = Mathf.Clamp(Mathf.CeilToInt(angleDelta / 10f), 1, 36);
+            Vector2 segmentStart = previousPlayer;
+            PortalFrameState segmentStartState = motion.Previous;
+
+            for (int i = 1; i <= steps; i++)
+            {
+                float t = i / (float)steps;
+                Vector2 segmentEnd = Vector2.LerpUnclamped(previousPlayer, currentPlayer, t);
+                PortalFrameState segmentEndState = PortalFrameState.Lerp(
+                    motion.Previous, motion.Current, t);
+                PortalFrameState middleState = PortalFrameState.Lerp(
+                    segmentStartState, segmentEndState, 0.5f);
+
+                if (SegmentIntersectsGate(
+                        segmentStart, segmentEnd, middleState,
+                        motion.Group.PortalHeight, radius, out float localTime))
+                {
+                    crossingTime = Mathf.Lerp((i - 1) / (float)steps, t, localTime);
+                    crossingPoint = Vector2.LerpUnclamped(segmentStart, segmentEnd, localTime);
+                    return true;
+                }
+
+                segmentStart = segmentEnd;
+                segmentStartState = segmentEndState;
+            }
+
+            crossingTime = 0f;
+            crossingPoint = currentPlayer;
+            return false;
+        }
+
+        bool SegmentIntersectsGate(
+            Vector2 start,
+            Vector2 end,
+            PortalFrameState state,
+            float height,
+            float radius,
+            out float intersectionTime)
+        {
+            Vector2 normal = state.Opening;
+            Vector2 tangent = state.Tangent;
+            Vector2 deltaStart = start - state.Position;
+            Vector2 deltaEnd = end - state.Position;
+            var localStart = new Vector2(
+                Vector2.Dot(deltaStart, normal), Vector2.Dot(deltaStart, tangent));
+            var localEnd = new Vector2(
+                Vector2.Dot(deltaEnd, normal), Vector2.Dot(deltaEnd, tangent));
+            var halfSize = new Vector2(
+                Mathf.Max(0.001f, gateThickness) * 0.5f + radius,
+                Mathf.Max(0.01f, height) * 0.5f + radius);
+            return SegmentIntersectsBox(
+                localStart, localEnd, halfSize, out intersectionTime);
+        }
+
+        static bool SegmentIntersectsBox(
+            Vector2 start, Vector2 end, Vector2 halfSize, out float intersectionTime)
+        {
+            Vector2 delta = end - start;
+            float minimum = 0f;
+            float maximum = 1f;
+
+            for (int axis = 0; axis < 2; axis++)
+            {
+                float origin = axis == 0 ? start.x : start.y;
+                float direction = axis == 0 ? delta.x : delta.y;
+                float extent = axis == 0 ? halfSize.x : halfSize.y;
+
+                if (Mathf.Abs(direction) < 0.0000001f)
+                {
+                    if (Mathf.Abs(origin) > extent)
+                    {
+                        intersectionTime = 0f;
+                        return false;
+                    }
+                    continue;
+                }
+
+                float near = (-extent - origin) / direction;
+                float far = (extent - origin) / direction;
+                if (near > far)
+                {
+                    float swap = near;
+                    near = far;
+                    far = swap;
+                }
+
+                minimum = Mathf.Max(minimum, near);
+                maximum = Mathf.Min(maximum, far);
+                if (minimum > maximum)
+                {
+                    intersectionTime = 0f;
+                    return false;
+                }
+            }
+
+            intersectionTime = Mathf.Clamp01(minimum);
+            return true;
+        }
+
+        void ResetMotionTracking()
+        {
+            _hasPlayerBaseline = false;
+            _observedPlayerRevision = 0;
+            EnsureMotionStates();
+            ResetMotion(_motionA);
+            ResetMotion(_motionB);
+        }
+
+        static void ResetMotion(PortalMotion motion)
+        {
+            motion.HasPrevious = false;
+            motion.RelocationPending = false;
+            motion.DiscontinuousThisStep = false;
         }
 
         void Update()
@@ -184,6 +603,7 @@ namespace Platformer
                 PushPlayerToGroups();
                 IgnorePlayerBodyCollision();
                 UpdateViewTransparency(true);
+                _hasPlayerBaseline = false;
             }
 
             if (_cooldown > 0f)
@@ -485,6 +905,12 @@ namespace Platformer
             var partner = source.partner;
             if (!IsPortalActive(partner)) return;
 
+            PlayGateHitAnimations(source);
+            Teleport(source, partner);
+        }
+
+        void PlayGateHitAnimations(CaptureDisplayGroup source)
+        {
             // 联通渐显期间如果已经触发有效传送，立即结束双门的画面渐变，
             // 不再让单门纹理遮挡本次传送后的正常捕获画面。
             if (_groupA != null) _groupA.CompleteConnectionReveal();
@@ -496,8 +922,6 @@ namespace Platformer
 
             // 哪扇门发起传送，哪扇门就重播一次自己的开门动画；另一扇门保持打开。
             source.PlayOpenAnimation();
-
-            Teleport(source, partner);
         }
 
         /// <summary>停止所有门的开门动画，并让它们保持完全打开。</summary>
@@ -533,28 +957,43 @@ namespace Platformer
         /// </summary>
         void Teleport(CaptureDisplayGroup source, CaptureDisplayGroup partner)
         {
+            if (player == null) return;
+            var controller = player.GetComponent<PlayerController2D>();
+            if (controller == null) return;
+
+            // 直接传送使用调用当下的门位姿；只有物理扫掠才使用本步采样/插值状态。
+            TeleportAt(
+                source,
+                partner,
+                ReadFrameState(source),
+                ReadFrameState(partner),
+                player.position,
+                controller.VelocityBeforePhysics);
+        }
+
+        void TeleportAt(
+            CaptureDisplayGroup source,
+            CaptureDisplayGroup partner,
+            PortalFrameState sourceState,
+            PortalFrameState partnerState,
+            Vector2 playerPosition,
+            Vector2 incomingVelocity)
+        {
             var controller = player.GetComponent<PlayerController2D>();
             if (controller == null) return;
 
             bool sameFacing = source.Facing == partner.Facing;
-
             var rb = player.GetComponent<Rigidbody2D>();
-            Vector3 playerPosition = player.position;
-            Vector3 sourceCenter = source.transform.position;
-            Vector3 partnerCenter = partner.transform.position;
 
             // 出口：对方门开口方向外侧 + 入口时沿门切线（门 Y+）的相对位置。
-            // 不能用世界 Y 来保留高度；门旋转后，世界 Y 会掺进法线方向，
-            // 导致玩家被放到门里或离门太近，出现“刚出来又碰到门”。
+            // 扫掠命中时使用命中瞬间的门与玩家位姿，避免把后续位移带进切线偏移。
             float front = gateThickness * 0.5f + controller.centerPointRadius + exitMargin;
-            Vector2 exitDirection = partner.OpeningDirection;
-            Vector2 sourceTangent = source.transform.up;
-            Vector2 partnerTangent = partner.transform.up;
-
+            Vector2 exitDirection = partnerState.Opening;
+            Vector2 sourceTangent = sourceState.Tangent;
+            Vector2 partnerTangent = partnerState.Tangent;
             float tangentOffset = Vector2.Dot(
-                (Vector2)playerPosition - (Vector2)sourceCenter, sourceTangent);
-
-            Vector3 target = partnerCenter +
+                playerPosition - sourceState.Position, sourceTangent);
+            Vector3 target = (Vector3)partnerState.Position +
                              (Vector3)(exitDirection * front) +
                              (Vector3)(partnerTangent * tangentOffset);
 
@@ -573,25 +1012,22 @@ namespace Platformer
                 ? playerVisual.worldToLocalMatrix * controlledCamera.transform.localToWorldMatrix
                 : Matrix4x4.identity;
 
-
             // 普通门保留玩家相对门切线的角度；同向门是镜像映射，相对角必须取反。
-            // 玩家 0° 从 B(45°) 到 A(0°) 时应为 +45°，而不是普通门公式得到的 -45°。
-            float sourceAngle = Vector2.SignedAngle(Vector2.up, source.transform.up);
-            float partnerAngle = Vector2.SignedAngle(Vector2.up, partner.transform.up);
             float playerRelativeAngle = Mathf.DeltaAngle(
-                sourceAngle, controller.CurrentRotationAngle);
+                sourceState.Angle, controller.CurrentRotationAngle);
             float exitAngle = Mathf.DeltaAngle(
                 0f,
                 sameFacing
-                    ? partnerAngle - playerRelativeAngle
-                    : partnerAngle + playerRelativeAngle);
+                    ? partnerState.Angle - playerRelativeAngle
+                    : partnerState.Angle + playerRelativeAngle);
 
-            // 进门前的速度/受力结果也按传送门坐标系一起变换：
-            // 法线分量沿出口正面反向，切线分量保留。
+            // 先扣除入口门在接触点的速度，映射后再叠加出口门点速度。
+            // 因而静止玩家被移动门扫到、或从旋转门边缘进入时，结果仍遵循相对运动。
+            Vector2 relativeVelocity = incomingVelocity - sourceState.PointVelocity(playerPosition);
             Vector2 velocity = TransformPortalVelocity(
-                controller.VelocityBeforePhysics, source, partner);
+                relativeVelocity, sourceState, partnerState) + partnerState.PointVelocity(target);
             Vector2 variableJumpDirection = TransformPortalVelocity(
-                controller.VariableJumpDirection, source, partner);
+                controller.VariableJumpDirection, sourceState, partnerState);
 
             // 剩余长按跳跃与速度走同一套门坐标变换，斜向门不会把它强行折回世界 Y 轴。
             controller.TeleportWithPortalRotation(
@@ -604,9 +1040,11 @@ namespace Platformer
             if (controlledCamera != null)
                 control.TeleportRelative(playerVisual, cameraRelative, sameFacing);
 
-
             // 一对门共享一个冷却，避免刚落地就被另一扇门立刻传回去。
             _cooldown = teleportCooldown;
+            _previousPlayerPosition = rb != null ? rb.position : (Vector2)target;
+            _observedPlayerRevision = controller.PositionRevision;
+            _hasPlayerBaseline = true;
 
             // 本帧 LateUpdate 里强制两扇门各捕获一次，并重新生成半屏画面。
             _forceCapture = true;
@@ -625,17 +1063,11 @@ namespace Platformer
         /// 这样两门同向时会被反向，相对旋转时速度也会跟着转。
         /// </summary>
         static Vector2 TransformPortalVelocity(
-            Vector2 velocity, CaptureDisplayGroup source, CaptureDisplayGroup partner)
+            Vector2 velocity, PortalFrameState source, PortalFrameState partner)
         {
-            Vector2 sourceNormal = source.OpeningDirection;
-            Vector2 sourceTangent = source.transform.up;
-            Vector2 partnerNormal = partner.OpeningDirection;
-            Vector2 partnerTangent = partner.transform.up;
-
-            float normalSpeed = Vector2.Dot(velocity, sourceNormal);
-            float tangentSpeed = Vector2.Dot(velocity, sourceTangent);
-
-            return partnerNormal * (-normalSpeed) + partnerTangent * tangentSpeed;
+            float normalSpeed = Vector2.Dot(velocity, source.Opening);
+            float tangentSpeed = Vector2.Dot(velocity, source.Tangent);
+            return partner.Opening * -normalSpeed + partner.Tangent * tangentSpeed;
         }
 
         void CacheGroups()
@@ -670,6 +1102,17 @@ namespace Platformer
             gate.offset = Vector2.zero;
             gate.size = new Vector2(gateThickness, group.PortalHeight);
             gate.enabled = IsLinked && IsPortalActive(group);
+
+            var body = group.GetComponent<Rigidbody2D>();
+            if (body == null) body = group.gameObject.AddComponent<Rigidbody2D>();
+            body.bodyType = RigidbodyType2D.Kinematic;
+            body.gravityScale = 0f;
+            body.constraints = RigidbodyConstraints2D.FreezeRotation;
+            body.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+            body.interpolation = RigidbodyInterpolation2D.None;
+            body.useFullKinematicContacts = true;
+            if (group == _groupA) _gateBodyA = body;
+            if (group == _groupB) _gateBodyB = body;
 
             // 门碰撞箱放到 Snapshot 层，玩家身体胶囊用 excludeLayers 忽略该层。
             // 层过滤不会像 Physics2D.IgnoreCollision 那样在碰撞箱重新启用后被重置。

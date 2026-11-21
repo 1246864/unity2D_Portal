@@ -267,8 +267,7 @@ namespace Platformer
             _outputHalfInitialized = true;
 
             // 还没有裁过半屏时先正常对齐；已经裁过才保留当前 X。
-            bool alreadyCropped = output != null && _halfSprite != null && output.sprite == _halfSprite;
-            ApplyHalfCrop(true, alreadyCropped);
+            ApplyHalfCrop(true, _hasAppliedCrop);
         }
 
         /// <summary>另一扇门（partner）的输出 SpriteRenderer；partner 未解析或没有输出时为 null。</summary>
@@ -328,6 +327,7 @@ namespace Platformer
         Sprite _halfSprite;
         PortalViewHalf _outputHalf;
         bool _outputHalfInitialized;
+        bool _hasAppliedCrop;
         PortalViewHalf? _pendingPartnerHalf;
         PortalPair _pair;
         Transform _viewAnchor;
@@ -1214,8 +1214,8 @@ namespace Platformer
         }
 
         /// <summary>
-        /// 只保留捕获画面的一半：用贴图的一半重建精灵，
-        /// 并把它摆到完整画面中对应的位置。
+        /// 只显示捕获画面的一半，并把它摆到完整画面中对应的位置。
+        /// 快照自己的 Sprite 保留全尺寸网格，半屏和中心缝由 Shader UV 处理。
         /// </summary>
         public void ApplyHalfCrop()
         {
@@ -1234,9 +1234,6 @@ namespace Platformer
             Sprite full = _fullSprite != null ? _fullSprite : current;
             if (full == null) return;
 
-            if (!force && output.sprite == _halfSprite)
-                return;
-
             float fullWidth = full.bounds.size.x;
             float pixelsPerUnit = full.pixelsPerUnit;
 
@@ -1249,18 +1246,45 @@ namespace Platformer
             bool rightHalf = OutputHalf == PortalViewHalf.Right;
             float halfPixels = full.rect.width * 0.5f;
             float gapPixels = Mathf.Clamp(centerGapPixels, 0f, halfPixels * 0.5f);
+            RegionSnapshotCamera source = FindOutputCapture();
+            bool usePersistentCapture = source != null && full == source.CaptureSprite &&
+                                        source.CapturedTexture != null;
 
-            var halfRect = new Rect(
-                rightHalf ? full.rect.x + halfPixels + gapPixels : full.rect.x,
-                full.rect.y,
-                halfPixels - gapPixels,
-                full.rect.height);
+            if (usePersistentCapture)
+            {
+                if (_halfSprite != null)
+                {
+                    Destroy(_halfSprite);
+                    _halfSprite = null;
+                }
 
-            if (_halfSprite != null) Destroy(_halfSprite);
-            _halfSprite = Sprite.Create(full.texture, halfRect, new Vector2(0.5f, 0.5f), pixelsPerUnit);
-            _halfSprite.name = "Snapshot Half";
+                output.sprite = full;
+                float gapUv = gapPixels / full.rect.width;
+                float edgeUv = 0.25f + gapUv * 0.5f;
+                var uvTransform = new Vector4(1f, 1f, rightHalf ? edgeUv : -edgeUv, 0f);
+                var uvClip = new Vector4(edgeUv, 0f, 0.75f - gapUv * 0.5f, 1f);
+                source.SetOutputCapture(source.CapturedTexture, uvTransform, uvClip);
+            }
+            else
+            {
+                // 外部手动指定 Sprite 时保留旧路径，避免改变普通 RegionSnapshotCamera 的用途。
+                if (!force && output.sprite == _halfSprite) return;
 
-            output.sprite = _halfSprite;
+                if (source != null)
+                    source.SetOutputCapture(full.texture, new Vector4(1f, 1f, 0f, 0f),
+                        new Vector4(0f, 0f, 1f, 1f));
+
+                var halfRect = new Rect(
+                    rightHalf ? full.rect.x + halfPixels + gapPixels : full.rect.x,
+                    full.rect.y,
+                    halfPixels - gapPixels,
+                    full.rect.height);
+
+                if (_halfSprite != null) Destroy(_halfSprite);
+                _halfSprite = Sprite.Create(full.texture, halfRect, new Vector2(0.5f, 0.5f), pixelsPerUnit);
+                _halfSprite.name = "Snapshot Half";
+                output.sprite = _halfSprite;
+            }
 
             // 把保留的区域摆到它在完整画面中的位置。
             float gapWorld = gapPixels / pixelsPerUnit;
@@ -1278,6 +1302,16 @@ namespace Platformer
                 // 在 Portal View 的初始局部位置（可能带有 Portal View Center 的 Z 偏移）上叠加半屏 X 偏移。
                 output.transform.localPosition = _viewBaseLocalPosition + new Vector3(offset, 0f, 0f);
             }
+
+            _hasAppliedCrop = true;
+        }
+
+        RegionSnapshotCamera FindOutputCapture()
+        {
+            if (partner != null && partner.capture != null && partner.capture.output == output)
+                return partner.capture;
+            if (capture != null && capture.output == output) return capture;
+            return null;
         }
     }
 }

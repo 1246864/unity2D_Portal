@@ -217,8 +217,15 @@ namespace Platformer.Tests
 
             Assert.AreEqual(pair.captureHeight, snapshot.captureHeight, 0.001f);
             Assert.AreEqual(pair.captureWidth, snapshot.captureWidth, 0.001f);
-            Texture2D texture = snapshot.output.sprite.texture;
+            Texture texture = snapshot.output.sprite.texture;
             Assert.IsNotNull(texture);
+            RenderTexture renderTexture = snapshot.captureCamera.targetTexture;
+            Assert.IsNotNull(renderTexture);
+            Sprite persistentSprite = snapshot.output.sprite;
+            var outputProperties = new MaterialPropertyBlock();
+            snapshot.output.GetPropertyBlock(outputProperties);
+            Assert.AreSame(renderTexture, outputProperties.GetTexture("_MainTex"),
+                "Portal View 应直接采样捕获相机的 RenderTexture。");
 
             Vector3 capturePosition = snapshot.captureCamera.transform.position;
             snapshot.sourceCamera.transform.position += new Vector3(4f, 0f, 0f);
@@ -226,14 +233,26 @@ namespace Platformer.Tests
             yield return null;
             Assert.AreEqual(capturePosition, snapshot.captureCamera.transform.position,
                 "捕获相机必须保持自身位置，不跟随主相机。");
+            Assert.AreSame(persistentSprite, snapshot.output.sprite,
+                "持续捕获不应重建几何 Sprite。");
 
             Assert.AreEqual(snapshot.captureHeight * 0.5f,
                 snapshot.captureCamera.orthographicSize, 0.01f);
             Assert.AreEqual(snapshot.captureWidth,
                 snapshot.captureCamera.aspect * snapshot.captureHeight, 0.01f);
             Assert.AreEqual(snapshot.captureHeight, snapshot.output.sprite.bounds.size.y, 0.001f);
-            Assert.AreEqual(snapshot.captureWidth * 0.5f,
-                snapshot.output.sprite.bounds.size.x, 0.2f);
+            Assert.AreEqual(snapshot.captureWidth,
+                snapshot.output.sprite.bounds.size.x, 0.2f,
+                "持久 Sprite 保留完整网格，半屏由 UV 裁剪。");
+
+            PortalViewHalf originalHalf = groupB.OutputHalf;
+            groupB.OutputHalf = originalHalf == PortalViewHalf.Right
+                ? PortalViewHalf.Left
+                : PortalViewHalf.Right;
+            Assert.AreSame(persistentSprite, snapshot.output.sprite,
+                "切换半屏不应重新创建 Sprite。");
+            groupB.OutputHalf = originalHalf;
+            Assert.AreSame(persistentSprite, snapshot.output.sprite);
 
             if (groupA.OutputHalf == PortalViewHalf.Right)
                 Assert.Greater(groupA.output.transform.localPosition.x, 0f);
@@ -274,7 +293,7 @@ namespace Platformer.Tests
             yield return null;
             yield return null;
 
-            Texture2D clampedTexture = snapshot.output.sprite.texture;
+            Texture clampedTexture = snapshot.output.sprite.texture;
             Assert.LessOrEqual(clampedTexture.width, snapshot.maxTextureSize);
             Assert.LessOrEqual(clampedTexture.height, snapshot.maxTextureSize);
             Assert.AreEqual(4f, clampedTexture.width / pair.captureWidth, 0.001f);
@@ -284,8 +303,18 @@ namespace Platformer.Tests
             Assert.AreEqual(128f,
                 snapshot.captureCamera.aspect * snapshot.captureCamera.orthographicSize * 2f, 0.001f);
             Assert.AreEqual(8f, snapshot.output.sprite.bounds.size.y, 0.001f);
-            float expectedHalfWidth = 64f - groupB.centerGapPixels / 4f;
-            Assert.AreEqual(expectedHalfWidth, snapshot.output.sprite.bounds.size.x, 0.001f);
+            Assert.AreEqual(128f, snapshot.output.sprite.bounds.size.x, 0.001f);
+
+            snapshot.output.GetPropertyBlock(outputProperties);
+            float gapUv = groupB.centerGapPixels / clampedTexture.width;
+            float edgeUv = 0.25f + gapUv * 0.5f;
+            Vector4 expectedTransform = new Vector4(1f, 1f,
+                groupB.OutputHalf == PortalViewHalf.Right ? edgeUv : -edgeUv, 0f);
+            Vector4 expectedClip = new Vector4(edgeUv, 0f, 0.75f - gapUv * 0.5f, 1f);
+            Assert.Less(Vector4.Distance(expectedTransform,
+                outputProperties.GetVector("_CaptureUvTransform")), 0.0001f);
+            Assert.Less(Vector4.Distance(expectedClip,
+                outputProperties.GetVector("_CaptureUvClip")), 0.0001f);
 
             snapshot.maxTextureSize = originalMaxTextureSize;
             pair.captureWidth = 50f;

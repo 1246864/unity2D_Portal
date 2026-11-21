@@ -46,6 +46,10 @@ namespace Platformer
         readonly Dictionary<Sprite, List<Vector2[]>> _spriteShapes =
             new Dictionary<Sprite, List<Vector2[]>>();
         readonly List<CarveRect> _lastRects = new List<CarveRect>();
+        readonly List<CarveRect> _rectBuffer = new List<CarveRect>();
+        readonly HashSet<Vector3Int> _affectedCells = new HashSet<Vector3Int>();
+        readonly HashSet<Vector3Int> _lastAffectedCells = new HashSet<Vector3Int>();
+        readonly HashSet<Vector3Int> _candidateCells = new HashSet<Vector3Int>();
 
         bool _warnedNoTerrain;
 
@@ -57,6 +61,7 @@ namespace Platformer
         {
             public Tile.ColliderType originalColliderType;
             public GameObject residualCollider;
+            public PolygonCollider2D residualPolygon;
         }
 
         /// <summary>
@@ -140,21 +145,25 @@ namespace Platformer
             ResolveTerrain();
             if (terrain == null || terrainCollider == null) return;
 
-            var rects = CollectCarveRects();
+            List<CarveRect> rects = CollectCarveRects(_rectBuffer);
             if (SameRects(rects, _lastRects)) return;
 
-            // 先全部恢复，再按最新矩形重新切。这样门移动/旋转时不会残留旧洞。
-            RestoreCells();
+            _lastRects.Clear();
             _lastRects.AddRange(rects);
 
-            if (rects.Count > 0) ApplyCarve(rects);
-            RebuildColliders();
+            // 世界 AABB 先换算成格子 broadphase，只处理新旧门洞涉及的少量格子。
+            _affectedCells.Clear();
+            CollectAffectedCells(rects, _affectedCells);
+            ApplyCarve(rects, _affectedCells);
+
+            _lastAffectedCells.Clear();
+            _lastAffectedCells.UnionWith(_affectedCells);
         }
 
         /// <summary>收集所有激活门的背向矩形。</summary>
-        List<CarveRect> CollectCarveRects()
+        List<CarveRect> CollectCarveRects(List<CarveRect> result)
         {
-            var result = new List<CarveRect>();
+            result.Clear();
             foreach (var pair in _openPortals)
             {
                 CaptureDisplayGroup group = pair.Key;
@@ -191,6 +200,46 @@ namespace Platformer
             return result;
         }
 
+        void CollectAffectedCells(List<CarveRect> rects, HashSet<Vector3Int> output)
+        {
+            BoundsInt terrainBounds = terrain.cellBounds;
+            if (terrainBounds.size == Vector3Int.zero) return;
+
+            foreach (CarveRect rect in rects)
+            {
+                float halfHeight = rect.height * 0.5f;
+                var minimum = new Vector3Int(int.MaxValue, int.MaxValue, int.MaxValue);
+                var maximum = new Vector3Int(int.MinValue, int.MinValue, int.MinValue);
+
+                IncludeCell(rect.ToWorld(new Vector2(-rect.frontMargin, -halfHeight)),
+                    ref minimum, ref maximum);
+                IncludeCell(rect.ToWorld(new Vector2(-rect.frontMargin, halfHeight)),
+                    ref minimum, ref maximum);
+                IncludeCell(rect.ToWorld(new Vector2(rect.length, -halfHeight)),
+                    ref minimum, ref maximum);
+                IncludeCell(rect.ToWorld(new Vector2(rect.length, halfHeight)),
+                    ref minimum, ref maximum);
+
+                // 向外扩一格，覆盖门洞恰好压到格子边界以及浮点误差。
+                minimum -= Vector3Int.one;
+                maximum += Vector3Int.one;
+                minimum = Vector3Int.Max(minimum, terrainBounds.min);
+                maximum = Vector3Int.Min(maximum, terrainBounds.max - Vector3Int.one);
+
+                for (int z = minimum.z; z <= maximum.z; z++)
+                for (int y = minimum.y; y <= maximum.y; y++)
+                for (int x = minimum.x; x <= maximum.x; x++)
+                    output.Add(new Vector3Int(x, y, z));
+            }
+        }
+
+        void IncludeCell(Vector2 world, ref Vector3Int minimum, ref Vector3Int maximum)
+        {
+            Vector3Int cell = terrain.WorldToCell(world);
+            minimum = Vector3Int.Min(minimum, cell);
+            maximum = Vector3Int.Max(maximum, cell);
+        }
+
         static bool SameRects(List<CarveRect> a, List<CarveRect> b)
         {
             if (a.Count != b.Count) return false;
@@ -206,31 +255,51 @@ namespace Platformer
             return true;
         }
 
-        /// <summary>遍历地形格，对每一格的碰撞形状依次减去所有矩形。</summary>
-        void ApplyCarve(List<CarveRect> rects)
+        /// <summary>只重算新旧门洞覆盖的格子；持续被切割的格子复用残余碰撞器。</summary>
+        void ApplyCarve(List<CarveRect> rects, HashSet<Vector3Int> affectedCells)
         {
-            BoundsInt bounds = terrain.cellBounds;
-            foreach (Vector3Int cell in bounds.allPositionsWithin)
+            _candidateCells.Clear();
+            _candidateCells.UnionWith(_lastAffectedCells);
+            _candidateCells.UnionWith(affectedCells);
+
+            bool tilemapChanged = false;
+            bool residualChanged = false;
+
+            foreach (Vector3Int cell in _candidateCells)
             {
-                if (!terrain.HasTile(cell)) continue;
+                _carved.TryGetValue(cell, out CarvedCell entry);
+                bool hadCarve = entry != null;
+                bool inNewCarve = affectedCells.Contains(cell) && terrain.HasTile(cell);
 
-                Tile.ColliderType colliderType = terrain.GetColliderType(cell);
-                if (colliderType == Tile.ColliderType.None) continue;
+                if (!inNewCarve)
+                {
+                    if (hadCarve && RestoreCarvedCell(cell, entry)) tilemapChanged = true;
+                    continue;
+                }
 
-                if (!(terrain.GetTile(cell) is Tile tile) || tile.sprite == null) continue;
+                Tile.ColliderType originalType = hadCarve
+                    ? entry.originalColliderType
+                    : terrain.GetColliderType(cell);
+                if (originalType == Tile.ColliderType.None ||
+                    !(terrain.GetTile(cell) is Tile tile) || tile.sprite == null)
+                {
+                    if (hadCarve && RestoreCarvedCell(cell, entry)) tilemapChanged = true;
+                    continue;
+                }
 
                 Vector2 center = terrain.GetCellCenterWorld(cell);
-                List<Vector2[]> worldShapes = GetWorldShapes(tile.sprite, center, colliderType);
-                if (worldShapes.Count == 0) continue;
+                List<Vector2[]> worldShapes = GetWorldShapes(tile.sprite, center, originalType);
+                if (worldShapes.Count == 0)
+                {
+                    if (hadCarve && RestoreCarvedCell(cell, entry)) tilemapChanged = true;
+                    continue;
+                }
 
                 float originalArea = 0f;
                 var remaining = new List<Vector2[]>();
-
                 foreach (Vector2[] shape in worldShapes)
                 {
                     originalArea += Mathf.Abs(SignedArea(shape));
-
-                    // 一个格子的物理形状可能是多个轮廓；逐个和所有矩形做差。
                     var pieces = new List<Vector2[]> { shape };
                     foreach (CarveRect rect in rects)
                     {
@@ -240,7 +309,6 @@ namespace Platformer
                         pieces = next;
                         if (pieces.Count == 0) break;
                     }
-
                     remaining.AddRange(pieces);
                 }
 
@@ -248,42 +316,88 @@ namespace Platformer
                 foreach (Vector2[] shape in remaining)
                     remainingArea += Mathf.Abs(SignedArea(shape));
 
-                // 没有真正切到这一格，保持原样。
-                if (Mathf.Abs(originalArea - remainingArea) <= 0.0001f) continue;
-
-                // 不再替换 Tile/Sprite，只把这一格从 TilemapCollider 里移除。
-                // 剩余碰撞用独立的 PolygonCollider2D 补回来，避免运行时改 Sprite 物理形状。
-                terrain.SetColliderType(cell, Tile.ColliderType.None);
-
-                GameObject residual = null;
-                if (remaining.Count > 0)
+                // broadphase 只说明矩形包围盒相交；面积没变时不修改 Tilemap。
+                if (Mathf.Abs(originalArea - remainingArea) <= 0.0001f)
                 {
-                    residual = new GameObject("Carved Collider " + cell.x + "," + cell.y);
-                    residual.layer = terrain.gameObject.layer;
-                    residual.transform.SetParent(terrain.transform, true);
-                    residual.transform.position = center;
-                    residual.transform.rotation = Quaternion.identity;
-                    residual.transform.localScale = Vector3.one;
-
-                    var polygon = residual.AddComponent<PolygonCollider2D>();
-                    polygon.sharedMaterial = terrainCollider.sharedMaterial;
-                    polygon.pathCount = remaining.Count;
-                    for (int i = 0; i < remaining.Count; i++)
-                    {
-                        Vector2[] shape = remaining[i];
-                        var points = new Vector2[shape.Length];
-                        for (int j = 0; j < shape.Length; j++)
-                            points[j] = residual.transform.InverseTransformPoint(shape[j]);
-                        polygon.SetPath(i, points);
-                    }
+                    if (hadCarve && RestoreCarvedCell(cell, entry)) tilemapChanged = true;
+                    continue;
                 }
 
-                _carved[cell] = new CarvedCell
+                if (!hadCarve)
                 {
-                    originalColliderType = colliderType,
-                    residualCollider = residual
-                };
+                    entry = new CarvedCell { originalColliderType = originalType };
+                    _carved.Add(cell, entry);
+                }
+
+                if (terrain.GetColliderType(cell) != Tile.ColliderType.None)
+                {
+                    terrain.SetColliderType(cell, Tile.ColliderType.None);
+                    tilemapChanged = true;
+                }
+
+                UpdateResidualCollider(cell, center, entry, remaining);
+                residualChanged = true;
             }
+
+            // 多次 SetColliderType 只提交一批；仅残余路径变化时不重建 Composite。
+            if (tilemapChanged) RebuildColliders();
+            else if (residualChanged) Physics2D.SyncTransforms();
+        }
+
+        void UpdateResidualCollider(
+            Vector3Int cell,
+            Vector2 center,
+            CarvedCell entry,
+            List<Vector2[]> remaining)
+        {
+            if (remaining.Count == 0)
+            {
+                // 全切掉时保留禁用对象，之后门在同一格移回一部分可直接复用。
+                if (entry.residualPolygon != null) entry.residualPolygon.enabled = false;
+                if (entry.residualCollider != null) entry.residualCollider.SetActive(false);
+                return;
+            }
+
+            if (entry.residualCollider == null)
+            {
+                entry.residualCollider = new GameObject("Carved Collider " + cell.x + "," + cell.y);
+                entry.residualCollider.layer = terrain.gameObject.layer;
+                entry.residualCollider.transform.SetParent(terrain.transform, true);
+                entry.residualCollider.transform.rotation = Quaternion.identity;
+                entry.residualCollider.transform.localScale = Vector3.one;
+                entry.residualPolygon = entry.residualCollider.AddComponent<PolygonCollider2D>();
+            }
+
+            entry.residualCollider.transform.position = center;
+            PolygonCollider2D polygon = entry.residualPolygon;
+            polygon.sharedMaterial = terrainCollider.sharedMaterial;
+            polygon.pathCount = remaining.Count;
+            for (int i = 0; i < remaining.Count; i++)
+            {
+                Vector2[] shape = remaining[i];
+                var points = new Vector2[shape.Length];
+                for (int j = 0; j < shape.Length; j++)
+                    points[j] = entry.residualCollider.transform.InverseTransformPoint(shape[j]);
+                polygon.SetPath(i, points);
+            }
+
+            polygon.enabled = true;
+            entry.residualCollider.SetActive(true);
+        }
+
+        bool RestoreCarvedCell(Vector3Int cell, CarvedCell entry)
+        {
+            if (entry.residualCollider != null)
+            {
+                entry.residualCollider.SetActive(false);
+                Destroy(entry.residualCollider);
+            }
+
+            bool changed = terrain != null &&
+                           terrain.GetColliderType(cell) != entry.originalColliderType;
+            if (changed) terrain.SetColliderType(cell, entry.originalColliderType);
+            _carved.Remove(cell);
+            return changed;
         }
 
         // ------------------------------------------------------------------
@@ -483,6 +597,9 @@ namespace Platformer
 
             _carved.Clear();
             _lastRects.Clear();
+            _affectedCells.Clear();
+            _lastAffectedCells.Clear();
+            _candidateCells.Clear();
         }
 
         void RestoreAll()

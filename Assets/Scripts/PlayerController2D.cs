@@ -151,6 +151,9 @@ namespace Platformer
         /// <summary>物理步开始前的速度，传送碰撞回调里用它恢复进门瞬间的速度。</summary>
         public Vector2 VelocityBeforePhysics { get; private set; }
 
+        /// <summary>显式位置跳变的版本号；传送门用它把重生/瞬移与连续物理位移区分开。</summary>
+        internal int PositionRevision { get; private set; }
+
         /// <summary>当前玩家显示部分的 Z 旋转角（-180~180），相机用它对齐。</summary>
         public float CurrentRotationAngle => visualRoot != null
             ? Mathf.DeltaAngle(0f, visualRoot.eulerAngles.z)
@@ -635,6 +638,7 @@ namespace Platformer
 
         void TeleportCore(Vector2 position)
         {
+            unchecked { PositionRevision++; }
             _rb.velocity = Vector2.zero;
             _rb.position = position;
             transform.position = position;

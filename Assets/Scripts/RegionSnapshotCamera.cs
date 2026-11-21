@@ -56,6 +56,17 @@ namespace Platformer
         bool _renderingAvailable;
         bool _warnedTextureClamp;
         bool _warnedMissingSource;
+        Texture _outputTexture;
+        Vector4 _captureUvTransform = new Vector4(1f, 1f, 0f, 0f);
+        Vector4 _captureUvClip = new Vector4(0f, 0f, 1f, 1f);
+        MaterialPropertyBlock _outputProperties;
+
+        static readonly int MainTexId = Shader.PropertyToID("_MainTex");
+        static readonly int CaptureUvTransformId = Shader.PropertyToID("_CaptureUvTransform");
+        static readonly int CaptureUvClipId = Shader.PropertyToID("_CaptureUvClip");
+
+        internal Sprite CaptureSprite => _sprite;
+        internal RenderTexture CapturedTexture => _renderTexture;
 
         void OnEnable()
         {
@@ -88,11 +99,11 @@ namespace Platformer
         {
             if (!_captureActive) return;
 
-            // 输出被门背面逻辑隐藏或对象未激活时，不做无效渲染与同步回读。
+            // 输出被门背面逻辑隐藏或对象未激活时，不做无效渲染。
             if (output == null || !output.enabled || !output.gameObject.activeInHierarchy) return;
             if (!EnsureResources()) return;
 
-            // captureInterval 为 0 时每帧都重新渲染/读取一次，分辨率不变。
+            // captureInterval 为 0 时每帧都重新渲染一次，分辨率不变。
             if (captureInterval <= 0f)
             {
                 Capture();
@@ -129,6 +140,27 @@ namespace Platformer
             if (!_renderingAvailable && SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null) return;
             if (!EnsureResources()) return;
             Capture();
+        }
+
+        /// <summary>由 Portal View 设置捕获纹理及半屏 UV；所有每渲染器参数共用一个属性块。</summary>
+        internal void SetOutputCapture(Texture texture, Vector4 uvTransform, Vector4 uvClip)
+        {
+            _outputTexture = texture;
+            _captureUvTransform = uvTransform;
+            _captureUvClip = uvClip;
+            ApplyOutputProperties();
+        }
+
+        void ApplyOutputProperties()
+        {
+            if (output == null) return;
+
+            if (_outputProperties == null) _outputProperties = new MaterialPropertyBlock();
+            output.GetPropertyBlock(_outputProperties);
+            if (_outputTexture != null) _outputProperties.SetTexture(MainTexId, _outputTexture);
+            _outputProperties.SetVector(CaptureUvTransformId, _captureUvTransform);
+            _outputProperties.SetVector(CaptureUvClipId, _captureUvClip);
+            output.SetPropertyBlock(_outputProperties);
         }
 
         bool EnsureResources()
@@ -212,13 +244,16 @@ namespace Platformer
                 _renderTexture.Create();
                 if (captureCamera != null) captureCamera.targetTexture = _renderTexture;
 
+                // Texture2D/Sprite 只提供全尺寸网格和 UV，不再承载捕获像素。
                 _texture = new Texture2D(width, height, TextureFormat.RGB24, false);
-                _texture.name = "Region Snapshot";
+                _texture.name = "Region Snapshot Geometry";
 
                 _sprite = Sprite.Create(_texture, new Rect(0, 0, width, height),
                     new Vector2(0.5f, 0.5f), actualPixelsPerUnit);
                 _sprite.name = "Region Snapshot Sprite";
                 output.sprite = _sprite;
+                _outputTexture = _renderTexture;
+                ApplyOutputProperties();
                 _spriteWorldWidth = worldWidth;
                 _spriteWorldHeight = worldHeight;
             }
@@ -229,19 +264,8 @@ namespace Platformer
         void Capture()
         {
             // 相机保持 disabled，只在这里显式提交一次渲染，避免自动/手动双调度。
+            // Portal View 直接采样同一个 RenderTexture，不做 GPU → CPU 回读。
             captureCamera.Render();
-
-            RenderTexture previous = RenderTexture.active;
-            try
-            {
-                RenderTexture.active = _renderTexture;
-                _texture.ReadPixels(new Rect(0, 0, _texture.width, _texture.height), 0, 0);
-                _texture.Apply();
-            }
-            finally
-            {
-                RenderTexture.active = previous;
-            }
         }
 
         void ReleaseTargets()

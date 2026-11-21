@@ -3,6 +3,8 @@ Shader "Hidden/Platformer/PortalView"
     Properties
     {
         [PerRendererData] _MainTex ("捕获画面", 2D) = "white" {}
+        [PerRendererData] _CaptureUvTransform ("捕获 UV 变换", Vector) = (1,1,0,0)
+        [PerRendererData] _CaptureUvClip ("捕获 UV 裁剪", Vector) = (0,0,1,1)
         _Color ("Tint", Color) = (1,1,1,1)
         _PortalColor ("单门纹理颜色", Color) = (0.35,0.65,1,1)
         _ConnectionReveal ("连接画面显现进度", Range(0,1)) = 0
@@ -37,6 +39,8 @@ Shader "Hidden/Platformer/PortalView"
             #pragma multi_compile_instancing
             #include "UnitySprites.cginc"
 
+            float4 _CaptureUvTransform;
+            float4 _CaptureUvClip;
             fixed4 _PortalColor;
             float _ConnectionReveal;
             float _OpenBrightness;
@@ -83,9 +87,15 @@ Shader "Hidden/Platformer/PortalView"
 
             fixed4 frag(v2f input) : SV_Target
             {
-                fixed4 captured = SampleSpriteTexture(input.texcoord) * input.color;
-                fixed4 closed = ClosedPattern(input.texcoord, input.color.a);
+                float2 captureUv = input.texcoord * _CaptureUvTransform.xy + _CaptureUvTransform.zw;
+                fixed4 captured = SampleSpriteTexture(captureUv) * input.color;
+                fixed4 closed = ClosedPattern(captureUv, input.color.a);
                 fixed4 result = lerp(closed, captured, saturate(_ConnectionReveal));
+
+                // 未打通噪音、已连接画面及两者的渐变都只在同一个半幅区域内显示。
+                float2 inside = step(_CaptureUvClip.xy, input.texcoord) *
+                                step(input.texcoord, _CaptureUvClip.zw);
+                result *= inside.x * inside.y;
                 result.rgb *= result.a;
                 return result;
             }

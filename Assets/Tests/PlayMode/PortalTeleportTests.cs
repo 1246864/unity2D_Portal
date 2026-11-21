@@ -886,6 +886,127 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Moving_Portal_Crosses_Stationary_Player_And_Transfers_Relative_Velocity()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup a = _rig.A;
+            CaptureDisplayGroup b = _rig.B;
+            PlayerController2D controller = _rig.Player;
+            PrepareTransparencySandbox(pair, a, b);
+
+            a.Facing = PortalFacing.Right;
+            b.Facing = PortalFacing.Left;
+            a.transform.SetPositionAndRotation(new Vector3(-0.2f, 0f, 0f), Quaternion.identity);
+            b.transform.SetPositionAndRotation(new Vector3(6f, 0f, 0f), Quaternion.identity);
+            controller.Teleport(Vector2.zero);
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+
+            // 玩家保持静止，门在一个物理步内越过玩家；实体碰撞已关闭，只能由扫掠命中。
+            a.transform.position = new Vector3(0.2f, 0f, 0f);
+            yield return new WaitForFixedUpdate();
+
+            Assert.Less(Vector2.Distance(controller.transform.position, b.transform.position), 2f,
+                "移动门越过静止玩家时，应把玩家送到另一扇门。");
+            Assert.Less(controller.Velocity.x, -5f,
+                "出口速度应扣除入口门的运动速度，而不是把静止玩家直接当成零相对速度。");
+        }
+
+        [UnityTest]
+        public IEnumerator Rotating_Portal_Sweeps_Stationary_Player_Between_End_Poses()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup a = _rig.A;
+            CaptureDisplayGroup b = _rig.B;
+            PlayerController2D controller = _rig.Player;
+            PrepareTransparencySandbox(pair, a, b);
+            pair.preserveVelocity = false;
+
+            a.Facing = PortalFacing.Right;
+            b.Facing = PortalFacing.Left;
+            a.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            b.transform.SetPositionAndRotation(new Vector3(6f, 0f, 0f), Quaternion.identity);
+            controller.Teleport(new Vector2(1f, 0f));
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+
+            // 起止姿态都是竖直门，玩家均不在门内；中间转到水平时才扫过玩家。
+            a.transform.rotation = Quaternion.Euler(0f, 0f, 180f);
+            yield return new WaitForFixedUpdate();
+
+            Assert.Less(Vector2.Distance(controller.transform.position, b.transform.position), 2f,
+                "旋转门的中间姿态扫到玩家时也应传送，不能只检测起止姿态。");
+        }
+
+        [UnityTest]
+        public IEnumerator Relocated_Portal_Does_Not_Create_Old_To_New_Swept_Corridor()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup a = _rig.A;
+            CaptureDisplayGroup b = _rig.B;
+            PlayerController2D controller = _rig.Player;
+            PrepareTransparencySandbox(pair, a, b);
+
+            a.transform.SetPositionAndRotation(new Vector3(-1f, 0f, 0f), Quaternion.identity);
+            b.transform.position = new Vector3(6f, 0f, 0f);
+            controller.Teleport(Vector2.zero);
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+
+            // 显式通知即使位移低于自动阈值，也不能把旧位置和新位置连成走廊。
+            a.transform.position = new Vector3(1f, 0f, 0f);
+            pair.NotifyPortalRelocated(a);
+            yield return new WaitForFixedUpdate();
+            Assert.Less(Vector2.Distance(controller.transform.position, Vector2.zero), 0.05f,
+                "显式瞬移门不应在旧、新位置之间扫掠并误传送玩家。");
+
+            // 不走通知的大位移由兜底规则识别；新位置没有罩住玩家，因此仍不能传送。
+            a.transform.position = new Vector3(20f, 0f, 0f);
+            yield return new WaitForFixedUpdate();
+            Assert.Less(Vector2.Distance(controller.transform.position, Vector2.zero), 0.05f,
+                "跨地图门重定位不应产生旧到新位置的假扫掠。");
+            Assert.Greater(Vector2.Distance(controller.transform.position, b.transform.position), 5f);
+        }
+
+        [UnityTest]
+        public IEnumerator Arbitrarily_Oriented_Portals_Map_Incoming_Velocity()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup a = _rig.A;
+            CaptureDisplayGroup b = _rig.B;
+            PlayerController2D controller = _rig.Player;
+            Rigidbody2D rb = controller.GetComponent<Rigidbody2D>();
+            PrepareTransparencySandbox(pair, a, b);
+            pair.teleportCooldown = 10f;
+
+            a.transform.SetPositionAndRotation(Vector3.zero, Quaternion.Euler(0f, 0f, 37f));
+            b.transform.SetPositionAndRotation(new Vector3(6f, 0f, 0f),
+                Quaternion.Euler(0f, 0f, -53f));
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+
+            rb.velocity = new Vector2(3.2f, -1.7f);
+            yield return new WaitForFixedUpdate();
+            Vector2 incoming = controller.VelocityBeforePhysics;
+            Vector2 expected = b.OpeningDirection * -Vector2.Dot(incoming, a.OpeningDirection) +
+                               (Vector2)b.transform.up * Vector2.Dot(incoming, a.transform.up);
+
+            pair.teleportCooldown = 0f;
+            var teleportMethod = typeof(PortalPair).GetMethod(
+                "Teleport", System.Reflection.BindingFlags.Instance |
+                            System.Reflection.BindingFlags.NonPublic);
+            teleportMethod.Invoke(pair, new object[] { a, b });
+
+            Assert.Less(Vector2.Distance(expected, rb.velocity), 0.001f,
+                "任意旋转门的出口速度应使用各自法线和切线映射进门速度。");
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator Portal_View_Hides_When_Player_Is_Behind()
         {
             FindGroups(out var a, out _);
