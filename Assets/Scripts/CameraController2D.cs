@@ -180,9 +180,12 @@ namespace Platformer
                 Vector3 cameraLocalPosition = Quaternion.Inverse(relativeRotation) * relativePosition;
                 cameraLocalPosition.x = -cameraLocalPosition.x;
                 relativePosition = relativeRotation * cameraLocalPosition;
+
+                // 同向门是反射而非纯旋转，相机相对角也必须取反；
+                // 投影镜像只负责画面左右翻转，不能替代 Transform 的角度映射。
+                relativeRotation = Quaternion.Inverse(relativeRotation);
             }
 
-            // 相对角度随玩家旋转增量映射，避免与投影镜像重复。
             Matrix4x4 relative = Matrix4x4.TRS(relativePosition, relativeRotation, relativeScale);
             Matrix4x4 world = playerVisual.localToWorldMatrix * relative;
             Decompose2D(world, out Vector3 position, out Quaternion rotation, out Vector3 scale);

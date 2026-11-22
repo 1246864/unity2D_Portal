@@ -384,8 +384,8 @@ namespace Platformer.Tests
                 0.1f, "本用例必须能区分相机局部镜像与旧的玩家局部镜像。");
             Assert.Less(Vector3.Distance(expectedPosition, actualPosition),
                 0.001f, "完整 B→A 链路应沿旧相机局部 X 镜像相机相对位置。");
-            Assert.AreEqual(oldAngle, actualAngle, 0.001f,
-                "投影切换已负责画面镜像，相机 Transform 不应再把旧相对角取反。");
+            Assert.AreEqual(-oldAngle, actualAngle, 0.001f,
+                "同向门是反射映射，相机 Transform 的旧相对角必须取反。");
 
             yield return null;
             Vector3 nextPosition = visual.InverseTransformPoint(camera.transform.position);
