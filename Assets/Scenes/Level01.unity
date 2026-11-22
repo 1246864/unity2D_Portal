@@ -926,7 +926,7 @@ MonoBehaviour:
   teleportCooldown: 0.25
   preserveVelocity: 1
   gateThickness: 0.05
-  exitMargin: 0.03
+  gateContactOffset: 0.1
   maskTopOffset: 2
   maskBottomOffset: -2
   useDynamicSize: 1

@@ -275,13 +275,6 @@ namespace Platformer.Tests
                 "从 B 门进入不应触发 A 的开门动画。");
             Assert.Greater(Vector2.Distance(player.transform.position, b.transform.position), 5f,
                 "传送后玩家应该已经离开 B 的位置。");
-
-            float distance = Vector2.Dot(
-                (Vector2)player.transform.position - (Vector2)a.transform.position,
-                a.OpeningDirection);
-            float safe = pair.gateThickness * 0.5f + controller.centerPointRadius + pair.exitMargin;
-            Assert.GreaterOrEqual(distance, safe - 0.02f,
-                "传送后玩家中心不应该停在对方门的碰撞箱里。");
         }
 
         [UnityTest]
@@ -400,6 +393,9 @@ namespace Platformer.Tests
             controller.Teleport((Vector2)(b.transform.position +
                                           (Vector3)b.OpeningDirection * 0.45f));
             teleportMethod.Invoke(pair, new object[] { b, a });
+            Vector2 expectedPlayerPosition = (Vector2)a.transform.position - a.OpeningDirection * 0.45f;
+            Assert.Less(Vector2.Distance(player.transform.position, expectedPlayerPosition), 0.0001f,
+                "同向门应将入口法向偏移镜像到出口的反方向，而不是直接传送到门中心。");
             Assert.AreEqual(45f, controller.CurrentRotationAngle, 0.001f,
                 "玩家 0° 从 B(45°)→A(0°) 时应为 +45°；旧结果的 -45° 正好偏了 90°。");
         }
@@ -995,12 +991,19 @@ namespace Platformer.Tests
             Vector2 expected = b.OpeningDirection * -Vector2.Dot(incoming, a.OpeningDirection) +
                                (Vector2)b.transform.up * Vector2.Dot(incoming, a.transform.up);
 
+            Vector2 sourceOffset = (Vector2)controller.transform.position - (Vector2)a.transform.position;
+            Vector2 expectedPlayerPosition = (Vector2)b.transform.position -
+                (Vector2)b.transform.right * Vector2.Dot(sourceOffset, a.transform.right) +
+                (Vector2)b.transform.up * Vector2.Dot(sourceOffset, a.transform.up);
+
             pair.teleportCooldown = 0f;
             var teleportMethod = typeof(PortalPair).GetMethod(
                 "Teleport", System.Reflection.BindingFlags.Instance |
                             System.Reflection.BindingFlags.NonPublic);
             teleportMethod.Invoke(pair, new object[] { a, b });
 
+            Assert.Less(Vector2.Distance(expectedPlayerPosition, controller.transform.position), 0.001f,
+                "反向门的位置应按双方局部 X 镜像，保留出口正面而不是落到门背后。");
             Assert.Less(Vector2.Distance(expected, rb.velocity), 0.001f,
                 "任意旋转门的出口速度应使用各自法线和切线映射进门速度。");
             yield return null;

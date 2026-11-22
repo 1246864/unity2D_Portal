@@ -36,8 +36,8 @@ namespace Platformer
         [Tooltip("传送门薄碰撞箱的厚度（世界单位）；越薄越依赖连续碰撞")]
         [Min(0.001f)] public float gateThickness = 0.05f;
 
-        [Tooltip("传送后玩家中心离碰撞箱外表面的额外距离（世界单位），建议大于物理接触偏移 0.01")]
-        [Min(0f)] public float exitMargin = 0.03f;
+        [Tooltip("玩家接触碰撞箱沿传送门开口反方向后退的距离（世界单位），用于减少出口处的重复接触传送；只偏移碰撞体，不移动门本体")]
+        [Min(0f)] public float gateContactOffset = 0.04f;
 
         [Header("门洞")]
         [Tooltip("上遮罩相对门中心的 Y 偏移（世界单位）；两扇门共用")]
@@ -123,6 +123,7 @@ namespace Platformer
             public Vector2 LinearVelocity;
             public float AngularVelocity;
 
+            public Vector2 Right => DirectionFromUp(Angle - 90f);
             public Vector2 Tangent => DirectionFromUp(Angle);
             public Vector2 Opening => DirectionFromUp(Angle + FacingSign * -90f);
 
@@ -527,8 +528,9 @@ namespace Platformer
         {
             Vector2 normal = state.Opening;
             Vector2 tangent = state.Tangent;
-            Vector2 deltaStart = start - state.Position;
-            Vector2 deltaEnd = end - state.Position;
+            Vector2 gateCenter = state.Position - state.Opening * gateContactOffset;
+            Vector2 deltaStart = start - gateCenter;
+            Vector2 deltaEnd = end - gateCenter;
             var localStart = new Vector2(
                 Vector2.Dot(deltaStart, normal), Vector2.Dot(deltaStart, tangent));
             var localEnd = new Vector2(
@@ -1006,17 +1008,14 @@ namespace Platformer
             bool sameFacing = source.Facing == partner.Facing;
             var rb = player.GetComponent<Rigidbody2D>();
 
-            // 出口：对方门开口方向外侧 + 入口时沿门切线（门 Y+）的相对位置。
-            // 扫掠命中时使用命中瞬间的门与玩家位姿，避免把后续位移带进切线偏移。
-            float front = gateThickness * 0.5f + controller.centerPointRadius + exitMargin;
-            Vector2 exitDirection = partnerState.Opening;
-            Vector2 sourceTangent = sourceState.Tangent;
-            Vector2 partnerTangent = partnerState.Tangent;
-            float tangentOffset = Vector2.Dot(
-                playerPosition - sourceState.Position, sourceTangent);
-            Vector3 target = (Vector3)partnerState.Position +
-                             (Vector3)(exitDirection * front) +
-                             (Vector3)(partnerTangent * tangentOffset);
+            // 位置按门根节点局部坐标做 X 镜像：(x, y) → (-x, y)。
+            // 同 Facing 时 Opening 分量取反，反 Facing 时保留。
+            Vector2 sourceOffset = playerPosition - sourceState.Position;
+            float xOffset = Vector2.Dot(sourceOffset, sourceState.Right);
+            float tangentOffset = Vector2.Dot(sourceOffset, sourceState.Tangent);
+            Vector3 target = (Vector3)(partnerState.Position -
+                                       partnerState.Right * xOffset +
+                                       partnerState.Tangent * tangentOffset);
 
             // 先解析实际执行传送的总控，再从它所在的相机记录相对位姿。
             Camera followCamera = source.capture != null ? source.capture.sourceCamera : null;
@@ -1045,9 +1044,9 @@ namespace Platformer
             // 先扣除入口门在接触点的速度，映射后再叠加出口门点速度。
             // 因而静止玩家被移动门扫到、或从旋转门边缘进入时，结果仍遵循相对运动。
             Vector2 relativeVelocity = incomingVelocity - sourceState.PointVelocity(playerPosition);
-            Vector2 velocity = TransformPortalVelocity(
+            Vector2 velocity = TransformPortalVector(
                 relativeVelocity, sourceState, partnerState) + partnerState.PointVelocity(target);
-            Vector2 variableJumpDirection = TransformPortalVelocity(
+            Vector2 variableJumpDirection = TransformPortalVector(
                 controller.VariableJumpDirection, sourceState, partnerState);
 
             // 剩余长按跳跃与速度走同一套门坐标变换，斜向门不会把它强行折回世界 Y 轴。
@@ -1081,14 +1080,14 @@ namespace Platformer
         /// <summary>
         /// 把进门时的速度/受力向量变换到出口门的坐标系：
         /// 沿门法线（开口方向）的分量反向，沿门切线（门 Y+）的分量保留。
-        /// 这样两门同向时会被反向，相对旋转时速度也会跟着转。
+        /// 同 Facing 时等价于门局部坐标的 X 镜像，相对旋转则由两门的坐标轴处理。
         /// </summary>
-        static Vector2 TransformPortalVelocity(
-            Vector2 velocity, PortalFrameState source, PortalFrameState partner)
+        static Vector2 TransformPortalVector(
+            Vector2 vector, PortalFrameState source, PortalFrameState partner)
         {
-            float normalSpeed = Vector2.Dot(velocity, source.Opening);
-            float tangentSpeed = Vector2.Dot(velocity, source.Tangent);
-            return partner.Opening * -normalSpeed + partner.Tangent * tangentSpeed;
+            float normalComponent = Vector2.Dot(vector, source.Opening);
+            float tangentComponent = Vector2.Dot(vector, source.Tangent);
+            return partner.Opening * -normalComponent + partner.Tangent * tangentComponent;
         }
 
         void CacheGroups()
@@ -1120,7 +1119,7 @@ namespace Platformer
                 gate = group.gameObject.AddComponent<BoxCollider2D>();
 
             gate.isTrigger = false;
-            gate.offset = Vector2.zero;
+            gate.offset = new Vector2(-group.FacingSign * gateContactOffset, 0f);
             gate.size = new Vector2(gateThickness, group.PortalHeight);
             gate.enabled = IsLinked && IsPortalActive(group);
 
@@ -1154,6 +1153,10 @@ namespace Platformer
             Vector2 size = new Vector2(gateThickness, group.PortalHeight);
             if (gate.size != size)
                 gate.size = size;
+
+            Vector2 offset = new Vector2(-group.FacingSign * gateContactOffset, 0f);
+            if (gate.offset != offset)
+                gate.offset = offset;
         }
 
         /// <summary>
