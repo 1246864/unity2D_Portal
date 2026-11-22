@@ -79,6 +79,15 @@ namespace Platformer
         [Tooltip("为了让玩家胶囊能贴到门面，额外向门面方向扩展的长度；0 = 严格从中轴开始")]
         [Min(0f)] public float carveFrontMargin = 0.1f;
 
+        [Tooltip("开洞顶边向下缩进的距离，保留一条地形碰撞支撑玩家；0 = 与门洞顶边齐平")]
+        [Min(0f)] public float carveTopMargin = 0.12f;
+
+        [Tooltip("玩家进入门前这段距离后关闭背面补墙碰撞体")]
+        [Min(0.01f)] public float carveActivationDepth = 1f;
+
+        [Tooltip("退出正面检测区域时的额外容差，避免补墙碰撞体在边界反复开关")]
+        [Min(0f)] public float carveActivationExitMargin = 0.15f;
+
         /// <summary>门洞高度，由上下遮罩偏移算出，两扇门共用。</summary>
         public float PortalHeight => Mathf.Abs(maskTopOffset - maskBottomOffset);
 
@@ -829,6 +838,9 @@ namespace Platformer
 
             _terrainCarver.carveWidth = Mathf.Max(0.01f, carveWidth);
             _terrainCarver.carveFrontMargin = Mathf.Max(0f, carveFrontMargin);
+            _terrainCarver.carveTopMargin = Mathf.Max(0f, carveTopMargin);
+            _terrainCarver.carveActivationDepth = Mathf.Max(0.01f, carveActivationDepth);
+            _terrainCarver.carveActivationExitMargin = Mathf.Max(0f, carveActivationExitMargin);
             _terrainCarver.enabled = true;
 
             if (_groupA != null)
@@ -872,12 +884,21 @@ namespace Platformer
 
             float width = Mathf.Max(0.01f, carveWidth);
             float frontMargin = Mathf.Max(0f, carveFrontMargin);
+            float topMargin = Mathf.Max(0f, carveTopMargin);
+            float activationDepth = Mathf.Max(0.01f, carveActivationDepth);
+            float activationExitMargin = Mathf.Max(0f, carveActivationExitMargin);
             bool parametersChanged =
                 !Mathf.Approximately(_terrainCarver.carveWidth, width) ||
-                !Mathf.Approximately(_terrainCarver.carveFrontMargin, frontMargin);
+                !Mathf.Approximately(_terrainCarver.carveFrontMargin, frontMargin) ||
+                !Mathf.Approximately(_terrainCarver.carveTopMargin, topMargin) ||
+                !Mathf.Approximately(_terrainCarver.carveActivationDepth, activationDepth) ||
+                !Mathf.Approximately(_terrainCarver.carveActivationExitMargin, activationExitMargin);
 
             _terrainCarver.carveWidth = width;
             _terrainCarver.carveFrontMargin = frontMargin;
+            _terrainCarver.carveTopMargin = topMargin;
+            _terrainCarver.carveActivationDepth = activationDepth;
+            _terrainCarver.carveActivationExitMargin = activationExitMargin;
 
             if (!_terrainCarver.enabled)
             {

@@ -10,7 +10,7 @@ namespace Platformer
     /// 矩形定义：
     /// - 起点：门的中心（PortalPair 下的 Portal A/B 根节点）；
     /// - 长度方向：门的朝向反向量（背向门面的方向），长度 = carveWidth；
-    /// - 高度方向：与背向垂直，长度 = PortalHeight，居中。
+    /// - 高度方向：与背向垂直，长度 = PortalHeight，居中；顶边向下缩进 carveTopMargin。
     /// - 为了让玩家胶囊能贴到门面，额外向门面方向扩展 carveFrontMargin；
     ///   设为 0 就是严格从门中轴开始。
     ///
@@ -18,6 +18,8 @@ namespace Platformer
     /// 一个 1×1 方块可以被切成 0.5 格、甚至更小的碎片。视觉 Tile 保持不变；
     /// 被影响的格子从 TilemapCollider2D 中移除，剩余碰撞用运行时 PolygonCollider2D 补回。
     /// 这样不需要在运行时 OverridePhysicsShape，也不会在门禁用/重新启用后残留 carve 状态。
+    /// 每个门洞另有一个等大的补墙 BoxCollider2D：玩家离开正面区域时启用，
+    /// 接近正面时关闭，因此进出检测区域不需要重新执行地形布尔裁剪。
     ///
     /// 门停用/场景卸载时移除残余碰撞、恢复原 ColliderType，并重建 CompositeCollider2D。
     /// </summary>
@@ -39,8 +41,18 @@ namespace Platformer
         [Tooltip("为了让玩家胶囊能贴到门面，额外向门面方向扩展的长度；0 = 严格从门中轴开始")]
         [Min(0f)] public float carveFrontMargin = 0.1f;
 
-        readonly Dictionary<CaptureDisplayGroup, bool> _openPortals =
-            new Dictionary<CaptureDisplayGroup, bool>();
+        [Tooltip("开洞顶边向下缩进的距离，保留一条地形碰撞支撑玩家；0 = 与门洞顶边齐平")]
+        [Min(0f)] public float carveTopMargin = 0.12f;
+
+        [Header("正面接近检测")]
+        [Tooltip("玩家进入门前这段距离后关闭补墙碰撞体，应略大于单帧最大移动距离")]
+        [Min(0.01f)] public float carveActivationDepth = 1f;
+
+        [Tooltip("退出正面检测区域时的额外容差，避免边界抖动导致碰撞体反复开关")]
+        [Min(0f)] public float carveActivationExitMargin = 0.15f;
+
+        readonly Dictionary<CaptureDisplayGroup, PortalCarveState> _openPortals =
+            new Dictionary<CaptureDisplayGroup, PortalCarveState>();
         readonly Dictionary<Vector3Int, CarvedCell> _carved =
             new Dictionary<Vector3Int, CarvedCell>();
         readonly Dictionary<Sprite, List<Vector2[]>> _spriteShapes =
@@ -56,6 +68,15 @@ namespace Platformer
         /// <summary>当前被切过碰撞的格子数。</summary>
         public int CarvedCellCount => _carved.Count;
 
+        sealed class PortalCarveState
+        {
+            public GameObject backfillObject;
+            public BoxCollider2D backfill;
+            public Transform player;
+            public CapsuleCollider2D playerCapsule;
+            public bool playerInFront;
+        }
+
         /// <summary>一个格子的原始碰撞信息，用于恢复。</summary>
         sealed class CarvedCell
         {
@@ -67,16 +88,18 @@ namespace Platformer
         /// <summary>
         /// 有朝向的矩形。origin 是门中轴起点，axis 是“门背后”的单位向量，
         /// perp 与 axis 垂直；local.x ∈ [-frontMargin, length]，
-        /// local.y ∈ [-height/2, height/2]。
+        /// local.y ∈ [-height/2, height/2 - topMargin]。
         /// </summary>
         struct CarveRect
         {
+            public CaptureDisplayGroup portal;
             public Vector2 origin;
             public Vector2 axis;
             public Vector2 perp;
             public float frontMargin;
             public float length;
             public float height;
+            public float topMargin;
 
             public Vector2 ToLocal(Vector2 world)
             {
@@ -123,8 +146,19 @@ namespace Platformer
         {
             if (group == null) return;
 
-            if (open) _openPortals[group] = true;
-            else _openPortals.Remove(group);
+            if (open)
+            {
+                if (!_openPortals.ContainsKey(group))
+                    _openPortals.Add(group, new PortalCarveState());
+            }
+            else
+            {
+                if (_openPortals.TryGetValue(group, out PortalCarveState state))
+                {
+                    DestroyBackfill(state);
+                    _openPortals.Remove(group);
+                }
+            }
 
             Refresh();
         }
@@ -146,7 +180,11 @@ namespace Platformer
             if (terrain == null || terrainCollider == null) return;
 
             List<CarveRect> rects = CollectCarveRects(_rectBuffer);
-            if (SameRects(rects, _lastRects)) return;
+            bool geometryChanged = !SameRects(rects, _lastRects);
+
+            // 补墙开关每帧更新；只有门洞几何变化才更新尺寸并执行地形布尔裁剪。
+            SyncBackfills(rects, geometryChanged);
+            if (!geometryChanged) return;
 
             _lastRects.Clear();
             _lastRects.AddRange(rects);
@@ -175,14 +213,21 @@ namespace Platformer
                 if (back.sqrMagnitude < 0.000001f) continue;
                 back.Normalize();
 
+                // perp 始终指向门自身上方，保证左右朝向的门都只缩减顶边。
+                Vector2 perp = new Vector2(-back.y, back.x);
+                if (Vector2.Dot(perp, group.transform.up) < 0f) perp = -perp;
+
+                float height = Mathf.Max(0.01f, group.PortalHeight);
                 result.Add(new CarveRect
                 {
+                    portal = group,
                     origin = group.transform.position,
                     axis = back,
-                    perp = new Vector2(-back.y, back.x),
+                    perp = perp,
                     frontMargin = Mathf.Max(0f, carveFrontMargin),
                     length = Mathf.Max(0.01f, carveWidth),
-                    height = Mathf.Max(0.01f, group.PortalHeight)
+                    height = height,
+                    topMargin = Mathf.Clamp(carveTopMargin, 0f, height - 0.01f)
                 });
             }
 
@@ -200,6 +245,116 @@ namespace Platformer
             return result;
         }
 
+        void SyncBackfills(List<CarveRect> rects, bool geometryChanged)
+        {
+            foreach (CarveRect rect in rects)
+            {
+                if (!_openPortals.TryGetValue(rect.portal, out PortalCarveState state)) continue;
+
+                bool created = state.backfill == null;
+                if (created) CreateBackfill(state, rect.portal);
+                if (created || geometryChanged) UpdateBackfillGeometry(state, rect);
+                UpdateBackfillActivation(state, rect);
+            }
+        }
+
+        void CreateBackfill(PortalCarveState state, CaptureDisplayGroup group)
+        {
+            var go = new GameObject(group.name + " Backfill Collider");
+            go.layer = terrain.gameObject.layer;
+            go.transform.SetParent(transform, true);
+
+            var body = go.AddComponent<Rigidbody2D>();
+            body.bodyType = RigidbodyType2D.Kinematic;
+            body.gravityScale = 0f;
+            body.interpolation = RigidbodyInterpolation2D.None;
+
+            var box = go.AddComponent<BoxCollider2D>();
+            box.sharedMaterial = terrainCollider.sharedMaterial;
+            box.isTrigger = false;
+            box.enabled = false;
+
+            state.backfillObject = go;
+            state.backfill = box;
+        }
+
+        static void UpdateBackfillGeometry(PortalCarveState state, CarveRect rect)
+        {
+            Vector2 center = rect.ToWorld(new Vector2(
+                (rect.length - rect.frontMargin) * 0.5f,
+                -rect.topMargin * 0.5f));
+            float angle = Mathf.Atan2(rect.axis.y, rect.axis.x) * Mathf.Rad2Deg;
+            state.backfillObject.transform.SetPositionAndRotation(
+                center, Quaternion.Euler(0f, 0f, angle));
+            state.backfill.size = new Vector2(
+                rect.length + rect.frontMargin,
+                rect.height - rect.topMargin);
+        }
+
+        void UpdateBackfillActivation(PortalCarveState state, CarveRect rect)
+        {
+            Transform player = rect.portal.PlayerTransform;
+            if (player == null)
+            {
+                state.player = null;
+                state.playerCapsule = null;
+                state.playerInFront = false;
+                if (!state.backfill.enabled) state.backfill.enabled = true;
+                return;
+            }
+
+            if (state.player != player)
+            {
+                state.player = player;
+                state.playerCapsule = player.GetComponent<CapsuleCollider2D>();
+                state.playerInFront = false;
+            }
+
+            Vector2 local = rect.ToLocal(player.position);
+            float exitMargin = state.playerInFront
+                ? Mathf.Max(0f, carveActivationExitMargin)
+                : 0f;
+            float forward = -local.x;
+            float halfHeight = rect.height * 0.5f;
+            bool inFront =
+                forward >= -rect.frontMargin - exitMargin &&
+                forward <= Mathf.Max(0.01f, carveActivationDepth) + exitMargin &&
+                Mathf.Abs(local.y) <= halfHeight + exitMargin;
+            state.playerInFront = inFront;
+
+            bool overlapsPlayer;
+            if (state.playerCapsule != null && state.playerCapsule.isActiveAndEnabled)
+            {
+                // 使用 AABB 做保守检查：宁可稍晚启用，也不能在玩家身上生成实体碰撞。
+                overlapsPlayer = state.backfill.bounds.Intersects(state.playerCapsule.bounds);
+            }
+            else
+            {
+                overlapsPlayer =
+                    local.x >= -rect.frontMargin && local.x <= rect.length &&
+                    local.y >= -halfHeight && local.y <= halfHeight - rect.topMargin;
+            }
+
+            bool enable = !inFront && !overlapsPlayer;
+            if (state.backfill.enabled != enable) state.backfill.enabled = enable;
+        }
+
+        void DestroyBackfill(PortalCarveState state)
+        {
+            if (state == null) return;
+            if (state.backfillObject != null)
+            {
+                state.backfillObject.SetActive(false);
+                Destroy(state.backfillObject);
+            }
+
+            state.backfillObject = null;
+            state.backfill = null;
+            state.player = null;
+            state.playerCapsule = null;
+            state.playerInFront = false;
+        }
+
         void CollectAffectedCells(List<CarveRect> rects, HashSet<Vector3Int> output)
         {
             BoundsInt terrainBounds = terrain.cellBounds;
@@ -207,17 +362,18 @@ namespace Platformer
 
             foreach (CarveRect rect in rects)
             {
-                float halfHeight = rect.height * 0.5f;
+                float bottom = -rect.height * 0.5f;
+                float top = -bottom - rect.topMargin;
                 var minimum = new Vector3Int(int.MaxValue, int.MaxValue, int.MaxValue);
                 var maximum = new Vector3Int(int.MinValue, int.MinValue, int.MinValue);
 
-                IncludeCell(rect.ToWorld(new Vector2(-rect.frontMargin, -halfHeight)),
+                IncludeCell(rect.ToWorld(new Vector2(-rect.frontMargin, bottom)),
                     ref minimum, ref maximum);
-                IncludeCell(rect.ToWorld(new Vector2(-rect.frontMargin, halfHeight)),
+                IncludeCell(rect.ToWorld(new Vector2(-rect.frontMargin, top)),
                     ref minimum, ref maximum);
-                IncludeCell(rect.ToWorld(new Vector2(rect.length, -halfHeight)),
+                IncludeCell(rect.ToWorld(new Vector2(rect.length, bottom)),
                     ref minimum, ref maximum);
-                IncludeCell(rect.ToWorld(new Vector2(rect.length, halfHeight)),
+                IncludeCell(rect.ToWorld(new Vector2(rect.length, top)),
                     ref minimum, ref maximum);
 
                 // 向外扩一格，覆盖门洞恰好压到格子边界以及浮点误差。
@@ -251,6 +407,7 @@ namespace Platformer
                 if (Mathf.Abs(a[i].frontMargin - b[i].frontMargin) > 0.0001f) return false;
                 if (Mathf.Abs(a[i].length - b[i].length) > 0.0001f) return false;
                 if (Mathf.Abs(a[i].height - b[i].height) > 0.0001f) return false;
+                if (Mathf.Abs(a[i].topMargin - b[i].topMargin) > 0.0001f) return false;
             }
             return true;
         }
@@ -415,7 +572,8 @@ namespace Platformer
             foreach (Vector2 p in worldPolygon)
                 local.Add(rect.ToLocal(p));
 
-            float halfHeight = rect.height * 0.5f;
+            float bottom = -rect.height * 0.5f;
+            float top = -bottom - rect.topMargin;
             float front = -rect.frontMargin;
 
             // 1) 矩形左侧（local.x <= front）
@@ -424,12 +582,12 @@ namespace Platformer
             // 2) 矩形右侧（local.x >= length）
             AddPiece(ClipHalfPlane(local, 0, rect.length, true), rect, output);
 
-            // 3) 矩形正下方窄条（front <= local.x <= length 且 local.y <= -h/2）
-            AddPiece(ClipBox(local, front, rect.length, float.NegativeInfinity, -halfHeight),
+            // 3) 矩形正下方窄条（front <= local.x <= length 且 local.y <= bottom）
+            AddPiece(ClipBox(local, front, rect.length, float.NegativeInfinity, bottom),
                 rect, output);
 
-            // 4) 矩形正上方窄条（front <= local.x <= length 且 local.y >= +h/2）
-            AddPiece(ClipBox(local, front, rect.length, halfHeight, float.PositiveInfinity),
+            // 4) 矩形正上方窄条（front <= local.x <= length 且 local.y >= top）
+            AddPiece(ClipBox(local, front, rect.length, top, float.PositiveInfinity),
                 rect, output);
         }
 
@@ -605,6 +763,7 @@ namespace Platformer
         void RestoreAll()
         {
             RestoreCells();
+            foreach (var pair in _openPortals) DestroyBackfill(pair.Value);
 
             if (terrain != null && terrainCollider != null &&
                 gameObject.scene.IsValid() && gameObject.scene.isLoaded)

@@ -30,6 +30,8 @@ namespace Platformer.Tests
                 new Vector3(0.1f, 0.5f, 0f), Quaternion.identity);
             _rig.A.Facing = PortalFacing.Left;
             _rig.B.transform.position = new Vector3(20f, 20f, 0f);
+            PlacePlayerInFront(_rig, _rig.A);
+            _rig.Player.GetComponent<Rigidbody2D>().simulated = false;
 
             _rig.Root.SetActive(true);
             _rig.Terrain.TilemapCollider.ProcessTilemapChanges();
@@ -44,6 +46,21 @@ namespace Platformer.Tests
         {
             if (_rig != null) _rig.Destroy();
             yield return null;
+        }
+
+        static void PlacePlayerInFront(PortalTestRig rig, CaptureDisplayGroup group)
+        {
+            rig.Player.transform.position =
+                group.transform.position + (Vector3)group.OpeningDirection * 0.75f;
+        }
+
+        static BoxCollider2D FindBackfill(PortalPair pair, CaptureDisplayGroup group)
+        {
+            foreach (BoxCollider2D collider in pair.GetComponentsInChildren<BoxCollider2D>(true))
+            {
+                if (collider.name == group.name + " Backfill Collider") return collider;
+            }
+            return null;
         }
 
         static int CountResidualColliders(GameObject terrainGo)
@@ -149,6 +166,77 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Carve_Leaves_Top_Support_Strip()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup groupA = _rig.A;
+            groupA.Facing = PortalFacing.Right; // 与 Level01 的 A 门一致，背向为 -X。
+            PlacePlayerInFront(_rig, groupA);
+            pair.carveTopMargin = 0.12f;
+            yield return new WaitForFixedUpdate();
+            yield return null;
+
+            Vector2 back = groupA.BackDirection;
+            Vector2 up = groupA.transform.up;
+            Vector2 inside = (Vector2)groupA.transform.position + back * 0.2f;
+            float top = pair.PortalHeight * 0.5f;
+            Vector2 support = inside + up * (top - pair.carveTopMargin * 0.5f);
+            Vector2 belowSupport = inside + up * (top - pair.carveTopMargin - 0.05f);
+
+            Assert.IsNotNull(Physics2D.OverlapPoint(support, _groundMask),
+                "门洞顶边下方应保留一条地形碰撞，支撑站在门顶后方的玩家。");
+            Assert.IsNull(Physics2D.OverlapPoint(belowSupport, _groundMask),
+                "顶部保留条以下的门洞内部仍应正常切除。");
+        }
+
+        [UnityTest]
+        public IEnumerator Backfill_Toggles_Without_Recarving()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup groupA = _rig.A;
+            var carver = pair.GetComponent<PortalTerrainCarver>();
+            GameObject terrainGo = _rig.Terrain.TerrainObject;
+            BoxCollider2D backfill = FindBackfill(pair, groupA);
+            Assert.IsNotNull(backfill, "激活门应创建一个背面补墙碰撞体。");
+
+            int carvedCellCount = carver.CarvedCellCount;
+            PolygonCollider2D[] originalResiduals =
+                terrainGo.GetComponentsInChildren<PolygonCollider2D>(true);
+            Vector2 inside = (Vector2)groupA.transform.position + groupA.BackDirection * 0.2f;
+            Assert.IsFalse(backfill.enabled, "玩家在正面区域内时补墙碰撞体应关闭。");
+            Assert.IsNull(Physics2D.OverlapPoint(inside, _groundMask));
+
+            // 玩家离开正面但仍处于补墙区域内部时，不能在其身上启用实体碰撞。
+            _rig.Player.transform.position =
+                groupA.transform.position + (Vector3)groupA.BackDirection * 0.4f;
+            Physics2D.SyncTransforms();
+            yield return new WaitForFixedUpdate();
+            yield return null;
+            Assert.IsFalse(backfill.enabled, "玩家与补墙区域重叠时应延迟启用。");
+
+            _rig.Player.transform.position = new Vector3(-10f, 4f, 0f);
+            Physics2D.SyncTransforms();
+            yield return new WaitForFixedUpdate();
+            yield return null;
+            Assert.IsTrue(backfill.enabled, "玩家离开正面和补墙区域后应恢复实体碰撞。");
+            Assert.IsNotNull(Physics2D.OverlapPoint(inside, _groundMask),
+                "补墙碰撞体应填回已切开的门洞。");
+
+            PlacePlayerInFront(_rig, groupA);
+            yield return new WaitForFixedUpdate();
+            yield return null;
+            Assert.IsFalse(backfill.enabled, "玩家重新接近正面时应再次关闭补墙碰撞体。");
+            Assert.IsNull(Physics2D.OverlapPoint(inside, _groundMask));
+            Assert.AreSame(backfill, FindBackfill(pair, groupA),
+                "玩家进出只应切换原碰撞体，不应销毁重建。");
+            Assert.AreEqual(carvedCellCount, carver.CarvedCellCount,
+                "玩家进出不应改变已裁剪格子数量。");
+            CollectionAssert.AreEquivalent(originalResiduals,
+                terrainGo.GetComponentsInChildren<PolygonCollider2D>(true),
+                "玩家进出不应重新执行地形布尔裁剪或重建残余碰撞体。");
+        }
+
+        [UnityTest]
         public IEnumerator OpeningDirection_Follows_Transform_Rotation()
         {
             CaptureDisplayGroup groupA = _rig.A;
@@ -175,6 +263,7 @@ namespace Platformer.Tests
             // 夹具在新旧两个位置都生成了瓦片，两个位置的开洞断言都有效。
             groupA.transform.position =
                 (Vector3)originalPosition + Vector3.up * (pair.PortalHeight + 0.5f);
+            PlacePlayerInFront(_rig, groupA);
             yield return new WaitForFixedUpdate();
             yield return null;
 
