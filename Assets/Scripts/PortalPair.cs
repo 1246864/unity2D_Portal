@@ -1,3 +1,6 @@
+// 文档导航（相对于项目根目录）：
+// 模块说明：.trae/documents/player-controller-modules.md
+// 架构说明：.trae/documents/player-controller-architecture.md
 using System;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -38,6 +41,8 @@ namespace Platformer
 
         [Tooltip("玩家接触碰撞箱沿传送门开口反方向后退的距离（世界单位），用于减少出口处的重复接触传送；只偏移碰撞体，不移动门本体")]
         [Min(0f)] public float gateContactOffset = 0.04f;
+        [Tooltip("出口中心碰撞点越过门碰撞箱外表面的额外安全距离（世界单位），范围 0~任意正值；0 表示只保留碰撞体与半径所需间距，过大可能让出口位置明显外移")]
+        [Min(0f)] public float exitMargin = 0.03f;
 
         [Header("门洞")]
         [Tooltip("上遮罩相对门中心的 Y 偏移（世界单位）；两扇门共用")]
@@ -1017,6 +1022,17 @@ namespace Platformer
                                        partnerState.Right * xOffset +
                                        partnerState.Tangent * tangentOffset);
 
+            // 中心碰撞点必须落在出口门外表面之外；否则冷却期间它会撞门并清零整份刚体速度。
+            Vector2 exitOpening = partnerState.Opening;
+            float targetNormalOffset = Vector2.Dot(
+                (Vector2)target - partnerState.Position, exitOpening);
+            float safeExitOffset = Mathf.Max(0f, -gateContactOffset + gateThickness * 0.5f +
+                                   controller.centerPointRadius + exitMargin);
+            if (targetNormalOffset < safeExitOffset)
+            {
+                target += (Vector3)(exitOpening * (safeExitOffset - targetNormalOffset));
+            }
+
             // 先解析实际执行传送的总控，再从它所在的相机记录相对位姿。
             Camera followCamera = source.capture != null ? source.capture.sourceCamera : null;
             if (followCamera == null) followCamera = Camera.main;
@@ -1053,8 +1069,8 @@ namespace Platformer
             controller.TeleportWithPortalRotation(
                 target, exitAngle, variableJumpDirection, preserveVelocity);
 
-            if (preserveVelocity && rb != null)
-                rb.velocity = velocity;
+            if (preserveVelocity)
+                controller.SetPortalExitVelocity(velocity);
 
             // 玩家已经完成瞬移和旋转；一次性传全相对位姿与同向镜像规则。
             if (controlledCamera != null)

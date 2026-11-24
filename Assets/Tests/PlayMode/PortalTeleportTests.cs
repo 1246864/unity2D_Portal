@@ -1,3 +1,6 @@
+// 文档导航（相对于项目根目录）：
+// 模块说明：.trae/documents/player-controller-modules.md
+// 架构说明：.trae/documents/player-controller-architecture.md
 using System.Collections;
 using NUnit.Framework;
 using UnityEngine;
@@ -99,6 +102,99 @@ namespace Platformer.Tests
             Assert.AreEqual(6f, b.PortalHeight, 0.001f, "改偏移后 B 的高度应变为 6。");
             Assert.AreEqual(6f, gateA.size.y, 0.001f, "A 的碰撞箱高度应更新为 6。");
             Assert.AreEqual(6f, gateB.size.y, 0.001f, "B 的碰撞箱高度应更新为 6。");
+        }
+
+        [UnityTest]
+        public IEnumerator Falling_Through_Real_Gates_Preserves_Exit_Momentum()
+        {
+            FindGroups(out var a, out var b);
+            var pair = _rig.Pair;
+            var controller = _rig.Player;
+            var body = controller.GetComponent<Rigidbody2D>();
+            pair.carveTerrain = false;
+            pair.preserveVelocity = true;
+
+            // A 开口向上，B 开口向右；玩家真实下落穿过 A 后应水平飞出 B。
+            a.Facing = PortalFacing.Right;
+            b.Facing = PortalFacing.Right;
+            a.transform.SetPositionAndRotation(Vector3.zero, Quaternion.Euler(0f, 0f, 90f));
+            b.transform.SetPositionAndRotation(new Vector3(10f, 0f, 0f), Quaternion.identity);
+            body.gravityScale = 0f;
+            controller.Teleport(new Vector2(0f, 1.5f));
+            controller.SetMoveInput(0f);
+
+            // 先耗尽普通空中权限，确保穿门不会借系统切换重新赋予控制权。
+            for (int i = 0; i < 20; i++)
+                yield return new WaitForFixedUpdate();
+            Assert.IsTrue(controller.IsPhysicsActionActive,
+                "进入真实门前应已由物理动作系统接管。");
+            Assert.AreEqual(0f, controller.AirControlAuthority, 0.02f,
+                "进入真实门前普通空中权限应已经归零。");
+
+            body.velocity = new Vector2(0f, -30f);
+            bool teleported = false;
+            for (int i = 0; i < 20; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                if (controller.transform.position.x < 5f) continue;
+                teleported = true;
+                break;
+            }
+
+            Assert.IsTrue(teleported, "玩家应通过真实门碰撞/扫掠从 A 传送到 B。");
+            Assert.IsTrue(controller.IsPhysicsActionActive,
+                "入口/出口碰撞不能切换到玩家动作系统。");
+            Assert.AreEqual(0f, controller.AirControlAuthority, 0.02f,
+                "传送不能重置物理系统的空中权限进度。");
+            Assert.IsFalse(controller.IsGrounded, "出口门碰撞不能被识别为地面。");
+            Assert.IsFalse(controller.HasWallContact, "入口/出口门碰撞不能被识别为墙。");
+            Assert.IsFalse(controller.IsWallSliding, "传送碰撞不能触发玩家墙滑。");
+
+            float exitSpeed = body.velocity.x;
+            Assert.Greater(exitSpeed, 20f, "下落速度应映射为水平出口速度。");
+            float startX = controller.transform.position.x;
+
+            for (int i = 0; i < 25; i++)
+                yield return new WaitForFixedUpdate();
+
+            Assert.IsTrue(controller.IsPhysicsActionActive,
+                "出口后的持续空中运动仍应归物理动作系统。");
+            Assert.AreEqual(0f, controller.AirControlAuthority, 0.02f);
+            Assert.Greater(body.velocity.x, exitSpeed - 2f,
+                "真实传送出口后的动量不能在后续控制步里丢失。");
+            Assert.Greater(controller.transform.position.x - startX, 10f,
+                "出口后应形成持续水平位移，而不是几格内停下。");
+        }
+
+        [UnityTest]
+        public IEnumerator Portal_Layer_Is_Excluded_Even_When_Included_In_Ground_Mask()
+        {
+            FindGroups(out var a, out var b);
+            var pair = _rig.Pair;
+            var controller = _rig.Player;
+            pair.carveTerrain = false;
+            typeof(PortalPair).GetField("_cooldown", System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic).SetValue(pair, 10f);
+            Assert.IsTrue(pair.IsTeleportCoolingDown,
+                "测试必须冻结实际传送逻辑，只保留真实门碰撞与地墙探测。");
+            a.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            b.transform.SetPositionAndRotation(new Vector3(10f, 0f, 0f), Quaternion.identity);
+
+            controller.groundMask |= controller.portalContactMask;
+            Assert.AreNotEqual(0, controller.groundMask.value & (1 << a.gameObject.layer),
+                "测试必须确实把真实门层包含进 groundMask。");
+            controller.Teleport(Vector2.zero);
+            controller.SetMoveInput(0f);
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+
+            Assert.IsTrue(controller.IsPhysicsActionActive,
+                "只有门接触时不得建立玩家系统的地墙支撑。");
+            Assert.IsFalse(controller.IsGrounded, "门层即使包含在 groundMask 中也不能算作地面。");
+            Assert.IsFalse(controller.HasWallContact, "门层即使包含在 groundMask 中也不能算作墙。");
+            Assert.IsFalse(controller.IsWallSliding, "门接触不能建立玩家墙滑状态。");
+            Assert.Greater(Vector2.Distance(controller.transform.position, b.transform.position), 5f,
+                "冷却中的门接触应保持原位，便于验证接触过滤。");
         }
 
         [UnityTest]
@@ -394,6 +490,16 @@ namespace Platformer.Tests
                                           (Vector3)b.OpeningDirection * 0.45f));
             teleportMethod.Invoke(pair, new object[] { b, a });
             Vector2 expectedPlayerPosition = (Vector2)a.transform.position - a.OpeningDirection * 0.45f;
+            Vector2 exitOpening = a.OpeningDirection;
+            float expectedNormalOffset = Vector2.Dot(
+                expectedPlayerPosition - (Vector2)a.transform.position, exitOpening);
+            float safeExitOffset = -pair.gateContactOffset + pair.gateThickness * 0.5f +
+                                   controller.centerPointRadius + pair.exitMargin;
+            if (expectedNormalOffset < safeExitOffset)
+            {
+                expectedPlayerPosition += exitOpening * (safeExitOffset - expectedNormalOffset);
+            }
+
             Assert.Less(Vector2.Distance(player.transform.position, expectedPlayerPosition), 0.0001f,
                 "同向门应将入口法向偏移镜像到出口的反方向，而不是直接传送到门中心。");
             Assert.AreEqual(45f, controller.CurrentRotationAngle, 0.001f,
@@ -995,6 +1101,15 @@ namespace Platformer.Tests
             Vector2 expectedPlayerPosition = (Vector2)b.transform.position -
                 (Vector2)b.transform.right * Vector2.Dot(sourceOffset, a.transform.right) +
                 (Vector2)b.transform.up * Vector2.Dot(sourceOffset, a.transform.up);
+            Vector2 exitOpening = b.OpeningDirection;
+            float expectedNormalOffset = Vector2.Dot(
+                expectedPlayerPosition - (Vector2)b.transform.position, exitOpening);
+            float safeExitOffset = -pair.gateContactOffset + pair.gateThickness * 0.5f +
+                                   controller.centerPointRadius + pair.exitMargin;
+            if (expectedNormalOffset < safeExitOffset)
+            {
+                expectedPlayerPosition += exitOpening * (safeExitOffset - expectedNormalOffset);
+            }
 
             pair.teleportCooldown = 0f;
             var teleportMethod = typeof(PortalPair).GetMethod(

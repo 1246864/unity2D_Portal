@@ -1,3 +1,6 @@
+// 文档导航（相对于项目根目录）：
+// 模块说明：.trae/documents/player-controller-modules.md
+// 架构说明：.trae/documents/player-controller-architecture.md
 using System.Collections;
 using System.Reflection;
 using NUnit.Framework;
@@ -163,9 +166,252 @@ namespace Platformer.Tests
             for (int i = 0; i < 4; i++)
                 yield return new WaitForFixedUpdate();
 
-            Assert.Greater(_controller.Velocity.x, 9.5f,
-                "空中同向超速应缓慢衰减，而不是立即压回跑速。");
+            Assert.AreEqual(13f, _controller.Velocity.x, 0.1f,
+                "空中同向超速不应继续累积加速，也不应被立即压回跑速。");
             _controller.JumpReleased();
+        }
+
+        [UnityTest]
+        public IEnumerator Air_Input_Approaches_Move_Speed_Without_Runaway_Acceleration()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _controller.fallLimitY = -100f;
+            _ground.SetActive(false);
+            _controller.Teleport(new Vector2(0f, 20f));
+            _controller.SetMoveInput(1f);
+            float startX = _player.transform.position.x;
+
+            try
+            {
+                for (int i = 0; i < 15; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.AreEqual(_controller.moveSpeed, _controller.Velocity.x, 0.05f,
+                    "持续空中输入只能让速度接近目标值，不能每帧无限叠加物理加速度。");
+                Assert.Greater(_player.transform.position.x - startX, 0.5f,
+                    "目标速度求解仍应产生实际水平位移。");
+                Assert.LessOrEqual(_player.transform.position.x - startX,
+                    _controller.moveSpeed * Time.fixedDeltaTime * 15f + 0.1f,
+                    "水平位移不能超过目标速度在当前时间段内产生的最大位移。");
+
+                for (int i = 0; i < 10; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.AreEqual(0f, _controller.AirControlAuthority, 0.02f);
+                Assert.AreEqual(_controller.moveSpeed, _controller.Velocity.x, 0.05f,
+                    "到达目标速度并耗尽权限后，继续保持输入也不能再次加速。");
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Jump_Air_Control_Fades_Then_Releases_Momentum()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _controller.fallLimitY = -100f;
+            _controller.SetMoveInput(0f);
+            _controller.JumpPressed();
+            yield return new WaitForFixedUpdate();
+            _ground.SetActive(false);
+
+            try
+            {
+                for (int i = 0; i < 9; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.AreEqual(1f, _controller.AirControlAuthority, 0.02f,
+                    "跳跃后的前 0.3 秒应保持完整方向权限。");
+
+                for (int i = 0; i < 15; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.AreEqual(0.6f, _controller.AirControlAuthority, 0.08f,
+                    "跳跃后 0.5 秒附近应处于 0.3～0.8 秒的线性衰减阶段。");
+
+                var body = _player.GetComponent<Rigidbody2D>();
+                float authority = _controller.AirControlAuthority;
+                body.velocity = new Vector2(0f, body.velocity.y);
+                _controller.SetMoveInput(1f);
+                yield return new WaitForFixedUpdate();
+                Assert.AreEqual(
+                    _controller.airAcceleration * authority * Time.fixedDeltaTime,
+                    _controller.Velocity.x, 0.15f,
+                    "衰减阶段只应降低方向键调整速度的效果，不能缩放或清除已有速度。");
+                _controller.SetMoveInput(0f);
+                body.velocity = new Vector2(0f, body.velocity.y);
+
+                for (int i = 0; i < 16; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.AreEqual(0f, _controller.AirControlAuthority, 0.02f,
+                    "跳跃后 0.8 秒应完全失去方向权限。");
+
+                body.velocity = new Vector2(6f, body.velocity.y);
+                _controller.SetMoveInput(-1f);
+                for (int i = 0; i < 5; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.AreEqual(6f, _controller.Velocity.x, 0.001f,
+                    "权限归零后，反向输入和主动刹车都不能消耗水平动量。");
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                _controller.JumpReleased();
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Jump_Release_Input_Preserves_Air_Momentum_After_Control_Ends()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _controller.fallLimitY = -100f;
+            _controller.SetMoveInput(1f);
+            _controller.JumpPressed();
+            yield return new WaitForFixedUpdate();
+            _ground.SetActive(false);
+
+            try
+            {
+                for (int i = 0; i < 45; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.IsTrue(_controller.IsPhysicsActionActive,
+                    "空中运动必须仍由物理动作系统接管。");
+                Assert.AreEqual(0f, _controller.AirControlAuthority, 0.02f);
+
+                float speedBeforeRelease = _controller.Velocity.x;
+                Assert.Greater(Mathf.Abs(speedBeforeRelease), 0.5f,
+                    "测试前必须已经形成可验证的水平动量。");
+                _controller.SetMoveInput(0f);
+                for (int i = 0; i < 8; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.AreEqual(speedBeforeRelease, _controller.Velocity.x, 0.001f,
+                    "物理动作系统松开方向后不应刹车或缩放已有水平速度。");
+                Assert.IsTrue(_controller.IsPhysicsActionActive,
+                    "松开方向不能把空中运动交还玩家动作系统。");
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                _controller.JumpReleased();
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Landing_Immediately_Restores_Ground_Control_And_Brakes()
+        {
+            _controller.SetMoveInput(1f);
+            _controller.JumpPressed();
+            yield return new WaitForFixedUpdate();
+            _controller.JumpReleased();
+            _controller.SetMoveInput(0f);
+
+            bool landed = false;
+            for (int i = 0; i < 100; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                if (!_controller.IsGrounded) continue;
+                landed = true;
+                break;
+            }
+
+            Assert.IsTrue(landed, "测试玩家应在短跳后重新落地。");
+            Assert.IsFalse(_controller.IsPhysicsActionActive,
+                "落地应立即从物理动作系统切换到玩家动作系统。");
+            Assert.AreEqual(1f, _controller.AirControlAuthority,
+                "落地必须立即恢复完整玩家控制。");
+
+            for (int i = 0; i < 8; i++)
+                yield return new WaitForFixedUpdate();
+            Assert.Less(Mathf.Abs(_controller.Velocity.x), 0.5f,
+                "落地后应立即使用地面减速，不能继续按空中外来动量长距离滑行。");
+        }
+
+        [UnityTest]
+        public IEnumerator Direct_Fall_Loses_Control_After_Point_Three_Seconds()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _controller.fallLimitY = -100f;
+            _ground.SetActive(false);
+            _controller.Teleport(new Vector2(0f, 20f));
+            _controller.SetMoveInput(0f);
+
+            try
+            {
+                for (int i = 0; i < 15; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.IsTrue(_controller.IsPhysicsActionActive,
+                    "直接离地后必须进入物理动作系统。");
+                Assert.AreEqual(1f, _controller.AirControlAuthority, 0.02f,
+                    "非跳跃离地在 0.3 秒时仍应保留完整权限。");
+
+                for (int i = 0; i < 2; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.AreEqual(0f, _controller.AirControlAuthority,
+                    "非跳跃离地超过 0.3 秒应立即失去方向权限。");
+
+                var body = _player.GetComponent<Rigidbody2D>();
+                body.velocity = new Vector2(5f, body.velocity.y);
+                _controller.SetMoveInput(-1f);
+                for (int i = 0; i < 3; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.AreEqual(5f, _controller.Velocity.x, 0.001f,
+                    "直接坠落失去权限后，水平速度应完全交给物理动量。");
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Portal_Exit_Momentum_Continues_After_Control_Ends()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _controller.fallLimitY = -100f;
+            _ground.SetActive(false);
+            var body = _player.GetComponent<Rigidbody2D>();
+            body.gravityScale = 0f;
+            _controller.TeleportWithPortalRotation(_player.transform.position, 0f);
+            _controller.SetPortalExitVelocity(new Vector2(30f, 0f));
+            _controller.SetMoveInput(0f);
+            float startX = _player.transform.position.x;
+
+            try
+            {
+                for (int i = 0; i < 25; i++)
+                    yield return new WaitForFixedUpdate();
+
+                float speedAfterControl = _controller.Velocity.x;
+                Assert.IsTrue(_controller.IsPhysicsActionActive,
+                    "传送出口后的空中动量必须由物理动作系统接管。");
+                Assert.AreEqual(0f, _controller.AirControlAuthority, 0.02f,
+                    "普通空中权限归零后仍应保持出口动量。");
+                Assert.Greater(speedAfterControl, 28f,
+                    "出口高速动量不能在几个世界单位内被普通空中刹车归零。");
+                Assert.Greater(_player.transform.position.x - startX, 13.5f,
+                    "出口后的前 0.5 秒应持续飞行，而不是提前停下。");
+
+                for (int i = 0; i < 20; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.AreEqual(speedAfterControl, _controller.Velocity.x, 0.05f,
+                    "方向权限归零后不应继续消耗水平动量。");
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+            }
         }
 
         [UnityTest]
@@ -271,27 +517,67 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
-        public IEnumerator Falling_Uses_Softer_Gravity_And_Terminal_Speed()
+        public IEnumerator Falling_Uses_Native_Gravity_Without_Terminal_Speed()
         {
             float originalFallLimit = _controller.fallLimitY;
             _ground.SetActive(false);
             _controller.fallLimitY = -100f;
             _controller.Teleport(new Vector2(0f, 20f));
             _controller.SetMoveInput(0f);
+            var body = _player.GetComponent<Rigidbody2D>();
 
             try
             {
                 for (int i = 0; i < 4; i++)
                     yield return new WaitForFixedUpdate();
 
-                float expectedSpeed = 40f * 4f * 0.75f * Time.fixedDeltaTime * 4f;
-                Assert.AreEqual(expectedSpeed, -_controller.Velocity.y, 0.2f,
-                    "下落前几步应使用较低的下落重力，而不是完整基础重力。");
+                float gravity = Mathf.Abs(Physics2D.gravity.y * body.gravityScale);
+                float expectedSpeed = gravity * Time.fixedDeltaTime * 4f;
+                Assert.IsTrue(_controller.IsPhysicsActionActive,
+                    "自由下落必须由物理动作系统接管。");
+                Assert.AreEqual(expectedSpeed, -_controller.Velocity.y, 0.25f,
+                    "下落加速度应完全等于 Physics2D 重力乘刚体重力缩放。");
 
                 for (int i = 0; i < 20; i++)
                     yield return new WaitForFixedUpdate();
-                Assert.AreEqual(24f, -_controller.Velocity.y, 0.05f,
-                    "下落应稳定在调整后的终端速度。");
+                Assert.AreEqual(gravity * Time.fixedDeltaTime * 24f,
+                    -_controller.Velocity.y, 0.35f,
+                    "持续下落仍应严格遵循原生重力积分。");
+                Assert.Greater(-_controller.Velocity.y, _controller.maxFallSpeed + 20f,
+                    "普通墙滑的最终速度上限不能限制自由下落。");
+            }
+            finally
+            {
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator High_Speed_Fall_Continues_With_Native_Gravity()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _controller.fallLimitY = -100f;
+            _ground.SetActive(false);
+            var body = _player.GetComponent<Rigidbody2D>();
+            _controller.Teleport(new Vector2(0f, 20f));
+            body.velocity = new Vector2(0f, -80f);
+
+            try
+            {
+                yield return new WaitForFixedUpdate();
+                float firstSpeed = -_controller.Velocity.y;
+                Assert.IsTrue(_controller.IsPhysicsActionActive,
+                    "高速下落不能被截停或交还玩家系统。");
+                Assert.Greater(firstSpeed, 80f,
+                    "外部高速下落不能在第一步被截到终端速度。");
+
+                for (int i = 0; i < 9; i++)
+                    yield return new WaitForFixedUpdate();
+                float gravity = Mathf.Abs(Physics2D.gravity.y * body.gravityScale);
+                Assert.AreEqual(firstSpeed + gravity * Time.fixedDeltaTime * 9f,
+                    -_controller.Velocity.y, 0.35f,
+                    "高速下落应继续按原生重力加速，不能向旧的终端速度恢复。");
             }
             finally
             {
@@ -319,6 +605,9 @@ namespace Platformer.Tests
                     yield return new WaitForFixedUpdate();
 
                 Assert.IsTrue(_controller.IsWallSliding, "推向墙面时应进入贴墙下落。");
+                Assert.IsTrue(_controller.HasWallContact, "普通墙滑必须来自真实地形墙接触。");
+                Assert.IsFalse(_controller.IsPhysicsActionActive,
+                    "低速贴墙应交给玩家动作系统执行普通墙滑。");
                 for (int i = 0; i < 10; i++)
                     yield return new WaitForFixedUpdate();
 
@@ -331,10 +620,115 @@ namespace Platformer.Tests
                     yield return new WaitForFixedUpdate();
                 Assert.Greater(-_controller.Velocity.y, 20f,
                     "持续滑墙后下落上限应逐渐恢复，不能无限缓慢悬挂。");
+                Assert.IsFalse(_controller.IsPhysicsActionActive,
+                    "连续普通墙滑恢复到高速后也不能反复跳回物理系统。");
 
                 _controller.SetMoveInput(0f);
                 yield return new WaitForFixedUpdate();
                 Assert.IsFalse(_controller.IsWallSliding, "松开推墙方向应立即退出贴墙下落。");
+                yield return new WaitForFixedUpdate();
+                Assert.IsTrue(_controller.IsPhysicsActionActive,
+                    "解除连续墙滑锁存后，高速下落应重新交给物理系统。");
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+                Object.Destroy(wall);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator High_Speed_Wall_Contact_Without_Push_Preserves_Physics_Fall()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _ground.SetActive(false);
+            _controller.fallLimitY = -100f;
+            var wall = new GameObject("TestHighSpeedWallCoast");
+            wall.layer = _ground.layer;
+            wall.transform.position = new Vector3(1f, 0f, 0f);
+            wall.AddComponent<BoxCollider2D>().size = new Vector2(1f, 100f);
+
+            try
+            {
+                _controller.Teleport(new Vector2(0.14f, 10f));
+                var body = _player.GetComponent<Rigidbody2D>();
+                body.velocity = new Vector2(0f, -40f);
+                _controller.SetMoveInput(0f);
+                yield return new WaitForFixedUpdate();
+
+                float firstSpeed = -_controller.Velocity.y;
+                Assert.IsTrue(_controller.HasWallContact, "测试玩家应已接触真实墙面。");
+                Assert.IsTrue(_controller.IsPhysicsActionActive,
+                    "高速贴墙但未推墙时必须保持物理动作系统。");
+                Assert.IsFalse(_controller.IsWallSliding,
+                    "高速贴墙本身不能触发玩家墙滑。");
+
+                for (int i = 0; i < 5; i++)
+                    yield return new WaitForFixedUpdate();
+                float gravity = Mathf.Abs(Physics2D.gravity.y * body.gravityScale);
+                Assert.AreEqual(firstSpeed + gravity * Time.fixedDeltaTime * 5f,
+                    -_controller.Velocity.y, 0.35f,
+                    "高速贴墙不推墙时应继续按原生重力加速，不能损耗垂直速度。");
+                Assert.IsTrue(_controller.IsPhysicsActionActive);
+                Assert.IsFalse(_controller.IsWallSliding);
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                _controller.fallLimitY = originalFallLimit;
+                _ground.SetActive(true);
+                Object.Destroy(wall);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator High_Speed_Wall_Push_Brakes_Then_Hands_Off_To_Player()
+        {
+            float originalFallLimit = _controller.fallLimitY;
+            _ground.SetActive(false);
+            _controller.fallLimitY = -100f;
+            var wall = new GameObject("TestHighSpeedWallBrake");
+            wall.layer = _ground.layer;
+            wall.transform.position = new Vector3(1f, 0f, 0f);
+            wall.AddComponent<BoxCollider2D>().size = new Vector2(1f, 100f);
+
+            try
+            {
+                _controller.Teleport(new Vector2(0.14f, 10f));
+                var body = _player.GetComponent<Rigidbody2D>();
+                body.velocity = new Vector2(0f, -40f);
+                _controller.SetMoveInput(1f);
+                yield return new WaitForFixedUpdate();
+
+                float firstBrakedSpeed = -_controller.Velocity.y;
+                Assert.Less(firstBrakedSpeed, 38f,
+                    "高速推墙第一步就应产生超过原生重力反向作用的明显制动。");
+                Assert.IsTrue(_controller.IsPhysicsActionActive,
+                    "高速制动期间仍由物理动作系统独占运动。");
+                Assert.IsFalse(_controller.IsWallSliding,
+                    "高速制动不能同时执行玩家普通墙滑。");
+
+                for (int i = 0; i < 2; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.Less(-_controller.Velocity.y, firstBrakedSpeed - 5f,
+                    "持续推墙应继续以可观速度降低下落速度。");
+                Assert.Greater(-_controller.Velocity.y, _controller.wallSlideStartSpeed,
+                    "交接前测试应仍处于高速物理制动阶段。");
+                Assert.IsTrue(_controller.IsPhysicsActionActive);
+
+                for (int i = 0; i < 20 && _controller.IsPhysicsActionActive; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.IsFalse(_controller.IsPhysicsActionActive,
+                    "降到低速后必须从物理系统交还玩家系统。");
+                Assert.IsTrue(_controller.HasWallContact);
+                Assert.IsTrue(_controller.IsWallSliding,
+                    "持续推墙交接后应进入普通玩家墙滑。");
+                Assert.Less(Mathf.Abs(_controller.Velocity.y),
+                    _controller.wallSlideStartSpeed + 0.5f,
+                    "系统交接应发生在约定的低速阈值附近。");
             }
             finally
             {

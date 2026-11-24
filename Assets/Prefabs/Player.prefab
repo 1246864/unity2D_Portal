@@ -165,8 +165,9 @@ MonoBehaviour:
   groundAcceleration: 100
   groundDeceleration: 100
   airAcceleration: 65
-  airDeceleration: 65
-  overSpeedDeceleration: 40
+  inputSpeedLimit: 24
+  airControlFullTime: 0.3
+  jumpAirControlEndTime: 0.8
   jumpHeight: 6.2
   playerHeight: 1.5
   coyoteTime: 0.1
@@ -176,15 +177,20 @@ MonoBehaviour:
   jumpHorizontalBoost: 4
   apexVelocityThreshold: 8.5
   apexGravityMultiplier: 0.5
-  fallGravityMultiplier: 0.75
   maxFallSpeed: 24
   wallCheckDistance: 0.12
   wallJumpHeight: 4.8
   wallSlideStartSpeed: 4
   wallSlideTime: 1.2
+  highSpeedWallBrakeAcceleration: 380
   wallJumpForceTime: 0.24
   groundMask:
     serializedVersion: 2
     m_Bits: 64
+  portalContactMask:
+    serializedVersion: 2
+    m_Bits: 256
   groundCheckDistance: 0.15
   fallLimitY: -12
+  highSpeedContactRetentionTime: 0.1
+  wallSlideReleaseFadeTime: 0.3
