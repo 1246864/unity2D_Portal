@@ -41,6 +41,18 @@ namespace Platformer.Tests
             b = _rig.B;
         }
 
+        static BoxCollider2D CreatePlacementSurface(
+            Transform parent, string name, Vector2 position, Vector2 size, float angle = 0f)
+        {
+            GameObject surface = PlayTestFixtures.CreateChild(parent, name);
+            surface.layer = 6;
+            surface.transform.SetPositionAndRotation(
+                position, Quaternion.Euler(0f, 0f, angle));
+            var collider = surface.AddComponent<BoxCollider2D>();
+            collider.size = size;
+            return collider;
+        }
+
         static void PrepareTransparencySandbox(PortalPair pair, CaptureDisplayGroup a, CaptureDisplayGroup b)
         {
             pair.carveTerrain = false;
@@ -66,6 +78,199 @@ namespace Platformer.Tests
             a.transform.rotation = b.transform.rotation = Quaternion.identity;
             a.Facing = PortalFacing.Right;
             b.Facing = PortalFacing.Left;
+        }
+
+        [UnityTest]
+        public IEnumerator Placement_Moves_Only_Target_And_Replays_Open_Animation()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup a = _rig.A;
+            CaptureDisplayGroup b = _rig.B;
+            CreatePlacementSurface(
+                _rig.Root.transform, "Placement Wall",
+                new Vector2(-5f, 4f), new Vector2(1f, 4f));
+            Physics2D.SyncTransforms();
+
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+            Vector2 mouse = origin + Vector2.right * 0.2f;
+            Vector3 oldBPosition = b.transform.position;
+            Quaternion oldBRotation = b.transform.rotation;
+            int oldACount = a.OpenAnimationCount;
+            int oldBCount = b.OpenAnimationCount;
+
+            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, mouse));
+            Assert.AreEqual(-5.5f, a.transform.position.x, 0.001f);
+            Assert.AreEqual(4f, a.transform.position.y, 0.001f);
+            Assert.AreEqual(oldACount + 1, a.OpenAnimationCount);
+            Assert.AreEqual(oldBCount, b.OpenAnimationCount);
+            Assert.AreEqual(oldBPosition, b.transform.position);
+            Assert.AreEqual(oldBRotation, b.transform.rotation);
+
+            Vector3 placedAPosition = a.transform.position;
+            int placedACount = a.OpenAnimationCount;
+            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.B, mouse));
+            Assert.AreEqual(-5.5f, b.transform.position.x, 0.001f);
+            Assert.AreEqual(oldBCount + 1, b.OpenAnimationCount);
+            Assert.AreEqual(placedAPosition, a.transform.position);
+            Assert.AreEqual(placedACount, a.OpenAnimationCount);
+
+            a.StopOpenAnimation();
+            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, mouse));
+            Assert.AreEqual(placedACount + 1, a.OpenAnimationCount);
+            Assert.AreEqual(oldBCount + 1, b.OpenAnimationCount);
+            Assert.AreEqual(0f, a.maskTop.localPosition.y, 0.0001f);
+            Assert.AreEqual(0f, a.maskBottom.localPosition.y, 0.0001f);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Placement_Uses_Nearest_Terrain_And_Ignores_Trigger_And_Gates()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup a = _rig.A;
+            CaptureDisplayGroup b = _rig.B;
+            BoxCollider2D trigger = CreatePlacementSurface(
+                _rig.Root.transform, "Ignored Trigger",
+                new Vector2(-8.5f, 4f), new Vector2(0.2f, 4f));
+            trigger.isTrigger = true;
+            CreatePlacementSurface(
+                _rig.Root.transform, "Near Wall",
+                new Vector2(-6f, 4f), new Vector2(1f, 4f));
+            CreatePlacementSurface(
+                _rig.Root.transform, "Far Wall",
+                new Vector2(-3f, 4f), new Vector2(1f, 4f));
+            a.transform.position = new Vector3(-8f, 4f, 0f);
+            Physics2D.SyncTransforms();
+
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+            Assert.IsTrue(pair.TryPlacePortal(
+                CaptureGroupSide.B, origin + Vector2.right * 0.2f));
+            Assert.AreEqual(-6.5f, b.transform.position.x, 0.001f,
+                "鼠标只决定方向，应选择最近的真实地形，而不是 Trigger、门或远端墙。");
+            Assert.AreEqual(4f, b.transform.position.y, 0.001f);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Placement_Skips_Player_Colliders()
+        {
+            PortalPair pair = _rig.Pair;
+            _rig.Player.gameObject.layer = 6;
+            _rig.Player.CenterPoint.gameObject.layer = 6;
+            CreatePlacementSurface(
+                _rig.Root.transform, "Wall Behind Player",
+                new Vector2(-6f, 4f), new Vector2(1f, 4f));
+            Physics2D.SyncTransforms();
+
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+            Assert.IsTrue(pair.TryPlacePortal(
+                CaptureGroupSide.A, origin + Vector2.right));
+            Assert.AreEqual(-6.5f, _rig.A.transform.position.x, 0.001f,
+                "即使玩家碰撞体被加入查询层，也必须跳过自身并命中后面的墙。");
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Placement_Rejects_Zero_Direction_And_Miss_Without_Changes()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup a = _rig.A;
+            CaptureDisplayGroup b = _rig.B;
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+            Vector3 oldAPosition = a.transform.position;
+            Vector3 oldBPosition = b.transform.position;
+            Quaternion oldARotation = a.transform.rotation;
+            Quaternion oldBRotation = b.transform.rotation;
+            int oldACount = a.OpenAnimationCount;
+            int oldBCount = b.OpenAnimationCount;
+
+            Assert.IsFalse(pair.TryPlacePortal(CaptureGroupSide.A, origin));
+            Assert.IsFalse(pair.TryPlacePortal(CaptureGroupSide.B, origin + Vector2.up));
+            Assert.AreEqual(oldAPosition, a.transform.position);
+            Assert.AreEqual(oldBPosition, b.transform.position);
+            Assert.AreEqual(oldARotation, a.transform.rotation);
+            Assert.AreEqual(oldBRotation, b.transform.rotation);
+            Assert.AreEqual(oldACount, a.OpenAnimationCount);
+            Assert.AreEqual(oldBCount, b.OpenAnimationCount);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Placement_Aligns_Opening_With_Wall_Ground_Ceiling_And_Slope()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup a = _rig.A;
+            CreatePlacementSurface(
+                _rig.Root.transform, "Right Wall",
+                new Vector2(-5f, 4f), new Vector2(1f, 4f));
+            CreatePlacementSurface(
+                _rig.Root.transform, "Ground",
+                new Vector2(-10f, 0f), new Vector2(4f, 1f));
+            CreatePlacementSurface(
+                _rig.Root.transform, "Ceiling",
+                new Vector2(-10f, 8f), new Vector2(4f, 1f));
+            CreatePlacementSurface(
+                _rig.Root.transform, "Rotated Slope",
+                new Vector2(-15f, 4f), new Vector2(2f, 2f), 30f);
+            a.transform.position = new Vector3(a.transform.position.x, a.transform.position.y, 1.5f);
+            Physics2D.SyncTransforms();
+
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+            Vector2[] directions = { Vector2.right, Vector2.down, Vector2.up, Vector2.left };
+            foreach (Vector2 direction in directions)
+            {
+                RaycastHit2D expected = Physics2D.Raycast(
+                    origin, direction, Mathf.Infinity, 1 << 6);
+                Assert.IsNotNull(expected.collider, "测试表面未按预期进入射线。");
+
+                Assert.IsTrue(pair.TryPlacePortal(
+                    CaptureGroupSide.A, origin + direction * 0.2f));
+                Vector2 normal = expected.normal.normalized;
+                PortalFacing expectedFacing = normal.x < 0f
+                    ? PortalFacing.Left : PortalFacing.Right;
+                float normalAngle = Mathf.Atan2(normal.y, normal.x) * Mathf.Rad2Deg;
+                float expectedAngle = expectedFacing == PortalFacing.Left
+                    ? normalAngle - 180f : normalAngle;
+
+                Assert.AreEqual(expected.point.x, a.transform.position.x, 0.001f);
+                Assert.AreEqual(expected.point.y, a.transform.position.y, 0.001f);
+                Assert.AreEqual(1.5f, a.transform.position.z, 0.001f);
+                Assert.AreEqual(expectedFacing, a.Facing);
+                Assert.AreEqual(0f, Mathf.DeltaAngle(
+                    expectedAngle, a.transform.eulerAngles.z), 0.01f);
+                Assert.AreEqual(1f, Vector2.Dot(a.OpeningDirection, normal), 0.001f);
+                Assert.AreEqual(-1f, Vector2.Dot(a.BackDirection, normal), 0.001f);
+            }
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Placed_Portal_Does_Not_Create_Old_To_New_Swept_Corridor()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup a = _rig.A;
+            CaptureDisplayGroup b = _rig.B;
+            PlayerController2D controller = _rig.Player;
+            PrepareTransparencySandbox(pair, a, b);
+
+            a.transform.SetPositionAndRotation(new Vector3(-1f, 0f, 0f), Quaternion.identity);
+            b.transform.position = new Vector3(6f, 0f, 0f);
+            controller.Teleport(Vector2.zero);
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+            yield return new WaitForFixedUpdate();
+
+            CreatePlacementSurface(
+                _rig.Root.transform, "Relocation Target",
+                new Vector2(1.1f, 0f), new Vector2(0.2f, 4f));
+            Physics2D.SyncTransforms();
+            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, Vector2.right * 0.2f));
+            Assert.AreEqual(1f, a.transform.position.x, 0.001f);
+
+            yield return new WaitForFixedUpdate();
+            Assert.Less(Vector2.Distance(controller.transform.position, Vector2.zero), 0.05f,
+                "放门属于显式瞬移，不能把旧、新位置之间扫成传送通道。");
+            Assert.Greater(Vector2.Distance(controller.transform.position, b.transform.position), 5f);
         }
 
         [UnityTest]

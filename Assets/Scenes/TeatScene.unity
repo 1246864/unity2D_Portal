@@ -1093,7 +1093,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   player: {fileID: 868375321}
   playerEyeOffset: 0.4
-  playerControl: {fileID: 0}
+  playerControl: {fileID: 30762816}
   teleportCooldown: 0.25
   preserveVelocity: 1
   gateThickness: 0.05

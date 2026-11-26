@@ -112,6 +112,7 @@ namespace Platformer
         Vector2 _previousPlayerPosition;
         int _observedPlayerRevision;
         bool _hasPlayerBaseline;
+        readonly RaycastHit2D[] _placementHits = new RaycastHit2D[16];
 
         /// <summary>一个物理步内的门位姿与速度；角度始终使用物理根节点的 Z 旋转。</summary>
         struct PortalFrameState
@@ -628,6 +629,7 @@ namespace Platformer
 
         void LateUpdate()
         {
+            HandlePortalPlacementInput();
             UpdateGateSizes();
             UpdateViewTransparency();
 
@@ -636,6 +638,97 @@ namespace Platformer
                 _forceCapture = false;
                 RefreshCaptures();
             }
+        }
+
+        void HandlePortalPlacementInput()
+        {
+            PlayerControlManager control = playerControl;
+            if (control == null)
+            {
+                control = ResolvePlayerControl(null);
+                if (control == null) return;
+                playerControl = control;
+            }
+            if (!control.isActiveAndEnabled) return;
+
+            bool placeA = control.MouseButtonPressed(0);
+            bool placeB = control.MouseButtonPressed(2);
+            if (!placeA && !placeB) return;
+
+            Vector2 mouseWorld = control.MouseWorldPosition;
+            if (placeA) TryPlacePortal(CaptureGroupSide.A, mouseWorld);
+            if (placeB) TryPlacePortal(CaptureGroupSide.B, mouseWorld);
+        }
+
+        /// <summary>
+        /// 沿玩家中心到鼠标世界坐标的方向查找最近地形表面，把指定门放到命中点。
+        /// 鼠标只决定方向，不限制射程；开门方向始终与命中表面的外法线一致。
+        /// </summary>
+        public bool TryPlacePortal(CaptureGroupSide side, Vector2 mouseWorldPosition)
+        {
+            if (player == null) return false;
+
+            CaptureDisplayGroup group = side == CaptureGroupSide.A ? _groupA :
+                side == CaptureGroupSide.B ? _groupB : null;
+            if (group == null) return false;
+
+            var controller = player.GetComponent<PlayerController2D>();
+            if (controller == null) return false;
+
+            Vector2 origin = controller.CenterPoint != null
+                ? controller.CenterPoint.transform.position
+                : player.position;
+            Vector2 delta = mouseWorldPosition - origin;
+            if (delta.sqrMagnitude <= 0.00000001f) return false;
+
+            int layerMask = controller.groundMask.value & ~controller.portalContactMask.value;
+            if (layerMask == 0) return false;
+
+            var filter = new ContactFilter2D
+            {
+                useLayerMask = true,
+                layerMask = layerMask,
+                useTriggers = false
+            };
+            int hitCount = Physics2D.Raycast(
+                origin, delta.normalized, filter, _placementHits, Mathf.Infinity);
+
+            Rigidbody2D playerBody = player.GetComponent<Rigidbody2D>();
+            RaycastHit2D nearest = default;
+            bool found = false;
+            for (int i = 0; i < hitCount; i++)
+            {
+                RaycastHit2D hit = _placementHits[i];
+                if (hit.collider == null) continue;
+                if (hit.collider.attachedRigidbody == playerBody && playerBody != null) continue;
+                if (hit.collider.transform == player || hit.collider.transform.IsChildOf(player)) continue;
+                if (found && hit.distance >= nearest.distance) continue;
+
+                nearest = hit;
+                found = true;
+            }
+
+            if (!found) return false;
+
+            Vector2 normal = nearest.normal;
+            if (normal.sqrMagnitude <= 0.00000001f) return false;
+            normal.Normalize();
+
+            PortalFacing nextFacing = normal.x < 0f ? PortalFacing.Left : PortalFacing.Right;
+            float normalAngle = Mathf.Atan2(normal.y, normal.x) * Mathf.Rad2Deg;
+            float targetAngle = nextFacing == PortalFacing.Left ? normalAngle - 180f : normalAngle;
+            Quaternion targetRotation = Quaternion.Euler(
+                0f, 0f, Mathf.DeltaAngle(0f, targetAngle));
+            Vector3 targetPosition = nearest.point;
+            targetPosition.z = group.transform.position.z;
+
+            group.Facing = nextFacing;
+            group.transform.SetPositionAndRotation(targetPosition, targetRotation);
+            NotifyPortalRelocated(group);
+            SetPortalTerrainState(group, true);
+            group.PlayOpenAnimation();
+            _forceCapture = true;
+            return true;
         }
 
         /// <summary>把绑定的玩家实例下发给本对传送门下的每一个 CaptureDisplayGroup。</summary>

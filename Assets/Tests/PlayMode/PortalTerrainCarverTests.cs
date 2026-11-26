@@ -332,5 +332,32 @@ namespace Platformer.Tests
             Assert.IsNotNull(Physics2D.OverlapPoint(outside, _groundMask),
                 "旋转门背向矩形之外的地形应保留。");
         }
+
+        [UnityTest]
+        public IEnumerator Placement_Restores_Old_Carve_And_Carves_New_Surface()
+        {
+            PortalPair pair = _rig.Pair;
+            CaptureDisplayGroup groupA = _rig.A;
+            Vector2 oldInside = (Vector2)groupA.transform.position + groupA.BackDirection * 0.2f;
+            Assert.IsNull(Physics2D.OverlapPoint(oldInside, _groundMask),
+                "放门前，旧门洞内部应已切除。");
+
+            _rig.Player.Teleport(new Vector2(-6f, 0.5f));
+            Physics2D.SyncTransforms();
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+            Assert.IsTrue(pair.TryPlacePortal(
+                CaptureGroupSide.A, origin + Vector2.right * 0.2f));
+            Assert.AreEqual(-4f, groupA.transform.position.x, 0.001f,
+                "射线应命中测试 Tilemap 的左侧外表面。");
+
+            yield return new WaitForFixedUpdate();
+            yield return null;
+
+            Assert.IsNotNull(Physics2D.OverlapPoint(oldInside, _groundMask),
+                "放门后，旧门洞的地形碰撞应恢复。");
+            Vector2 newInside = (Vector2)groupA.transform.position + groupA.BackDirection * 0.2f;
+            Assert.IsNull(Physics2D.OverlapPoint(newInside, _groundMask),
+                "放门后，新命中表面的门洞应正确切除。");
+        }
     }
 }
