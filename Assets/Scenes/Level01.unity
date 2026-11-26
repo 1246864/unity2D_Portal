@@ -940,8 +940,6 @@ MonoBehaviour:
   carveWidth: 0.8
   carveFrontMargin: 0.1
   carveTopMargin: 0.12
-  carveActivationDepth: 1
-  carveActivationExitMargin: 0.15
 --- !u!4 &503124222
 Transform:
   m_ObjectHideFlags: 0

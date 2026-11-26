@@ -44,13 +44,6 @@ namespace Platformer
         [Tooltip("开洞顶边向下缩进的距离，保留一条地形碰撞支撑玩家；0 = 与门洞顶边齐平")]
         [Min(0f)] public float carveTopMargin = 0.12f;
 
-        [Header("正面接近检测")]
-        [Tooltip("玩家进入门前这段距离后关闭补墙碰撞体，应略大于单帧最大移动距离")]
-        [Min(0.01f)] public float carveActivationDepth = 1f;
-
-        [Tooltip("退出正面检测区域时的额外容差，避免边界抖动导致碰撞体反复开关")]
-        [Min(0f)] public float carveActivationExitMargin = 0.15f;
-
         readonly Dictionary<CaptureDisplayGroup, PortalCarveState> _openPortals =
             new Dictionary<CaptureDisplayGroup, PortalCarveState>();
         readonly Dictionary<Vector3Int, CarvedCell> _carved =
@@ -74,7 +67,6 @@ namespace Platformer
             public BoxCollider2D backfill;
             public Transform player;
             public Collider2D playerBody;
-            public bool playerInFront;
         }
 
         /// <summary>一个格子的原始碰撞信息，用于恢复。</summary>
@@ -293,12 +285,12 @@ namespace Platformer
 
         void UpdateBackfillActivation(PortalCarveState state, CarveRect rect)
         {
+            bool playerBehind = rect.portal.IsPlayerBehind;
             Transform player = rect.portal.PlayerTransform;
             if (player == null)
             {
                 state.player = null;
                 state.playerBody = null;
-                state.playerInFront = false;
                 if (!state.backfill.enabled) state.backfill.enabled = true;
                 return;
             }
@@ -307,21 +299,10 @@ namespace Platformer
             {
                 state.player = player;
                 state.playerBody = player.GetComponent<Collider2D>();
-                state.playerInFront = false;
             }
 
             Vector2 local = rect.ToLocal(player.position);
-            float exitMargin = state.playerInFront
-                ? Mathf.Max(0f, carveActivationExitMargin)
-                : 0f;
-            float forward = -local.x;
             float halfHeight = rect.height * 0.5f;
-            bool inFront =
-                forward >= -rect.frontMargin - exitMargin &&
-                forward <= Mathf.Max(0.01f, carveActivationDepth) + exitMargin &&
-                Mathf.Abs(local.y) <= halfHeight + exitMargin;
-            state.playerInFront = inFront;
-
             bool overlapsPlayer;
             if (state.playerBody != null && state.playerBody.isActiveAndEnabled)
             {
@@ -335,7 +316,8 @@ namespace Platformer
                     local.y >= -halfHeight && local.y <= halfHeight - rect.topMargin;
             }
 
-            bool enable = !inFront && !overlapsPlayer;
+            // 与 output 显隐完全一致：门前半平面始终开放，只有门后才补墙。
+            bool enable = playerBehind && !overlapsPlayer;
             if (state.backfill.enabled != enable) state.backfill.enabled = enable;
         }
 
@@ -352,7 +334,6 @@ namespace Platformer
             state.backfill = null;
             state.player = null;
             state.playerBody = null;
-            state.playerInFront = false;
         }
 
         void CollectAffectedCells(List<CarveRect> rects, HashSet<Vector3Int> output)

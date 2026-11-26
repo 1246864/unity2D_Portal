@@ -227,6 +227,21 @@ namespace Platformer
         /// <summary>玩家的 Transform（未下发玩家时为 null）。</summary>
         public Transform PlayerTransform => player != null ? player.transform : null;
 
+        /// <summary>与 output 显隐、补墙碰撞共用的门后半平面判断。</summary>
+        internal bool IsPlayerBehind
+        {
+            get
+            {
+                CachePlayer();
+                Transform currentPlayer = PlayerTransform;
+                if (currentPlayer == null) return false;
+
+                Vector3 anchor = _viewAnchor != null ? _viewAnchor.position : transform.position;
+                Vector3 toPlayer = currentPlayer.position - anchor;
+                return Vector3.Dot(OpeningDirection, toPlayer) <= 0f;
+            }
+        }
+
         /// <summary>
         /// 本门 Portal View 显示对方相机纹理的哪一半。
         /// 默认 A 门右半、B 门左半；可在运行时直接修改。
@@ -982,20 +997,7 @@ namespace Platformer
         void UpdateVisibility()
         {
             if (output == null) return;
-
-            CachePlayer();
-            if (player == null)
-            {
-                output.enabled = true;
-                return;
-            }
-
-            Vector3 openingDirection = OpeningDirection;
-            Vector3 anchor = _viewAnchor != null ? _viewAnchor.position : transform.position;
-            Vector3 toPlayer = player.transform.position - anchor;
-
-            // 点积 <= 0 等价于夹角 >= 90°，此时玩家在门的背面。
-            output.enabled = Vector3.Dot(openingDirection, toPlayer) > 0f;
+            output.enabled = !IsPlayerBehind;
         }
 
         /// <summary>接收 PortalPair 的统一仲裁结果并立即应用，不在本组内决定透明目标。</summary>

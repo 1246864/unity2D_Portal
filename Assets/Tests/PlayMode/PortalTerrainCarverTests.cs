@@ -215,7 +215,8 @@ namespace Platformer.Tests
             yield return null;
             Assert.IsFalse(backfill.enabled, "玩家与补墙区域重叠时应延迟启用。");
 
-            _rig.Player.Teleport(new Vector2(-10f, 4f));
+            _rig.Player.Teleport(
+                (Vector2)groupA.transform.position + groupA.BackDirection * 4f);
             Physics2D.SyncTransforms();
             yield return new WaitForFixedUpdate();
             yield return null;
@@ -223,10 +224,14 @@ namespace Platformer.Tests
             Assert.IsNotNull(Physics2D.OverlapPoint(inside, _groundMask),
                 "补墙碰撞体应填回已切开的门洞。");
 
-            PlacePlayerInFront(_rig, groupA);
+            // 门前没有接近距离上限，覆盖高速玩家单帧跨过旧检测深度时的碰撞回归。
+            _rig.Player.Teleport(
+                (Vector2)groupA.transform.position + groupA.OpeningDirection * 20f);
+            Physics2D.SyncTransforms();
             yield return new WaitForFixedUpdate();
             yield return null;
-            Assert.IsFalse(backfill.enabled, "玩家重新接近正面时应再次关闭补墙碰撞体。");
+            Assert.IsFalse(backfill.enabled,
+                "玩家即使从极远处高速接近，只要在门前半平面就应关闭补墙碰撞体。");
             Assert.IsNull(Physics2D.OverlapPoint(inside, _groundMask));
             Assert.AreSame(backfill, FindBackfill(pair, groupA),
                 "玩家进出只应切换原碰撞体，不应销毁重建。");
