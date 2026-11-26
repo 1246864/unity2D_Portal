@@ -7,19 +7,19 @@ namespace Platformer
     {
         public Transform PlayerVisual { get; }
 
-        /// <summary>玩家传送前后的世界旋转增量。</summary>
-        public Quaternion PlayerDeltaRotation { get; }
+        /// <summary>旧玩家世界系到可选反射、再到新玩家世界系的速度变换。</summary>
+        public Matrix4x4 VectorTransform { get; }
 
-        /// <summary>沿相机局部 X 镜像相对位置，不镜像 VisualRoot 缩放或相对角。</summary>
+        /// <summary>是否在旧玩家局部 X 方向反射相对位姿与运动状态。</summary>
         public bool MirrorRelative { get; }
 
         public CameraTeleportContext(
             Transform playerVisual,
-            Quaternion playerDeltaRotation,
+            Matrix4x4 vectorTransform,
             bool mirrorRelative)
         {
             PlayerVisual = playerVisual;
-            PlayerDeltaRotation = playerDeltaRotation;
+            VectorTransform = vectorTransform;
             MirrorRelative = mirrorRelative;
         }
     }

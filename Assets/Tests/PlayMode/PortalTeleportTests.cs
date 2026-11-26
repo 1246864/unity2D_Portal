@@ -462,17 +462,14 @@ namespace Platformer.Tests
             Assert.IsFalse(control.IsMirrored, "连续两次同向传送后应恢复原始投影。");
             yield return null;
 
-            Vector3 oldCameraLocalPosition = Quaternion.Inverse(oldRotation) * oldPosition;
-            oldCameraLocalPosition.x = -oldCameraLocalPosition.x;
-            Vector3 expectedPosition = oldRotation * oldCameraLocalPosition;
+            Vector3 expectedPosition = new Vector3(-oldPosition.x, oldPosition.y, oldPosition.z);
             Vector3 actualPosition = visual.InverseTransformPoint(camera.transform.position);
             Quaternion actualRotation = Quaternion.Inverse(visual.rotation) * camera.transform.rotation;
             float actualAngle = Mathf.DeltaAngle(0f, actualRotation.eulerAngles.z);
-            Assert.Greater(Vector3.Distance(
-                    expectedPosition, new Vector3(-oldPosition.x, oldPosition.y, oldPosition.z)),
-                0.1f, "本用例必须能区分相机局部镜像与旧的玩家局部镜像。");
+            Assert.Greater(Mathf.Abs(oldPosition.x), 0.1f,
+                "本用例必须具有非零相对 X，才能验证位置镜像。");
             Assert.Less(Vector3.Distance(expectedPosition, actualPosition),
-                0.001f, "完整 B→A 链路应沿旧相机局部 X 镜像相机相对位置。");
+                0.001f, "完整 B→A 链路应沿旧玩家局部 X 镜像相机相对位置。");
             Assert.AreEqual(-oldAngle, actualAngle, 0.001f,
                 "同向门是反射映射，相机 Transform 的旧相对角必须取反。");
 

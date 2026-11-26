@@ -1258,7 +1258,7 @@ namespace Platformer.Tests
                 control.TeleportRelative(targetGo.transform, relative, true);
                 yield return null;
 
-                AssertCameraMomentum(follow, new Vector3(0f, -1f, 0f), 12f, -0.75f, 3f);
+                AssertCameraMomentum(follow, new Vector3(0f, -1f, 0f), -12f, -0.75f, 3f);
             }
             finally
             {
@@ -1299,17 +1299,16 @@ namespace Platformer.Tests
 
                 Vector3 actualLocalPosition = targetGo.transform.InverseTransformPoint(
                     cameraGo.transform.position);
-                Vector3 cameraLocalPosition = Quaternion.Inverse(oldRelativeRotation) * oldRelativePosition;
-                cameraLocalPosition.x = -cameraLocalPosition.x;
-                Vector3 expectedLocalPosition = oldRelativeRotation * cameraLocalPosition;
+                Vector3 expectedLocalPosition = new Vector3(
+                    -oldRelativePosition.x, oldRelativePosition.y, oldRelativePosition.z);
                 Assert.Less(Vector3.Distance(expectedLocalPosition, actualLocalPosition), 0.0001f,
-                    "同向门应沿旧相机局部 X 镜像相对位置，再映射到出口玩家空间。");
+                    "同向门应沿旧玩家局部 X 镜像相对位置，再映射到出口玩家空间。");
 
                 Quaternion localRotation = Quaternion.Inverse(targetGo.transform.rotation) *
                                            cameraGo.transform.rotation;
                 float actualLocalAngle = Mathf.DeltaAngle(0f, localRotation.eulerAngles.z);
-                Assert.AreEqual(30f, actualLocalAngle, 0.0001f,
-                    "投影已负责画面镜像，同向门不应再次取反相机的旧玩家相对角度。");
+                Assert.AreEqual(-30f, actualLocalAngle, 0.0001f,
+                    "同向门应在同一旧玩家坐标系中取反相机的旧相对角度。");
             }
             finally
             {
@@ -1370,14 +1369,14 @@ namespace Platformer.Tests
         static void SetCameraMomentum(
             CameraFollow2D follow,
             Vector3 followVelocity,
-            float cameraAngleVelocity,
+            float relativeAngleVelocity,
             float lookAhead,
             float lookAheadVelocity)
         {
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
             System.Type type = typeof(CameraFollow2D);
             type.GetField("_followVelocity", flags).SetValue(follow, followVelocity);
-            type.GetField("_cameraAngleVelocity", flags).SetValue(follow, cameraAngleVelocity);
+            type.GetField("_relativeAngleVelocity", flags).SetValue(follow, relativeAngleVelocity);
             type.GetField("_lookAhead", flags).SetValue(follow, lookAhead);
             type.GetField("_lookAheadVelocity", flags).SetValue(follow, lookAheadVelocity);
         }
@@ -1385,21 +1384,21 @@ namespace Platformer.Tests
         static void AssertCameraMomentum(
             CameraFollow2D follow,
             Vector3 expectedFollowVelocity,
-            float expectedCameraAngleVelocity,
+            float expectedRelativeAngleVelocity,
             float expectedLookAhead,
             float expectedLookAheadVelocity)
         {
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
             System.Type type = typeof(CameraFollow2D);
             var followVelocity = (Vector3)type.GetField("_followVelocity", flags).GetValue(follow);
-            float cameraAngleVelocity = (float)type.GetField("_cameraAngleVelocity", flags).GetValue(follow);
+            float relativeAngleVelocity = (float)type.GetField("_relativeAngleVelocity", flags).GetValue(follow);
             float lookAhead = (float)type.GetField("_lookAhead", flags).GetValue(follow);
             float lookAheadVelocity = (float)type.GetField("_lookAheadVelocity", flags).GetValue(follow);
 
             Assert.Less(Vector3.Distance(expectedFollowVelocity, followVelocity), 0.0001f,
                 $"位置动量应为 {expectedFollowVelocity}，实际为 {followVelocity}。");
-            Assert.AreEqual(expectedCameraAngleVelocity, cameraAngleVelocity, 0.0001f,
-                "传送后的角度动量不符合旋转/镜像规则。");
+            Assert.AreEqual(expectedRelativeAngleVelocity, relativeAngleVelocity, 0.0001f,
+                "传送后的相对角度动量不符合旋转/镜像规则。");
             Assert.AreEqual(expectedLookAhead, lookAhead, 0.0001f,
                 "传送后的前瞻偏移不符合旋转/镜像规则。");
             Assert.AreEqual(expectedLookAheadVelocity, lookAheadVelocity, 0.0001f,

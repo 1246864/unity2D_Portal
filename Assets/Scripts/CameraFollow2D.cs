@@ -4,7 +4,7 @@ namespace Platformer
 {
     /// <summary>
     /// 平滑跟随的 2D 相机。
-    /// 位置和角度都独立平滑；角色回正时相机角度会滞后，不会硬锁定到角色角度。
+    /// 位置独立平滑；角度在玩家显示空间中平滑，玩家回正不会污染相机的相对角速度。
     /// </summary>
     [RequireComponent(typeof(Camera))]
     public class CameraFollow2D : CameraBehavior2D
@@ -39,10 +39,11 @@ namespace Platformer
         Vector3 _followVelocity;
         float _lookAhead;
         float _lookAheadVelocity;
-        float _cameraAngle;
-        float _cameraAngleVelocity;
+        // 角度状态全部是相机相对玩家显示空间的角度及其速度，不是世界角。
+        float _relativeAngle;
+        float _relativeAngleVelocity;
+        float _previousPlayerAngle;
         bool _initialized;
-        bool _wasRealigning;
 
         public override Transform Target => target;
 
@@ -68,7 +69,8 @@ namespace Platformer
             _visual = GetVisual();
             if (_visual == null) return;
 
-            _cameraAngle = Mathf.DeltaAngle(0f, _visual.eulerAngles.z);
+            _relativeAngle = 0f;
+            _previousPlayerAngle = Mathf.DeltaAngle(0f, _visual.eulerAngles.z);
             _initialized = true;
         }
 
@@ -124,34 +126,31 @@ namespace Platformer
                 _lookAheadVelocity = 0f;
             }
 
-            float targetAngle = Mathf.DeltaAngle(0f, _visual.eulerAngles.z);
+            // r = c - p。玩家本帧转过 Δp 时，先用 r -= Δp 保持相机原有世界朝向，
+            // 再把 r 平滑到 0；既保留回正滞后，也不直接平滑不断变化的世界目标角。
+            float playerAngle = Mathf.DeltaAngle(0f, _visual.eulerAngles.z);
+            float playerDelta = Mathf.DeltaAngle(_previousPlayerAngle, playerAngle);
+            _relativeAngle = Mathf.DeltaAngle(0f, _relativeAngle - playerDelta);
+            _previousPlayerAngle = playerAngle;
 
-            if (realigning)
-            {
-                // 传送/回正开始的第一帧先对齐，之后以“迟钝”的角度跟随。
-                if (!_wasRealigning)
-                {
-                    _cameraAngle = targetAngle;
-                    _cameraAngleVelocity = 0f;
-                }
+            float angleSmoothTime = realigning
+                ? realignRotationSmoothTime
+                : rotationSmoothTime;
 
-                _cameraAngle = Mathf.SmoothDampAngle(
-                    _cameraAngle, targetAngle,
-                    ref _cameraAngleVelocity, realignRotationSmoothTime);
-            }
-            else if (rotationSmoothTime > 0.0001f)
+            if (angleSmoothTime > 0.0001f)
             {
-                _cameraAngle = Mathf.SmoothDampAngle(
-                    _cameraAngle, targetAngle,
-                    ref _cameraAngleVelocity, rotationSmoothTime);
+                _relativeAngle = Mathf.SmoothDampAngle(
+                    _relativeAngle, 0f,
+                    ref _relativeAngleVelocity, angleSmoothTime);
             }
             else
             {
-                _cameraAngle = targetAngle;
-                _cameraAngleVelocity = 0f;
+                _relativeAngle = 0f;
+                _relativeAngleVelocity = 0f;
             }
 
-            Quaternion cameraRotation = Quaternion.Euler(0f, 0f, _cameraAngle);
+            float cameraAngle = Mathf.DeltaAngle(0f, playerAngle + _relativeAngle);
+            Quaternion cameraRotation = Quaternion.Euler(0f, 0f, cameraAngle);
             Vector3 rotatedOffset = cameraRotation * new Vector3(
                 offset.x + _lookAhead, offset.y, 0f);
 
@@ -172,22 +171,17 @@ namespace Platformer
             }
 
             transform.rotation = cameraRotation;
-            _wasRealigning = realigning;
         }
 
         protected override void OnTeleported(CameraTeleportContext context)
         {
-            _followVelocity = context.PlayerDeltaRotation * _followVelocity;
+            // 与相对位姿共用同一个世界线性映射，镜像时已经包含反射，
+            // 不能再按新相机局部 X 二次翻转，否则任意初始角度下会产生方向偏差。
+            _followVelocity = context.VectorTransform.MultiplyVector(_followVelocity);
             if (context.MirrorRelative)
             {
-                // 与相机位置一致，沿传送后的相机局部 X 镜像位置速度。
-                Vector3 localVelocity = ControlledCamera.transform.InverseTransformVector(_followVelocity);
-                localVelocity.x = -localVelocity.x;
-                _followVelocity = ControlledCamera.transform.TransformVector(localVelocity);
-
-                // 反射会反转世界 Z 角速度；若继续保留旧方向，连续同向传送时
-                // 相机会沿镜像后的错误方向继续回正。
-                _cameraAngleVelocity = -_cameraAngleVelocity;
+                // r' = -r，因而相对角速度 ṙ' = -ṙ；这与玩家当前世界角速度无关。
+                _relativeAngleVelocity = -_relativeAngleVelocity;
 
                 // 前瞻是相机局部水平状态，偏移及其平滑速度随局部 X 镜像。
                 _lookAhead = -_lookAhead;
@@ -197,14 +191,12 @@ namespace Platformer
             _visual = GetVisual();
             if (_visual == null) _visual = context.PlayerVisual;
 
-            _cameraAngle = Mathf.DeltaAngle(0f, ControlledCamera.transform.eulerAngles.z);
-
-            // 如果新传送仍然处于回正阶段，下一帧不要再次执行“回正第一帧硬对齐”，
-            // 否则会把刚映射好的相机角度重新拉向玩家，造成连续传送时卡顿。
-            PlayerController2D controller = target != null
-                ? target.GetComponent<PlayerController2D>()
-                : null;
-            _wasRealigning = controller != null && controller.IsRealigning;
+            // 位姿已由控制器映射，这里只从映射结果恢复同一套相对角状态。
+            // 不在回正首帧硬对齐或清零，连续传送会保留并继续这份运动状态。
+            float playerAngle = Mathf.DeltaAngle(0f, _visual.eulerAngles.z);
+            float cameraAngle = Mathf.DeltaAngle(0f, ControlledCamera.transform.eulerAngles.z);
+            _relativeAngle = Mathf.DeltaAngle(playerAngle, cameraAngle);
+            _previousPlayerAngle = playerAngle;
             _initialized = true;
         }
 
@@ -215,13 +207,15 @@ namespace Platformer
             if (!_initialized) Initialize();
             if (_visual == null) return;
 
-            _cameraAngle = Mathf.DeltaAngle(0f, _visual.eulerAngles.z);
-            _cameraAngleVelocity = 0f;
+            _relativeAngle = 0f;
+            _relativeAngleVelocity = 0f;
             _followVelocity = Vector3.zero;
             _lookAhead = 0f;
             _lookAheadVelocity = 0f;
 
-            Quaternion rotation = Quaternion.Euler(0f, 0f, _cameraAngle);
+            float playerAngle = Mathf.DeltaAngle(0f, _visual.eulerAngles.z);
+            _previousPlayerAngle = playerAngle;
+            Quaternion rotation = Quaternion.Euler(0f, 0f, playerAngle);
             Vector3 rotatedOffset = rotation * new Vector3(offset.x, offset.y, 0f);
 
             transform.position = new Vector3(

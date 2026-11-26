@@ -169,20 +169,13 @@ namespace Platformer
             Transform cameraTransform = ControlledCamera.transform;
             Quaternion previousPlayerRotation =
                 cameraTransform.rotation * Quaternion.Inverse(relativeRotation);
-            Quaternion playerDeltaRotation =
-                playerVisual.rotation * Quaternion.Inverse(previousPlayerRotation);
 
             bool mirrorRelative = request.MirrorRelative;
             if (mirrorRelative)
             {
-                // 视野左右翻转必须沿相机自身的水平轴镜像相对位置。
-                // 若改用玩家局部 X，非零相对角时会在 B→A 产生额外位置偏差。
-                Vector3 cameraLocalPosition = Quaternion.Inverse(relativeRotation) * relativePosition;
-                cameraLocalPosition.x = -cameraLocalPosition.x;
-                relativePosition = relativeRotation * cameraLocalPosition;
-
-                // 同向门是反射而非纯旋转，相机相对角也必须取反；
-                // 投影镜像只负责画面左右翻转，不能替代 Transform 的角度映射。
+                // 位置与旋转必须在同一个旧玩家局部坐标系中反射。
+                // 相机 Transform 保存反射后的正向旋转，画面 handedness 由投影镜像负责。
+                relativePosition.x = -relativePosition.x;
                 relativeRotation = Quaternion.Inverse(relativeRotation);
             }
 
@@ -190,9 +183,19 @@ namespace Platformer
             Matrix4x4 world = playerVisual.localToWorldMatrix * relative;
             Decompose2D(world, out Vector3 position, out Quaternion rotation, out Vector3 scale);
 
+            // 位置速度与位姿共用：旧玩家世界系 → 可选局部 X 反射 → 新玩家世界系。
+            // 非镜像时退化为玩家世界旋转增量，镜像时行列式为 -1。
+            Matrix4x4 mirror = mirrorRelative
+                ? Matrix4x4.Scale(new Vector3(-1f, 1f, 1f))
+                : Matrix4x4.identity;
+            Matrix4x4 vectorTransform =
+                Matrix4x4.Rotate(playerVisual.rotation) *
+                mirror *
+                Matrix4x4.Rotate(Quaternion.Inverse(previousPlayerRotation));
+
             cameraTransform.SetPositionAndRotation(position, rotation);
             cameraTransform.localScale = scale;
-            context = new CameraTeleportContext(playerVisual, playerDeltaRotation, mirrorRelative);
+            context = new CameraTeleportContext(playerVisual, vectorTransform, mirrorRelative);
             ClearPendingTeleport();
             return true;
         }
