@@ -22,7 +22,9 @@ public class PlayerController2DEditor : Editor
         Field("groundDeceleration", "玩家水平减速度",
             "地面松开方向时使用的水平减速率（单位/秒²）；贴墙松键会回到物理模块，不在墙面应用此减速。");
         Field("airAcceleration", "空中速度变化率",
-            "方向输入让水平速度接近目标速度的最大变化率（单位/秒²）；乘以剩余空中权限，松键不主动刹车。");
+            "方向输入让水平速度接近目标速度的最大变化率（单位/秒²）；乘以剩余空中权限，松键后的速度衰减由物理水平减速度接管。");
+        Field("physicsHorizontalDeceleration", "物理状态水平减速度",
+            "物理系统在空中及高速落地保留期将 X 速度向 0 衰减的变化率（单位/秒²）；0 表示关闭，不影响 Y、撞墙缓存或离墙恢复。");
         Field("inputSpeedLimit", "AD 横向增速上限",
             "只限制 AD 继续增加 X 速度绝对值；Y 不参与，已有超速不硬截断，仍可减速和反向。也是高速落地与撞墙动量保留的触发阈值。");
 
@@ -44,7 +46,7 @@ public class PlayerController2DEditor : Editor
         Field("jumpHeight", "满跳高度（格）",
             "持续按住跳跃时，从起跳位置到顶点的目标世界高度；1 世界单位按 1 格计算。");
         Field("playerHeight", "角色显示高度（格）",
-            "用于 Scene 视图的跳跃高度辅助线；实际接触探测使用 CapsuleCollider2D 的实时 Bounds。");
+            "用于 Scene 视图的跳跃高度辅助线；实际接触探测使用平底圆头 PolygonCollider2D 的实时 Bounds。");
         Field("coyoteTime", "离地起跳宽限（秒）",
             "离开平台边缘后仍允许普通跳跃的时间；设为 0 可关闭土狼时间。");
         Field("jumpBufferTime", "跳跃预输入（秒）",
@@ -59,12 +61,12 @@ public class PlayerController2DEditor : Editor
             "上升速度低于此值（单位/秒）时进入顶点阶段；只有仍按住跳跃才应用顶点低重力。");
         Field("apexGravityMultiplier", "顶点重力倍率",
             "上升顶点阶段直接乘在基础重力上的倍率；下落阶段不使用此修正。");
-        Field("maxFallSpeed", "玩家墙滑最终上限",
-            "普通低速玩家墙滑的最终下落速度上限（单位/秒）；不限制自由下落或传送出口速度。");
+        Field("maxFallSpeed", "最大坠落速度",
+            "物理动作系统的最大下落速度，同时作为普通玩家墙滑的最终下落上限（单位/秒）；0 表示可停住下落。");
 
         Header("墙面（无主动抓墙/攀爬/体力）");
         Field("wallCheckDistance", "墙面探测距离",
-            "从胶囊左右两侧进行 BoxCast 的额外距离（世界单位）；只接受法线足够竖直的墙面。");
+            "从身体左右两侧进行 BoxCast 的额外距离（世界单位）；只接受法线足够竖直的墙面。");
         Field("wallJumpHeight", "墙跳满跳高度（格）",
             "墙跳持续按住时的目标高度，独立于普通满跳高度。较低墙跳配合离墙方向锁，使玩家返回同一面墙时高度自然下降，但不限制墙跳次数。");
         Field("wallSlideStartSpeed", "墙滑初始速度上限",
@@ -88,7 +90,13 @@ public class PlayerController2DEditor : Editor
         Field("portalContactMask", "排除的传送门层",
             "从地墙控制接触中排除的门碰撞层；入口和出口碰撞不能触发玩家接管或墙制动。");
         Field("groundCheckDistance", "地面探测距离",
-            "胶囊底部向下延伸的探测距离（世界单位）；过大会提前判定接地，过小可能在斜坡上丢失接触。");
+            "身体底部向下延伸的探测距离（世界单位）；过大会提前判定接地，过小可能在斜坡上丢失接触。");
+
+        Header("接触纠正");
+        Field("maxStepUpHeight", "最大低台阶高度",
+            "地面水平移动可自动爬升的局部台阶高度上限，最大 0.2 世界单位；爬升前检查头顶路径和目标完整身体空间，0 表示关闭。");
+        Field("headCorrectionMaxDistance", "头顶最大纠偏距离",
+            "上升碰到斜向倒角时允许的最大横向纠偏；按 0.02 递增选择最小安全偏移，平天花板和空间不足时不纠正，0 表示关闭。");
 
         Header("重生");
         Field("fallLimitY", "重生高度（世界 Y）",
@@ -100,7 +108,7 @@ public class PlayerController2DEditor : Editor
 
         Header("显示");
         Field("visualRoot", "显示根节点",
-            "承载 SpriteRenderer 和传送门旋转的子节点；留空会在 Awake 自动创建。物理根节点和胶囊始终不旋转。");
+            "承载 SpriteRenderer 和传送门旋转的子节点；留空会在 Awake 自动创建。物理根节点和身体始终不旋转。");
 
         Header("传送门回正");
         Field("portalRealignSpeed", "基础回正速度（度/秒）",

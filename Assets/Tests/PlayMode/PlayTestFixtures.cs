@@ -304,9 +304,9 @@ namespace Platformer.Tests
             body.interpolation = RigidbodyInterpolation2D.Interpolate;
             body.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
 
-            var capsule = player.AddComponent<CapsuleCollider2D>();
-            capsule.size = new Vector2(0.72f, 1.5f);
-            capsule.sharedMaterial = new PhysicsMaterial2D("Test Player Zero Friction")
+            var bodyCollider = player.AddComponent<PolygonCollider2D>();
+            PlayerController2D.ConfigureDefaultBody(bodyCollider);
+            bodyCollider.sharedMaterial = new PhysicsMaterial2D("Test Player Zero Friction")
             {
                 friction = 0f,
                 bounciness = 0f,
@@ -318,6 +318,8 @@ namespace Platformer.Tests
 
             var controller = player.AddComponent<PlayerController2D>();
             controller.groundMask = 1 << 6;
+            // 既有运动用例默认隔离可调水平阻尼；验证该参数时应显式赋值。
+            controller.physicsHorizontalDeceleration = 0f;
             player.SetActive(true);
             return controller;
         }

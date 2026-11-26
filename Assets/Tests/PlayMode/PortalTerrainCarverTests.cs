@@ -207,14 +207,15 @@ namespace Platformer.Tests
             Assert.IsNull(Physics2D.OverlapPoint(inside, _groundMask));
 
             // 玩家离开正面但仍处于补墙区域内部时，不能在其身上启用实体碰撞。
-            _rig.Player.transform.position =
-                groupA.transform.position + (Vector3)groupA.BackDirection * 0.4f;
+            // 直接跨门改 Transform 会被 PortalPair 当成真实扫掠穿门；这里只测试回填位置。
+            _rig.Player.Teleport(
+                (Vector2)groupA.transform.position + groupA.BackDirection * 0.4f);
             Physics2D.SyncTransforms();
             yield return new WaitForFixedUpdate();
             yield return null;
             Assert.IsFalse(backfill.enabled, "玩家与补墙区域重叠时应延迟启用。");
 
-            _rig.Player.transform.position = new Vector3(-10f, 4f, 0f);
+            _rig.Player.Teleport(new Vector2(-10f, 4f));
             Physics2D.SyncTransforms();
             yield return new WaitForFixedUpdate();
             yield return null;

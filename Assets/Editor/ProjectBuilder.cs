@@ -345,9 +345,8 @@ namespace Platformer.EditorTools
             rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
             rb.interpolation = RigidbodyInterpolation2D.Interpolate;
 
-            var col = go.AddComponent<CapsuleCollider2D>();
-            col.direction = CapsuleDirection2D.Vertical;
-            col.size = new Vector2(PlayerWidth, PlayerHeight);
+            var col = go.AddComponent<PolygonCollider2D>();
+            PlayerController2D.ConfigureDefaultBody(col);
             col.sharedMaterial = playerMaterial;
 
             var controller = go.AddComponent<PlayerController2D>();

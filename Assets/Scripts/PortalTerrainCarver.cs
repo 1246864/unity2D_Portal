@@ -11,7 +11,7 @@ namespace Platformer
     /// - 起点：门的中心（PortalPair 下的 Portal A/B 根节点）；
     /// - 长度方向：门的朝向反向量（背向门面的方向），长度 = carveWidth；
     /// - 高度方向：与背向垂直，长度 = PortalHeight，居中；顶边向下缩进 carveTopMargin。
-    /// - 为了让玩家胶囊能贴到门面，额外向门面方向扩展 carveFrontMargin；
+    /// - 为了让玩家身体能贴到门面，额外向门面方向扩展 carveFrontMargin；
     ///   设为 0 就是严格从门中轴开始。
     ///
     /// 这不是按瓦片格整格删除，而是把矩形和每一格的 Sprite 物理形状做布尔差：
@@ -38,7 +38,7 @@ namespace Platformer
         [Tooltip("沿门朝向反方向的长度（世界单位）")]
         [Min(0.01f)] public float carveWidth = 0.5f;
 
-        [Tooltip("为了让玩家胶囊能贴到门面，额外向门面方向扩展的长度；0 = 严格从门中轴开始")]
+        [Tooltip("为了让玩家身体能贴到门面，额外向门面方向扩展的长度；0 = 严格从门中轴开始")]
         [Min(0f)] public float carveFrontMargin = 0.1f;
 
         [Tooltip("开洞顶边向下缩进的距离，保留一条地形碰撞支撑玩家；0 = 与门洞顶边齐平")]
@@ -73,7 +73,7 @@ namespace Platformer
             public GameObject backfillObject;
             public BoxCollider2D backfill;
             public Transform player;
-            public CapsuleCollider2D playerCapsule;
+            public Collider2D playerBody;
             public bool playerInFront;
         }
 
@@ -297,7 +297,7 @@ namespace Platformer
             if (player == null)
             {
                 state.player = null;
-                state.playerCapsule = null;
+                state.playerBody = null;
                 state.playerInFront = false;
                 if (!state.backfill.enabled) state.backfill.enabled = true;
                 return;
@@ -306,7 +306,7 @@ namespace Platformer
             if (state.player != player)
             {
                 state.player = player;
-                state.playerCapsule = player.GetComponent<CapsuleCollider2D>();
+                state.playerBody = player.GetComponent<Collider2D>();
                 state.playerInFront = false;
             }
 
@@ -323,10 +323,10 @@ namespace Platformer
             state.playerInFront = inFront;
 
             bool overlapsPlayer;
-            if (state.playerCapsule != null && state.playerCapsule.isActiveAndEnabled)
+            if (state.playerBody != null && state.playerBody.isActiveAndEnabled)
             {
                 // 使用 AABB 做保守检查：宁可稍晚启用，也不能在玩家身上生成实体碰撞。
-                overlapsPlayer = state.backfill.bounds.Intersects(state.playerCapsule.bounds);
+                overlapsPlayer = state.backfill.bounds.Intersects(state.playerBody.bounds);
             }
             else
             {
@@ -351,7 +351,7 @@ namespace Platformer
             state.backfillObject = null;
             state.backfill = null;
             state.player = null;
-            state.playerCapsule = null;
+            state.playerBody = null;
             state.playerInFront = false;
         }
 

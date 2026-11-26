@@ -81,7 +81,7 @@ namespace Platformer
         [Tooltip("开洞矩形沿门朝向反方向的长度（世界单位）")]
         [Min(0.01f)] public float carveWidth = 0.5f;
 
-        [Tooltip("为了让玩家胶囊能贴到门面，额外向门面方向扩展的长度；0 = 严格从中轴开始")]
+        [Tooltip("为了让玩家碰撞体能贴到门面，额外向门面方向扩展的长度；0 = 严格从中轴开始")]
         [Min(0f)] public float carveFrontMargin = 0.1f;
 
         [Tooltip("开洞顶边向下缩进的距离，保留一条地形碰撞支撑玩家；0 = 与门洞顶边齐平")]
@@ -108,7 +108,7 @@ namespace Platformer
         bool _wasLinked;
         Transform _lastPlayer;
         CaptureDisplayGroup _automaticViewSource;
-        CapsuleCollider2D _ignoredPlayerBody;
+        Collider2D _ignoredPlayerBody;
         int _originalBodyExcludeLayers;
 
         Rigidbody2D _gateBodyA;
@@ -174,7 +174,7 @@ namespace Platformer
             public bool DiscontinuousThisStep;
         }
 
-        /// <summary>门碰撞箱所在层（复用 Snapshot 层，玩家身体胶囊会排除该层）。</summary>
+        /// <summary>门碰撞箱所在层（复用 Snapshot 层，玩家身体碰撞体会排除该层）。</summary>
         const int GateLayer = 8;
 
         /// <summary>手动选中的接近基准门；null 表示自动仲裁。</summary>
@@ -612,7 +612,7 @@ namespace Platformer
         {
             SyncPortalLinkState();
 
-            // 支持运行时换玩家：重新下发引用，并让新玩家的身体胶囊排除门层。
+            // 支持运行时换玩家：重新下发引用，并让新玩家的身体碰撞体排除门层。
             if (_lastPlayer != player)
             {
                 _lastPlayer = player;
@@ -1150,7 +1150,7 @@ namespace Platformer
             if (group == _groupA) _gateBodyA = body;
             if (group == _groupB) _gateBodyB = body;
 
-            // 门碰撞箱放到 Snapshot 层，玩家身体胶囊用 excludeLayers 忽略该层。
+            // 门碰撞箱放到 Snapshot 层，玩家身体碰撞体用 excludeLayers 忽略该层。
             // 层过滤不会像 Physics2D.IgnoreCollision 那样在碰撞箱重新启用后被重置。
             group.gameObject.layer = GateLayer;
             return gate;
@@ -1176,7 +1176,7 @@ namespace Platformer
         }
 
         /// <summary>
-        /// 身体胶囊不参与和碰撞箱的碰撞，只让玩家中心的碰撞点去撞。
+        /// 身体碰撞体不参与和碰撞箱的碰撞，只让玩家中心的碰撞点去撞。
         /// 用层过滤而不是 Physics2D.IgnoreCollision：后者在碰撞箱被禁用/重新启用后会被重置，
         /// 重新开门时玩家会把薄碰撞箱当成墙。
         /// </summary>
@@ -1185,7 +1185,7 @@ namespace Platformer
             RestorePlayerBodyCollision();
             if (player == null) return;
 
-            var body = player.GetComponent<CapsuleCollider2D>();
+            var body = player.GetComponent<Collider2D>();
             if (body == null) return;
 
             _ignoredPlayerBody = body;

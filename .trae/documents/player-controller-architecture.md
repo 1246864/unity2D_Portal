@@ -13,7 +13,7 @@
 - `Assets/Tests/PlayMode/PlayerControllerPlayTests.cs`
 - `Assets/Tests/PlayMode/PortalTeleportTests.cs`
 
-本文基于重构后的源码进行静态核对；本次未运行 Unity/PlayMode 测试。
+本文基于重构后的源码进行静态核对；相关平底碰撞体改动已执行 Unity PlayMode 专项验证。
 
 ## 2. 总体结构
 
@@ -25,7 +25,7 @@ Unity / PlayerControlManager / 自动化测试
 +-------------------------------------------------------+
 | PlayerController2D（外层 MonoBehaviour，唯一协调者）    |
 |                                                       |
-| 配置 / 输入 / 缓冲与方向锁 / Rigidbody2D / Capsule       |
+| 配置 / 输入 / 缓冲与方向锁 / Rigidbody2D / PolygonCollider2D |
 | 地墙 BoxCast / 接触计时 / 高速 X 缓存 / 墙滑淡出          |
 | 跳跃仲裁 / SwitchActionSystem / 传送与重生 / 显示回正     |
 |                                                       |
@@ -63,7 +63,7 @@ Unity / PlayerControlManager / 自动化测试
 
 | 数据/职责 | 唯一所有者 | 使用方 |
 |---|---|---|
-| 刚体与胶囊引用 | 外层 `_rb`、`_col` | 两系统通过 `Body` 访问刚体；外层用胶囊 Bounds 探测 |
+| 刚体与身体碰撞体引用 | 外层 `_rb`、`_col` | 两系统通过 `Body` 访问刚体；外层用身体碰撞体 Bounds 探测 |
 | 原始/程序输入 | 外层 `_moveInput`、`_manualInput`、`_jumpHeld` | 外层跳跃仲裁；两系统读取 `CurrentHorizontalInput` |
 | 跳跃缓冲、土狼时间、方向锁 | 外层 | 跳跃仲裁、接触与输入计算 |
 | 地面、墙方向、地法线 | 外层 `ProbeContacts` | 跳跃、交接、Player 斜坡/墙滑、Physics 缓存 |
@@ -82,7 +82,7 @@ Unity / PlayerControlManager / 自动化测试
 
 ```text
 Awake
-├─ 获取 Rigidbody2D / CapsuleCollider2D，记录出生点
+├─ 获取 Rigidbody2D / PolygonCollider2D，记录出生点
 ├─ new PlayerActionSystem(this)
 ├─ new PhysicsActionSystem(this)
 ├─ _activeActions = Player；Player.Enter()
@@ -129,6 +129,8 @@ FixedUpdate
 │    └─ 否则 ResolveActionSystem()
 │
 ├─ 5. _activeActions.Tick(dt)       // 全步仅一次
+│    ├─ Player：地面/墙面前先做 0.2 低台阶及净空查询
+│    └─ Physics：末尾预测上升倒角并选择最小安全横向纠偏
 │
 ├─ 6. RespawnIfFallen()
 │
@@ -140,7 +142,7 @@ FixedUpdate
 - **跳跃优先于接触交接**，避免本步先切系统再处理起跳。
 - 地面交接优先于墙缓存；地面状态会清掉墙缓存和淡出。
 - `VelocityBeforePhysics` 在 Tick 和重生检查后记录，供随后的碰撞/扫掠传送以及下一固定步的撞墙前 X 锁存使用。
-- 高速落地保留期间，Physics Tick 的接地分支不写速度、不施力并直接返回。
+- 高速落地保留期间，Physics Tick 的接地分支按 `physicsHorizontalDeceleration` 只衰减 X，保留 Y，不施力并直接返回。
 
 ## 5. 接触探测与跳跃墙监测
 
@@ -156,7 +158,8 @@ ProbeContacts
 ```
 
 - 地面与墙面使用同一 `contactMask`；`portalContactMask` 默认排除第 8 层 Snapshot 门碰撞盒。
-- 墙面探测使用胶囊 Bounds 的 70% 宽高和 `wallCheckDistance`；法线明确时要求 `abs(normal.x) > 0.5`。
+- 地面探针使用身体碰撞体的完整宽度，只接受 `normal.y > 0.3` 的向上表面；少量脚底边缘仍有支撑时保持接地，侧墙不会算作地面。
+- 墙面探测使用身体碰撞体 Bounds 的 70% 宽高和 `wallCheckDistance`；法线明确时要求 `abs(normal.x) > 0.5`。
 - 只有真实地形墙能参与交接、墙滑和高速 X 缓存；门碰撞本身不能触发这些逻辑。
 - Physics 正在跳跃时，地面命中不会直接视为有效接地，避免起跳后仍被旧地面接触拉住。
 
@@ -183,6 +186,31 @@ Physics.StartJump
 
 因此门传送后无需等待旧跳跃到达顶点，下一次 `ProbeContacts` 就能重新探测墙；后续 `RefreshJumpPhase` 也不会重新武装已取消的旧暂停。
 
+### 5.4 平底圆头与安全接触纠正
+
+根节点只有一个 `PolygonCollider2D`：底边和两侧竖直，头顶为 16 段半圆弧。身体宽 `0.72`、高 `1.5`，圆头半径 `0.36`、圆心局部 Y 为 `0.39`，底边局部 Y 为 `-0.75`。Center Point 仍是独立运行时子节点，不是第二个根身体碰撞体。
+
+候选空间使用同一几何常量，通过“下身 OverlapBox + 头顶 OverlapCircle”检查，所有查询排除 `portalContactMask` 且不命中 Trigger。查询不创建额外物理碰撞体，也不读取 `visualRoot` 的角度；物理根节点始终保持世界轴对齐。
+
+两类位置修正都由当前动作系统在自己的 Tick 内独占执行：
+
+```text
+PlayerActionSystem.Tick
+└─ 接地、近平地且有水平速度
+   └─ 侧面障碍 -> 局部顶面 -> 头顶路径 -> 目标完整身体
+      └─ 全部安全：爬升不超过 maxStepUpHeight=0.2
+
+PhysicsActionSystem.Tick
+└─ 最终 velocity.y > 0
+   └─ 圆头向上 CircleCast（覆盖本步预计位移）
+      └─ 仅斜向倒角：按 0.02 搜索最小安全 X 偏移
+         ├─ 检查当前及本步上升后的完整身体空间
+         ├─ 排除其他阻挡，并确认已绕开原向下表面
+         └─ 最大 headCorrectionMaxDistance=0.24，保持本步 Y 速度
+```
+
+平天花板、竖墙、初始重叠零法线或任何目标空间不足都不纠偏。台阶落点额外留出 `0.03`，大于两侧默认接触偏移之和，防止 Overlap 把合法顶面接触误判为穿透。小幅位置修正不调用 `TeleportCore`、不增加 `PositionRevision`，也不创建第三条运动系统。
+
 ## 6. 动作系统交接状态机
 
 ### 6.1 Player 激活时
@@ -202,7 +230,7 @@ Player 不再因为“墙滑 Y 又超过某阈值”而自动跳回 Physics，�
 | 条件（按优先级） | 结果 |
 |---|---|
 | 本步成功跳跃请求 | 保持/进入 Physics 并重新开始跳跃 |
-| 接地且高速落地 retention 尚未结束 | 保持 Physics；本步 Tick 不做脚本运动写入 |
+| 接地且高速落地 retention 尚未结束 | 保持 Physics；本步 Tick 只对 X 应用水平减速度，不改 Y |
 | 接地且无需保留，或 retention 已结束 | 切 Player |
 | 离地且 `_hasWallMomentumCache` | 保持 Physics；缓存优先于推墙交接 |
 | 离地、无缓存且朝墙输入 | 清淡出并切 Player；上升和下降都使用同一方向判断 |
@@ -231,7 +259,7 @@ _delayLandingHandoff = true，累计 _groundContactTime
         |
 ResolveActionSystem
 ├─ _groundContactTime < 0.1：保持 Physics
-│  └─ Physics.Tick 接地分支直接返回，不写速度/施力
+│  └─ Physics.Tick 按 physicsHorizontalDeceleration 衰减 X，保留 Y 后返回
 └─ 到期或锁存为 false：SwitchActionSystem(Player)
    └─ 恢复 groundAcceleration / groundDeceleration 等直接控制
 ```
@@ -294,13 +322,15 @@ PlayerActionSystem.Tick
    └─ LimitHorizontalInputAcceleration(currentX, candidateX)
 
 PhysicsActionSystem.Tick（无缓存、无离墙恢复时）
-└─ CalculateAirHorizontalSpeed(currentX, input, AirControlAuthority, dt)
-   ├─ 松键/权限 0/同向超速：保留 currentX
-   ├─ MoveTowards(..., airAcceleration * authority * dt)
-   └─ LimitHorizontalInputAcceleration(currentX, candidateX)
+├─ CalculateAirHorizontalSpeed(currentX, input, AirControlAuthority, dt)
+│  ├─ 松键/权限 0/同向超速：输入求解保留 currentX
+│  ├─ MoveTowards(..., airAcceleration * authority * dt)
+│  └─ LimitHorizontalInputAcceleration(currentX, candidateX)
+└─ ApplyPhysicsHorizontalDeceleration(nextX, dt)
+   └─ MoveTowards(nextX, 0, physicsHorizontalDeceleration * dt)
 ```
 
-这两条都是**横向纯计算**：输入、候选值、比较和返回值都只有 X，不读取或限制 Y。`inputSpeedLimit=24` 只拒绝 AD 在 24 以上继续增大 |X|，不是综合向量限速，也不硬截断已有超速。
+这两个输入求解函数都是**横向纯计算**：输入、候选值、比较和返回值都只有 X，不读取或限制 Y。正常空中分支随后再独立衰减 X；撞墙缓存和离墙恢复保持原路径。`inputSpeedLimit=24` 只拒绝 AD 在 24 以上继续增大 |X|，不是综合向量限速，也不硬截断已有超速。
 
 默认参数下：跑速目标 9，普通跳在当前 X 上代数加助推 4，墙跳固定使用 `离墙方向 * (9 + 4)`；这些离散助推不经过普通 AD 增速限制。
 
@@ -433,7 +463,7 @@ PortalPair.TeleportAt
 
 **门传送不选择动作系统、不调用 Enter、不重置空中权限。** `SetPortalExitVelocity` 也不能扩展成隐式交接入口，否则会破坏已经耗尽的空中权限和出口动量连续性。
 
-身体胶囊由 `PortalPair.IgnorePlayerBodyCollision()` 排除第 8 层；门碰撞只由 Center Point 命中。玩家外层同时又用 `portalContactMask` 排除门层，形成“物理碰撞过滤 + 控制接触过滤”两道边界。
+身体碰撞体由 `PortalPair.IgnorePlayerBodyCollision()` 排除第 8 层；门碰撞只由 Center Point 命中。玩家外层同时又用 `portalContactMask` 排除门层，形成“物理碰撞过滤 + 控制接触过滤”两道边界。
 
 ## 11. 接口分层索引
 
@@ -478,8 +508,8 @@ PhysicsActionSystem
 
 - `PlayerController2DEditor.OnInspectorGUI()` 只读写序列化属性；`Field` 用中文 `GUIContent(label, tooltip)` 绘制，并优先采用字段自身的 `[Tooltip]`，不提供另一套运行逻辑。
 - 新增字段若要在 Inspector 出现，需要真实序列化字段及对应 `Field` 调用；参数说明以字段上的中文 `[Tooltip]` 为主，自定义调用处文案只作缺失时的备用。
-- `Player.prefab` 固化当前主要参数：普通跳 6.2、墙跳 4.8、跑速 9、助推 4、`inputSpeedLimit=24`、高速 retention 0.1、同墙松键 fade 0.3。
-- Prefab 的 `groundMask=64`（层 6）、`portalContactMask=256`（层 8），刚体 `gravityScale=4`，胶囊为 `0.72 × 1.5`。
+- `Player.prefab` 固化当前主要参数：普通跳 6.2、墙跳 4.8、跑速 9、助推 4、`inputSpeedLimit=24`、`maxFallSpeed=100`、触地回正倍率 1、高速 retention 0.1、同墙松键 fade 0.3、低台阶上限 0.2、头顶纠偏上限 0.24。
+- Prefab 的 `groundMask=64`（层 6）、`portalContactMask=256`（层 8），刚体 `gravityScale=4`；单个平底圆头 `PolygonCollider2D` 的 Bounds 为 `0.72 × 1.5`，底边无圆角或中间点。
 - `visualRoot` 默认为空并由 Awake 创建；Center Point 同样运行时创建。`centerPointRadius=0.08` 同时进入出口安全距离计算。
 
 ## 13. 维护不变量与测试说明
@@ -488,19 +518,21 @@ PhysicsActionSystem
 
 1. FixedUpdate 顺序不变，尤其“探测/缓存 → 跳跃优先 → 交接 → 单次 Tick → 记录 VelocityBeforePhysics”。
 2. 每个物理步不能有两个动作系统同时写运动；不要把旧并列运动函数重新引入。
-3. 横向输入求解只处理 X；禁止恢复综合向量限速、`moveSpeed * 1.1` 阈值或全局 Y 终端速度。
+3. 横向输入求解只处理 X；禁止恢复综合向量限速或 `moveSpeed * 1.1` 阈值；最大下落速度仅由 `maxFallSpeed` 控制。
 4. 高速撞墙从 `VelocityBeforePhysics.x` 锁存；高速落地看新接地时当前 X；二者都严格使用 `inputSpeedLimit`，不混入 Y。
 5. 不恢复持续推墙计时和低速自动交接；`wallSlideStartSpeed` 不再是系统切换阈值。
 6. 高速缓存优先于推墙交接；离墙恢复只能一次赋值，换墙/到期/落地/跳跃/传送按当前规则清理。
 7. 普通墙滑与松键淡出继续共享同一个 Y 公式；淡出只限同墙中性松键且不插值 X。
 8. 跳跃上升暂停墙监测，Physics `OnTeleport` 必须立即取消暂停；门传送仍不得重置空中权限。
 9. PortalPair 先 `TeleportWithPortalRotation`，后按 `preserveVelocity` 调 `SetPortalExitVelocity`；出口安全间距公式中的四项不能遗漏。
-10. 保持 `portalContactMask` 和 Center Point/身体胶囊层过滤，避免门被当成地墙或出口重复碰撞消掉速度。
+10. 保持 `portalContactMask` 和 Center Point/身体碰撞体层过滤，避免门被当成地墙或出口重复碰撞消掉速度。
+11. 低台阶和头顶纠偏只能留在各自动作系统 Tick 内，并先检查头顶路径与完整目标身体；不得改成无空间检测的位置吸附或传送。
+12. 根节点只保留一个身体 Polygon；传送门只旋转 `visualRoot`，不能旋转根节点、刚体或碰撞路径。
 
 ### 测试状态
 
-两份相关 PlayMode 测试源码已读取；本次仅添加文档导航注释，没有修改测试逻辑，也没有运行测试。
+本次已在临时 Unity 工程执行相关 PlayMode 测试：新增的 12 项低台阶、倒角、净空拒绝和旋转契约用例全部通过；`PlayerControllerPlayTests` 为 49 项中 46 项通过，`PortalTeleportTests` 22/22，`PortalTerrainCarverTests` 7 项中 6 项通过，`LevelTilemapTests` 5/5。
 
-`PlayerControllerPlayTests.High_Speed_Wall_Push_Brakes_Then_Hands_Off_To_Player` 已语义过时：它以 X=0、Y=-40 构造场景，仍期待“Physics 纵向高速推墙制动 → 降到 wallSlideStartSpeed 附近自动交 Player”。当前高速撞墙链路要求撞墙前世界 X 朝墙且超过 24，缓存只保留 0.1s，并已删除低速自动交接，所以该旧断言序列不再对应当前架构。
+剩余 4 项为 2 项相机镜像、1 项高速推墙和 1 项门顶支撑条补墙，均属于此前已确认、在旧碰撞体对照中也失败的问题，不作为本次功能通过依据。回填测试中的跨门位置摆放已改用 `Teleport` 更新位置版本，避免把测试摆位误当成真实扫掠穿门。
 
-后续更新测试时应验证当前 X 缓存与 retention 契约，而不是恢复旧实现。本文不声明任何测试通过结果。
+`PlayerControllerPlayTests.High_Speed_Wall_Push_Brakes_Then_Hands_Off_To_Player` 已语义过时：它以 X=0、Y=-40 构造场景，仍期待“Physics 纵向高速推墙制动 → 降到 wallSlideStartSpeed 附近自动交 Player”。当前高速撞墙链路要求撞墙前世界 X 朝墙且超过 24，缓存只保留 0.1s，并已删除低速自动交接，所以该旧断言序列不再对应当前架构。后续更新测试时应验证当前 X 缓存与 retention 契约，而不是恢复旧实现。

@@ -45,13 +45,13 @@ namespace Platformer.Tests
             }
             Assert.AreEqual(41 * 2, cells, "夹具应生成指定的两行地面瓦片。");
 
-            var capsule = _player.GetComponent<CapsuleCollider2D>();
+            var bodyCollider = _player.GetComponent<Collider2D>();
             float groundTop = _terrainRig.Tilemap.GetCellCenterWorld(new Vector3Int(0, -1, 0)).y +
                               _terrainRig.Tilemap.layoutGrid.cellSize.y * 0.5f;
-            float expectedY = groundTop + capsule.size.y * 0.5f;
+            float expectedY = groundTop + bodyCollider.bounds.size.y * 0.5f;
             Assert.IsTrue(_player.IsGrounded, "玩家应站在临时 Tilemap 的合并碰撞体上。");
             Assert.AreEqual(expectedY, _player.transform.position.y, 0.15f,
-                "落地高度应由临时瓦片顶面和胶囊高度计算。");
+                "落地高度应由临时瓦片顶面和身体碰撞体高度计算。");
         }
 
         [UnityTest]

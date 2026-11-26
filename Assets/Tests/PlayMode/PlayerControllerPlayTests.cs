@@ -41,7 +41,7 @@ namespace Platformer.Tests
             var groundCollider = _ground.AddComponent<BoxCollider2D>();
             groundCollider.size = new Vector2(100f, 1f);
 
-            // 让胶囊在地面上稳定下来。
+            // 让玩家身体在地面上稳定下来。
             for (int i = 0; i < 15; i++)
                 yield return new WaitForFixedUpdate();
 
@@ -57,11 +57,346 @@ namespace Platformer.Tests
             yield return null;
         }
 
+        GameObject CreateBoxObstacle(string name, Vector2 center, Vector2 size)
+        {
+            var obstacle = new GameObject(name);
+            obstacle.layer = _ground.layer;
+            obstacle.transform.position = center;
+            var collider = obstacle.AddComponent<BoxCollider2D>();
+            collider.size = size;
+            collider.sharedMaterial = _player.GetComponent<Collider2D>().sharedMaterial;
+            Physics2D.SyncTransforms();
+            return obstacle;
+        }
+
+        GameObject CreatePolygonObstacle(string name, Vector2[] points)
+        {
+            var obstacle = new GameObject(name);
+            obstacle.layer = _ground.layer;
+            var collider = obstacle.AddComponent<PolygonCollider2D>();
+            collider.pathCount = 1;
+            collider.SetPath(0, points);
+            collider.sharedMaterial = _player.GetComponent<Collider2D>().sharedMaterial;
+            Physics2D.SyncTransforms();
+            return obstacle;
+        }
+
+        GameObject CreateChamferObstacle(int side)
+        {
+            var points = new[]
+            {
+                new Vector2(0f, 2.5f),
+                new Vector2(0.5f, 2f),
+                new Vector2(3f, 2f),
+                new Vector2(3f, 6f),
+                new Vector2(0f, 6f)
+            };
+            if (side < 0)
+            {
+                for (int i = 0; i < points.Length; i++)
+                    points[i] = new Vector2(-points[i].x, points[i].y);
+                System.Array.Reverse(points);
+            }
+            return CreatePolygonObstacle("Test Ceiling Chamfer", points);
+        }
+
         [UnityTest]
         public IEnumerator Player_Stands_On_Ground()
         {
             Assert.IsTrue(_controller.IsGrounded, "Player should be grounded after settling.");
             yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Flat_Feet_Stay_Grounded_On_Narrow_Platform_Edge()
+        {
+            var bodyCollider = _player.GetComponent<PolygonCollider2D>();
+            Assert.IsNotNull(bodyCollider, "玩家身体应使用平底圆头 PolygonCollider2D。");
+            Assert.AreEqual(1, _player.GetComponents<Collider2D>().Length,
+                "玩家根节点只能有一个身体碰撞体，Center Point 应留在子节点。");
+            Assert.AreEqual(1, bodyCollider.pathCount, "身体只能包含一条凸路径。");
+            Vector2[] bodyPath = bodyCollider.GetPath(0);
+            Assert.AreEqual(-0.36f, bodyPath[0].x, 0.0001f);
+            Assert.AreEqual(-0.75f, bodyPath[0].y, 0.0001f);
+            Assert.AreEqual(0.36f, bodyPath[1].x, 0.0001f);
+            Assert.AreEqual(-0.75f, bodyPath[1].y, 0.0001f,
+                "底边两个顶点必须直接相邻，不能插入圆角或中间点。");
+            Assert.AreEqual(0.72f, bodyCollider.bounds.size.x, 0.0001f);
+            Assert.AreEqual(1.5f, bodyCollider.bounds.size.y, 0.0001f);
+
+            var groundCollider = _ground.GetComponent<BoxCollider2D>();
+            groundCollider.size = new Vector2(1f, 1f);
+            _player.GetComponent<Rigidbody2D>().gravityScale = 1f;
+            Physics2D.SyncTransforms();
+
+            const float supportWidth = 0.04f;
+            float rootY = groundCollider.bounds.max.y - bodyPath[0].y;
+            float rootX = groundCollider.bounds.max.x - supportWidth + bodyPath[1].x;
+            _controller.Teleport(new Vector2(rootX, rootY));
+            _controller.SetMoveInput(0f);
+
+            for (int i = 0; i < 20; i++)
+                yield return new WaitForFixedUpdate();
+
+            Assert.IsTrue(_controller.IsGrounded, "少量平底仍在平台上时应保持接地。");
+            Assert.AreEqual(rootY, _player.transform.position.y, 0.05f,
+                "平底边缘支撑不应让玩家滑落。");
+            Assert.AreEqual(rootX, _player.transform.position.x, 0.05f,
+                "边缘接触不应把玩家横向推离平台。");
+        }
+
+        [UnityTest]
+        public IEnumerator Ground_Movement_Steps_Up_Right_010()
+        {
+            yield return RunStepUpCase(1f, 0.1f);
+        }
+
+        [UnityTest]
+        public IEnumerator Ground_Movement_Steps_Up_Left_010()
+        {
+            yield return RunStepUpCase(-1f, 0.1f);
+        }
+
+        [UnityTest]
+        public IEnumerator Ground_Movement_Steps_Up_Right_020()
+        {
+            yield return RunStepUpCase(1f, 0.2f);
+        }
+
+        [UnityTest]
+        public IEnumerator Ground_Movement_Steps_Up_Left_020()
+        {
+            yield return RunStepUpCase(-1f, 0.2f);
+        }
+
+        IEnumerator RunStepUpCase(float direction, float stepHeight)
+        {
+            var step = CreateBoxObstacle("Test Low Step",
+                new Vector2(direction * 4f, stepHeight * 0.5f),
+                new Vector2(6f, stepHeight));
+            try
+            {
+                _controller.SetMoveInput(direction);
+                for (int i = 0; i < 35; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.Greater(_player.transform.position.x * direction, 1.5f,
+                    "玩家应通过低台阶，而不是停在原侧墙前。");
+                Assert.AreEqual(0.75f + stepHeight, _player.transform.position.y, 0.08f,
+                    "爬升后的脚底应落在台阶顶面。");
+                Assert.IsTrue(_controller.IsGrounded);
+                Assert.IsFalse(_controller.IsPhysicsActionActive,
+                    "低台阶由地面玩家系统处理，不应变成跳跃。");
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                Object.Destroy(step);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Ground_Movement_Does_Not_Step_Up_High_Wall_Right()
+        {
+            yield return RunHighWallRejectionCase(1f);
+        }
+
+        [UnityTest]
+        public IEnumerator Ground_Movement_Does_Not_Step_Up_High_Wall_Left()
+        {
+            yield return RunHighWallRejectionCase(-1f);
+        }
+
+        IEnumerator RunHighWallRejectionCase(float direction)
+        {
+            const float wallHeight = 0.24f;
+            var wall = CreateBoxObstacle("Test High Step Rejection",
+                new Vector2(direction * 4f, wallHeight * 0.5f),
+                new Vector2(6f, wallHeight));
+            try
+            {
+                _controller.SetMoveInput(direction);
+                for (int i = 0; i < 25; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.Less(_player.transform.position.x * direction, 0.9f,
+                    "超过 0.2 的墙面不能自动爬升或穿过。");
+                Assert.AreEqual(0.75f, _player.transform.position.y, 0.05f);
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                Object.Destroy(wall);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Step_Up_Rejects_Insufficient_Headroom()
+        {
+            var step = CreateBoxObstacle("Test Step Under Ceiling",
+                new Vector2(4f, 0.1f), new Vector2(6f, 0.2f));
+            var ceiling = CreateBoxObstacle("Test Step Ceiling",
+                new Vector2(3f, 1.65f), new Vector2(9f, 0.1f));
+            try
+            {
+                _controller.SetMoveInput(1f);
+                for (int i = 0; i < 25; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.Less(_player.transform.position.x, 0.9f);
+                Assert.AreEqual(0.75f, _player.transform.position.y, 0.05f,
+                    "爬升会碰到天花板时必须保持原位置高度。");
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                Object.Destroy(ceiling);
+                Object.Destroy(step);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Step_Up_Rejects_Blocked_Target_Space()
+        {
+            var step = CreateBoxObstacle("Test Step With Blocked Target",
+                new Vector2(4f, 0.1f), new Vector2(6f, 0.2f));
+            var wall = CreateBoxObstacle("Test Step Second Wall",
+                new Vector2(1.12f, 1.2f), new Vector2(0.2f, 2f));
+            try
+            {
+                _controller.SetMoveInput(1f);
+                for (int i = 0; i < 25; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.Less(_player.transform.position.x, 0.9f);
+                Assert.AreEqual(0.75f, _player.transform.position.y, 0.05f,
+                    "台阶后的第二堵墙会占据目标空间时不能爬升。");
+            }
+            finally
+            {
+                _controller.SetMoveInput(0f);
+                Object.Destroy(wall);
+                Object.Destroy(step);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Jump_Rounded_Head_Corrects_Right_Chamfer_And_Keeps_Rising()
+        {
+            yield return RunRoundedHeadChamferCase(1);
+        }
+
+        [UnityTest]
+        public IEnumerator Jump_Rounded_Head_Corrects_Left_Chamfer_And_Keeps_Rising()
+        {
+            yield return RunRoundedHeadChamferCase(-1);
+        }
+
+        IEnumerator RunRoundedHeadChamferCase(int side)
+        {
+            var chamfer = CreateChamferObstacle(side);
+            try
+            {
+                _controller.Teleport(new Vector2(-side * 0.15f, 0.75f));
+                _controller.SetMoveInput(0f);
+                yield return new WaitForFixedUpdate();
+
+                float initialX = _player.transform.position.x;
+                float initialY = _player.transform.position.y;
+                float maxY = initialY;
+                float maxCorrection = 0f;
+                float previousY = initialY;
+                bool corrected = false;
+                bool roseAfterCorrection = false;
+                _controller.JumpPressed();
+
+                for (int i = 0; i < 18; i++)
+                {
+                    yield return new WaitForFixedUpdate();
+                    float correction = side * (initialX - _player.transform.position.x);
+                    maxCorrection = Mathf.Max(maxCorrection, correction);
+                    if (correction > 0.08f) corrected = true;
+                    if (corrected && _controller.Velocity.y > 0f &&
+                        _player.transform.position.y > previousY + 0.001f)
+                        roseAfterCorrection = true;
+
+                    maxY = Mathf.Max(maxY, _player.transform.position.y);
+                    previousY = _player.transform.position.y;
+                }
+
+                Assert.Greater(maxCorrection, 0.08f,
+                    "零水平输入时，圆头倒角也应自动产生横向纠正。");
+                Assert.LessOrEqual(maxCorrection,
+                    _controller.headCorrectionMaxDistance + 0.02f);
+                Assert.Greater(maxY, initialY + 1.5f,
+                    "纠偏后仍应继续获得明显净上升高度。");
+                Assert.IsTrue(roseAfterCorrection,
+                    "横向纠偏之后必须继续向上运动，而不是被碰撞顶停。");
+                Assert.AreEqual(-side * 0.36f, _player.transform.position.x, 0.12f,
+                    "纠偏后应贴近倒角后的竖墙。");
+                Assert.IsFalse(_controller.IsWallSliding);
+            }
+            finally
+            {
+                Object.Destroy(chamfer);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Jump_Flat_Ceiling_Does_Not_Correct_Horizontally()
+        {
+            var ceiling = CreateBoxObstacle("Test Flat Ceiling",
+                new Vector2(0f, 2.25f), new Vector2(5f, 0.5f));
+            try
+            {
+                float initialX = _player.transform.position.x;
+                float maxY = _player.transform.position.y;
+                _controller.SetMoveInput(0f);
+                _controller.JumpPressed();
+                for (int i = 0; i < 12; i++)
+                {
+                    yield return new WaitForFixedUpdate();
+                    maxY = Mathf.Max(maxY, _player.transform.position.y);
+                }
+
+                Assert.AreEqual(initialX, _player.transform.position.x, 0.02f,
+                    "平天花板没有可循的倒角方向，不能擅自横移。");
+                Assert.Less(maxY, 1.35f, "平天花板仍应正常阻挡上升。");
+            }
+            finally
+            {
+                Object.Destroy(ceiling);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Jump_Chamfer_Rejects_Blocked_Correction_Space()
+        {
+            var chamfer = CreateChamferObstacle(1);
+            var blocker = CreateBoxObstacle("Test Chamfer Escape Blocker",
+                new Vector2(-0.65f, 4f), new Vector2(0.2f, 6f));
+            try
+            {
+                _controller.Teleport(new Vector2(-0.15f, 0.75f));
+                _controller.SetMoveInput(0f);
+                yield return new WaitForFixedUpdate();
+                float initialX = _player.transform.position.x;
+                _controller.JumpPressed();
+
+                for (int i = 0; i < 12; i++)
+                    yield return new WaitForFixedUpdate();
+
+                Assert.AreEqual(initialX, _player.transform.position.x, 0.04f,
+                    "逃逸方向被第二堵墙占据时不能横向纠正。");
+                Assert.GreaterOrEqual(_player.GetComponent<Collider2D>().bounds.min.x,
+                    blocker.GetComponent<Collider2D>().bounds.max.x - 0.02f,
+                    "纠偏查询不能把玩家送进侧面阻挡。");
+            }
+            finally
+            {
+                Object.Destroy(blocker);
+                Object.Destroy(chamfer);
+            }
         }
 
         [UnityTest]
@@ -499,7 +834,7 @@ namespace Platformer.Tests
             };
             _ground.GetComponent<Collider2D>().sharedMaterial = highFriction;
 
-            var playerMaterial = _player.GetComponent<CapsuleCollider2D>().sharedMaterial;
+            var playerMaterial = _player.GetComponent<Collider2D>().sharedMaterial;
             Assert.IsNotNull(playerMaterial);
             Assert.AreEqual(0f, playerMaterial.friction, 0.0001f);
 
@@ -517,7 +852,7 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
-        public IEnumerator Falling_Uses_Native_Gravity_Without_Terminal_Speed()
+        public IEnumerator Falling_Uses_Native_Gravity_Until_Max_Fall_Speed()
         {
             float originalFallLimit = _controller.fallLimitY;
             _ground.SetActive(false);
@@ -536,15 +871,13 @@ namespace Platformer.Tests
                 Assert.IsTrue(_controller.IsPhysicsActionActive,
                     "自由下落必须由物理动作系统接管。");
                 Assert.AreEqual(expectedSpeed, -_controller.Velocity.y, 0.25f,
-                    "下落加速度应完全等于 Physics2D 重力乘刚体重力缩放。");
+                    "达到上限前，下落加速度应等于 Physics2D 重力乘刚体重力缩放。");
 
                 for (int i = 0; i < 20; i++)
                     yield return new WaitForFixedUpdate();
-                Assert.AreEqual(gravity * Time.fixedDeltaTime * 24f,
+                Assert.AreEqual(_controller.maxFallSpeed,
                     -_controller.Velocity.y, 0.35f,
-                    "持续下落仍应严格遵循原生重力积分。");
-                Assert.Greater(-_controller.Velocity.y, _controller.maxFallSpeed + 20f,
-                    "普通墙滑的最终速度上限不能限制自由下落。");
+                    "持续下落达到 maxFallSpeed 后应保持最大下落速度。");
             }
             finally
             {
@@ -554,7 +887,7 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
-        public IEnumerator High_Speed_Fall_Continues_With_Native_Gravity()
+        public IEnumerator High_Speed_Fall_Is_Capped_At_Max_Fall_Speed()
         {
             float originalFallLimit = _controller.fallLimitY;
             _controller.fallLimitY = -100f;
@@ -569,15 +902,14 @@ namespace Platformer.Tests
                 float firstSpeed = -_controller.Velocity.y;
                 Assert.IsTrue(_controller.IsPhysicsActionActive,
                     "高速下落不能被截停或交还玩家系统。");
-                Assert.Greater(firstSpeed, 80f,
-                    "外部高速下落不能在第一步被截到终端速度。");
+                Assert.AreEqual(_controller.maxFallSpeed, firstSpeed, 0.35f,
+                    "超过上限的外部下落速度应被物理系统截到最大值。");
 
                 for (int i = 0; i < 9; i++)
                     yield return new WaitForFixedUpdate();
-                float gravity = Mathf.Abs(Physics2D.gravity.y * body.gravityScale);
-                Assert.AreEqual(firstSpeed + gravity * Time.fixedDeltaTime * 9f,
+                Assert.AreEqual(_controller.maxFallSpeed,
                     -_controller.Velocity.y, 0.35f,
-                    "高速下落应继续按原生重力加速，不能向旧的终端速度恢复。");
+                    "持续高速下落应保持配置的最大速度。");
             }
             finally
             {
@@ -667,10 +999,9 @@ namespace Platformer.Tests
 
                 for (int i = 0; i < 5; i++)
                     yield return new WaitForFixedUpdate();
-                float gravity = Mathf.Abs(Physics2D.gravity.y * body.gravityScale);
-                Assert.AreEqual(firstSpeed + gravity * Time.fixedDeltaTime * 5f,
+                Assert.AreEqual(_controller.maxFallSpeed,
                     -_controller.Velocity.y, 0.35f,
-                    "高速贴墙不推墙时应继续按原生重力加速，不能损耗垂直速度。");
+                    "高速贴墙不推墙时仍应遵循物理系统的最大下落速度。");
                 Assert.IsTrue(_controller.IsPhysicsActionActive);
                 Assert.IsFalse(_controller.IsWallSliding);
             }
@@ -1314,6 +1645,13 @@ namespace Platformer.Tests
 
             Assert.AreEqual(-45f, _controller.CurrentRotationAngle, 2f,
                 "玩家角度应等于当前角度与出口门角度的和。");
+            Assert.AreEqual(Quaternion.identity, _player.transform.rotation,
+                "传送门只能旋转显示子节点，物理根节点不能旋转。");
+            Assert.AreEqual(0f, _player.GetComponent<Rigidbody2D>().rotation, 0.0001f);
+            var bodyCollider = _player.GetComponent<PolygonCollider2D>();
+            Vector2[] originalBodyPath = bodyCollider.GetPath(0);
+            Assert.AreEqual(0.72f, bodyCollider.bounds.size.x, 0.0001f);
+            Assert.AreEqual(1.5f, bodyCollider.bounds.size.y, 0.0001f);
 
             var cameraGo = new GameObject("RotateTestCamera");
             var camera = cameraGo.AddComponent<Camera>();
@@ -1340,6 +1678,12 @@ namespace Platformer.Tests
                 "回正动画结束后玩家应恢复竖直。");
             Assert.AreEqual(0f, Mathf.DeltaAngle(0f, camera.transform.eulerAngles.z), 2f,
                 "回正后相机也应恢复 0°。");
+            Assert.AreEqual(Quaternion.identity, _player.transform.rotation);
+            Assert.AreEqual(0f, _player.GetComponent<Rigidbody2D>().rotation, 0.0001f);
+            CollectionAssert.AreEqual(originalBodyPath, bodyCollider.GetPath(0),
+                "显示回正不能改写身体碰撞形状。");
+            Assert.AreEqual(0.72f, bodyCollider.bounds.size.x, 0.0001f);
+            Assert.AreEqual(1.5f, bodyCollider.bounds.size.y, 0.0001f);
 
             Object.Destroy(cameraGo);
             _controller.portalRealignSpeed = originalSpeed;

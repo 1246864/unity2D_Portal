@@ -1097,6 +1097,7 @@ MonoBehaviour:
   teleportCooldown: 0.25
   preserveVelocity: 1
   gateThickness: 0.05
+  gateContactOffset: 0.04
   exitMargin: 0.03
   maskTopOffset: 2
   maskBottomOffset: -2
@@ -1110,6 +1111,9 @@ MonoBehaviour:
   carveTerrain: 1
   carveWidth: 0.8
   carveFrontMargin: 0.1
+  carveTopMargin: 0.12
+  carveActivationDepth: 1
+  carveActivationExitMargin: 0.15
 --- !u!4 &503124222
 Transform:
   m_ObjectHideFlags: 0
@@ -1225,7 +1229,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1564783981486215018, guid: d72febf9d1549604bafb6094dc94b32e, type: 3}
       propertyPath: m_SortingLayer
-      value: 3
+      value: 5
       objectReference: {fileID: 0}
     - target: {fileID: 1564783981486215018, guid: d72febf9d1549604bafb6094dc94b32e, type: 3}
       propertyPath: m_SortingLayerID
@@ -1270,6 +1274,10 @@ PrefabInstance:
     - target: {fileID: 3184768329360707786, guid: d72febf9d1549604bafb6094dc94b32e, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4558686518708173478, guid: d72febf9d1549604bafb6094dc94b32e, type: 3}
+      propertyPath: maxFallSpeed
+      value: 100
       objectReference: {fileID: 0}
     - target: {fileID: 4558686518708173478, guid: d72febf9d1549604bafb6094dc94b32e, type: 3}
       propertyPath: portalRealignGroundedSpeedMultiplier

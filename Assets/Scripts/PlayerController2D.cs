@@ -13,9 +13,21 @@ namespace Platformer
     /// Physics2D.gravity 后，跳跃高度仍等于 <see cref="jumpHeight"/>。
     /// </summary>
     [RequireComponent(typeof(Rigidbody2D))]
-    [RequireComponent(typeof(CapsuleCollider2D))]
+    [RequireComponent(typeof(PolygonCollider2D))]
     public class PlayerController2D : MonoBehaviour
     {
+        const float BodyHalfWidth = 0.36f;
+        const float BodyBottomY = -0.75f;
+        const float BodyTopY = 0.75f;
+        const float HeadCenterY = BodyTopY - BodyHalfWidth;
+        const int HeadArcSegments = 16;
+        const float CorrectionSkin = 0.005f;
+        // 大于两侧接触偏移之和，避免目标空间查询把台阶顶面算作重叠。
+        const float SupportClearance = 0.03f;
+        const float HeadCorrectionIncrement = 0.02f;
+
+        static readonly Vector2 HeadCenterOffset = new Vector2(0f, HeadCenterY);
+
         #region 可配置参数
 
         [Header("水平移动")]
@@ -25,8 +37,10 @@ namespace Platformer
         [Min(0f)] public float groundAcceleration = 100f;
         [Tooltip("地面松开方向时的横向减速度（单位/秒²），范围 0~任意正值；0 表示不主动减速，贴墙松键由物理模块接管")]
         [Min(0f)] public float groundDeceleration = 100f;
-        [Tooltip("空中方向输入调整 X 速度的变化率（单位/秒²），范围 0~任意正值；会乘以剩余空中权限，松键不主动刹车")]
+        [Tooltip("空中方向输入调整 X 速度的变化率（单位/秒²），范围 0~任意正值；会乘以剩余空中权限，松键后的速度衰减由物理水平减速度接管")]
         [Min(0f)] public float airAcceleration = 65f;
+        [Tooltip("物理动作系统把 X 速度向 0 衰减的变化率（单位/秒²），同时用于空中和高速落地保留期；0 表示关闭，不影响 Y、撞墙缓存或离墙恢复")]
+        [Min(0f)] public float physicsHorizontalDeceleration = 12f;
         [Tooltip("AD 允许继续增加 |X| 的上限及高速地墙接触阈值（单位/秒），范围 0~任意正值；Y 不参与，已有超速仍可减速和反向")]
         [Min(0f)] public float inputSpeedLimit = 24f;
 
@@ -45,7 +59,7 @@ namespace Platformer
         [Header("跳跃")]
         [Tooltip("持续按住跳跃的普通满跳高度（世界单位/格），范围 0~任意正值；0 表示没有有效起跳高度")]
         [Min(0f)] public float jumpHeight = 6.2f;
-        [Tooltip("Scene 跳跃辅助线使用的角色高度（格），范围 0.01~任意正值；不修改碰撞体，实际接触探测使用胶囊 Bounds")]
+        [Tooltip("Scene 跳跃辅助线使用的角色高度（格），范围 0.01~任意正值；不修改碰撞体，实际接触探测使用身体 Bounds")]
         [Min(0.01f)] public float playerHeight = 1.5f;
         [Tooltip("离地后仍可普通起跳的宽限时间（秒），范围 0~任意正值；0 表示关闭土狼时间，不影响墙跳")]
         [Min(0f)] public float coyoteTime = 0.1f;
@@ -61,11 +75,11 @@ namespace Platformer
         [Min(0f)] public float apexVelocityThreshold = 8.5f;
         [Tooltip("上升顶点阶段直接乘在基础重力上的倍率，范围 0.1~1；仅在顶点阈值内且按住跳跃时生效，自由下落始终使用原生重力")]
         [Range(0.1f, 1f)] public float apexGravityMultiplier = 0.5f;
-        [Tooltip("普通玩家墙滑的最终下落速度上限（单位/秒），范围 0~任意正值；0 表示最终可停住下落，不限制自由下落或传送出口速度")]
+        [Tooltip("物理动作系统的最大下落速度，同时作为普通玩家墙滑的最终上限（单位/秒），范围 0~任意正值；0 表示可停住下落")]
         [Min(0f)] public float maxFallSpeed = 24f;
 
         [Header("墙面")]
-        [Tooltip("胶囊向两侧 BoxCast 的额外墙面探测距离（世界单位），范围 0.01~任意正值；只接受足够竖直的真实地形墙")]
+        [Tooltip("身体向两侧 BoxCast 的额外墙面探测距离（世界单位），范围 0.01~任意正值；只接受足够竖直的真实地形墙")]
         [Min(0.01f)] public float wallCheckDistance = 0.12f;
         [Tooltip("墙跳持续按住时的目标高度（格），范围 0.1~任意正值；通常低于普通满跳，使返回同墙时高度自然下降，不限制墙跳次数")]
         [Min(0.1f)] public float wallJumpHeight = 4.8f;
@@ -83,8 +97,14 @@ namespace Platformer
         public LayerMask groundMask = 1 << 6;
         [Tooltip("从地墙控制接触中排除的传送门 LayerMask，可多选；需覆盖门碰撞层，默认排除 Snapshot 门碰撞盒")]
         public LayerMask portalContactMask = 1 << 8;
-        [Tooltip("胶囊底部向下 BoxCast 的延伸距离（世界单位），范围 0~任意正值；过大可能提前接地，过小可能在斜坡丢失接触")]
+        [Tooltip("身体底部向下 BoxCast 的延伸距离（世界单位），范围 0~任意正值；过大可能提前接地，过小可能在斜坡丢失接触")]
         [Min(0f)] public float groundCheckDistance = 0.15f;
+
+        [Header("接触纠正")]
+        [Tooltip("地面水平移动可自动爬升的局部台阶最大高度（世界单位），范围 0~0.2；爬升前检查头顶路径和目标身体空间，0 表示关闭")]
+        [Range(0f, 0.2f)] public float maxStepUpHeight = 0.2f;
+        [Tooltip("上升碰到斜向倒角时允许的最大横向纠正距离（世界单位），范围 0~0.36；逐小步选择最小安全偏移，0 表示关闭")]
+        [Range(0f, 0.36f)] public float headCorrectionMaxDistance = 0.24f;
 
         [Header("重生")]
         [Tooltip("触发重生的世界 Y 阈值，可配置任意正负值；玩家根节点低于此值立即回到出生点")]
@@ -95,7 +115,7 @@ namespace Platformer
         [Min(0.01f)] public float centerPointRadius = 0.08f;
 
         [Header("显示")]
-        [Tooltip("承载 SpriteRenderer 和传送门旋转的显示子节点；可留空并由 Awake 自动创建，物理根节点与胶囊始终不旋转")]
+        [Tooltip("承载 SpriteRenderer 和传送门旋转的显示子节点；可留空并由 Awake 自动创建，物理根节点与身体始终不旋转")]
         public Transform visualRoot;
 
         [Header("传送门旋转（玩家管理）")]
@@ -126,9 +146,11 @@ namespace Platformer
         #region 运行时状态
 
         Rigidbody2D _rb;
-        CapsuleCollider2D _col;
+        Collider2D _col;
         SpriteRenderer _sr;
         CircleCollider2D _centerPoint;
+        readonly RaycastHit2D[] _queryHits = new RaycastHit2D[16];
+        readonly Collider2D[] _overlapHits = new Collider2D[1];
 
         float _moveInput;
         bool _manualInput;
@@ -220,10 +242,39 @@ namespace Platformer
 
         #region 初始化与显示
 
+        /// <summary>配置唯一身体碰撞体：平底竖直下身与半圆头顶，保持 0.72×1.5 的包围盒。</summary>
+        public static void ConfigureDefaultBody(PolygonCollider2D body)
+        {
+            var points = new Vector2[HeadArcSegments + 3];
+            points[0] = new Vector2(-BodyHalfWidth, BodyBottomY);
+            points[1] = new Vector2(BodyHalfWidth, BodyBottomY);
+
+            for (int i = 0; i <= HeadArcSegments; i++)
+            {
+                if (i == 0)
+                    points[i + 2] = new Vector2(BodyHalfWidth, HeadCenterY);
+                else if (i == HeadArcSegments / 2)
+                    points[i + 2] = new Vector2(0f, BodyTopY);
+                else if (i == HeadArcSegments)
+                    points[i + 2] = new Vector2(-BodyHalfWidth, HeadCenterY);
+                else
+                {
+                    float angle = Mathf.PI * i / HeadArcSegments;
+                    points[i + 2] = new Vector2(
+                        BodyHalfWidth * Mathf.Cos(angle),
+                        HeadCenterY + BodyHalfWidth * Mathf.Sin(angle));
+                }
+            }
+
+            body.offset = Vector2.zero;
+            body.pathCount = 1;
+            body.SetPath(0, points);
+        }
+
         void Awake()
         {
             _rb = GetComponent<Rigidbody2D>();
-            _col = GetComponent<CapsuleCollider2D>();
+            _col = GetComponent<PolygonCollider2D>();
             _spawnPoint = transform.position;
             _playerActions = new PlayerActionSystem(this);
             _physicsActions = new PhysicsActionSystem(this);
@@ -299,7 +350,7 @@ namespace Platformer
 
         /// <summary>
         /// 出传送门后的回正：从出口角按曲线平滑转回 0°（竖直）。
-        /// 只旋转显示子节点，物理根节点和胶囊碰撞体始终不动。
+        /// 只旋转显示子节点，物理根节点和身体碰撞体始终不动。
         /// </summary>
         void AdvancePortalRealign()
         {
@@ -626,6 +677,12 @@ namespace Platformer
             return LimitHorizontalInputAcceleration(currentX, candidateX);
         }
 
+        /// <summary>物理状态的水平阻尼只让 X 向 0 衰减，不读取或修改 Y。</summary>
+        float ApplyPhysicsHorizontalDeceleration(float currentX, float dt)
+        {
+            return Mathf.MoveTowards(currentX, 0f, physicsHorizontalDeceleration * dt);
+        }
+
         /// <summary>只拒绝 AD 在 24 之上继续增加 |X|；Y 不进入计算，减速和反向始终允许。</summary>
         float LimitHorizontalInputAcceleration(float currentX, float candidateX)
         {
@@ -633,6 +690,164 @@ namespace Platformer
                 Mathf.Abs(candidateX) > inputSpeedLimit &&
                 Mathf.Abs(candidateX) > Mathf.Abs(currentX);
             return increasesSpeedAboveLimit ? currentX : candidateX;
+        }
+
+        #endregion
+
+        #region 接触纠正查询
+
+        ContactFilter2D TerrainContactFilter()
+        {
+            return new ContactFilter2D
+            {
+                useLayerMask = true,
+                layerMask = groundMask.value & ~portalContactMask.value,
+                useTriggers = false
+            };
+        }
+
+        /// <summary>用下身 Box 与圆头 Circle 的并集检查候选空间，不创建额外物理碰撞体。</summary>
+        bool HasBodySpace(Vector2 root)
+        {
+            ContactFilter2D filter = TerrainContactFilter();
+            var lowerCenter = root + new Vector2(0f, (BodyBottomY + HeadCenterY) * 0.5f);
+            var lowerSize = new Vector2(BodyHalfWidth * 2f, HeadCenterY - BodyBottomY);
+            if (Physics2D.OverlapBox(lowerCenter, lowerSize, 0f, filter, _overlapHits) > 0)
+                return false;
+
+            return Physics2D.OverlapCircle(
+                root + HeadCenterOffset, BodyHalfWidth, filter, _overlapHits) == 0;
+        }
+
+        int CastHeadUp(Vector2 root, float distance)
+        {
+            return Physics2D.CircleCast(
+                root + HeadCenterOffset, BodyHalfWidth, Vector2.up,
+                TerrainContactFilter(), _queryHits, Mathf.Max(0f, distance));
+        }
+
+        void ApplyContactCorrection(Vector2 root)
+        {
+            _rb.position = root;
+            transform.position = new Vector3(root.x, root.y, transform.position.z);
+            Physics2D.SyncTransforms();
+        }
+
+        bool TryFindStepUp(float horizontalVelocity, float dt, out Vector2 targetRoot)
+        {
+            Vector2 root = _rb.position;
+            targetRoot = root;
+            if (maxStepUpHeight <= 0f || Mathf.Abs(horizontalVelocity) <= 0.01f)
+                return false;
+
+            float direction = Mathf.Sign(horizontalVelocity);
+            float bottomY = root.y + BodyBottomY;
+            var sideOrigin = new Vector2(
+                root.x, bottomY + CorrectionSkin + maxStepUpHeight * 0.5f);
+            var sideSize = new Vector2(BodyHalfWidth * 1.8f, maxStepUpHeight);
+            float sideDistance = Mathf.Abs(horizontalVelocity) * dt + CorrectionSkin;
+            ContactFilter2D filter = TerrainContactFilter();
+
+            int sideCount = Physics2D.BoxCast(
+                sideOrigin, sideSize, 0f, new Vector2(direction, 0f),
+                filter, _queryHits, sideDistance);
+            if (sideCount == 0) return false;
+
+            RaycastHit2D sideHit = _queryHits[0];
+            if (sideHit.collider == null ||
+                sideHit.normal.x * direction > -0.5f ||
+                Mathf.Abs(sideHit.normal.y) > 0.5f)
+                return false;
+
+            float candidateX = root.x + horizontalVelocity * dt + direction * CorrectionSkin;
+            var topOrigin = new Vector2(
+                candidateX + direction * (BodyHalfWidth - CorrectionSkin),
+                bottomY + maxStepUpHeight + CorrectionSkin);
+            int topCount = Physics2D.Raycast(
+                topOrigin, Vector2.down, filter, _queryHits,
+                maxStepUpHeight + CorrectionSkin * 2f);
+            if (topCount == 0) return false;
+
+            RaycastHit2D topHit = _queryHits[0];
+            if (topHit.collider != sideHit.collider || topHit.distance <= 0.0001f ||
+                topHit.normal.y < 0.9f)
+                return false;
+
+            float stepHeight = topHit.point.y - bottomY;
+            if (stepHeight <= CorrectionSkin ||
+                stepHeight > maxStepUpHeight + 0.0001f)
+                return false;
+
+            // 先检查爬升路径的头顶，再检查台阶上的完整身体；高墙和窄槽都在这里被拒绝。
+            if (CastHeadUp(new Vector2(candidateX, root.y),
+                    stepHeight + SupportClearance) > 0)
+                return false;
+
+            targetRoot = new Vector2(
+                candidateX, root.y + stepHeight + SupportClearance);
+            return HasBodySpace(targetRoot);
+        }
+
+        bool TryFindHeadCorrection(float verticalVelocity, float dt, out Vector2 targetRoot)
+        {
+            Vector2 root = _rb.position;
+            targetRoot = root;
+            float rise = verticalVelocity * dt;
+            if (headCorrectionMaxDistance <= 0f || rise <= 0f) return false;
+
+            int hitCount = CastHeadUp(root, rise + CorrectionSkin);
+            if (hitCount == 0) return false;
+
+            RaycastHit2D ceilingHit = _queryHits[0];
+            for (int i = 1; i < hitCount; i++)
+            {
+                if (_queryHits[i].distance < ceilingHit.distance)
+                    ceilingHit = _queryHits[i];
+            }
+
+            if (ceilingHit.collider == null || ceilingHit.normal.y >= -0.1f ||
+                Mathf.Abs(ceilingHit.normal.x) <= 0.1f)
+                return false;
+
+            float direction = Mathf.Sign(ceilingHit.normal.x);
+            int stepCount = Mathf.CeilToInt(
+                headCorrectionMaxDistance / HeadCorrectionIncrement);
+            for (int i = 1; i <= stepCount; i++)
+            {
+                float offset = Mathf.Min(
+                    headCorrectionMaxDistance, i * HeadCorrectionIncrement);
+                Vector2 candidate = root + new Vector2(direction * offset, 0f);
+                if (!HasBodySpace(candidate) ||
+                    !HasBodySpace(candidate + new Vector2(0f, rise)))
+                    continue;
+
+                int candidateHitCount = CastHeadUp(
+                    candidate, ceilingHit.distance + rise + BodyHalfWidth * 2f);
+                bool blocked = false;
+                for (int hitIndex = 0; hitIndex < candidateHitCount; hitIndex++)
+                {
+                    RaycastHit2D candidateHit = _queryHits[hitIndex];
+                    if (candidateHit.collider != ceilingHit.collider)
+                    {
+                        blocked = true;
+                        break;
+                    }
+
+                    // 同一地形只剩竖墙时可以继续贴墙上升；向下表面或重叠仍不安全。
+                    if (candidateHit.normal.y < -0.1f ||
+                        candidateHit.normal.sqrMagnitude < 0.01f)
+                    {
+                        blocked = true;
+                        break;
+                    }
+                }
+
+                if (blocked) continue;
+                targetRoot = candidate;
+                return true;
+            }
+
+            return false;
         }
 
         #endregion
@@ -648,13 +863,14 @@ namespace Platformer
             int contactMask = groundMask & ~portalContactMask;
             Bounds b = _col.bounds;
             Vector2 groundProbeCenter = new Vector2(b.center.x, b.min.y + 0.05f);
-            Vector2 groundProbeSize = new Vector2(b.size.x * 0.85f, 0.06f);
+            Vector2 groundProbeSize = new Vector2(b.size.x, 0.06f);
             RaycastHit2D groundHit = Physics2D.BoxCast(
                 groundProbeCenter, groundProbeSize, 0f, Vector2.down,
                 groundCheckDistance, contactMask);
 
+            // 全宽探测匹配平底边缘支撑；只接受向上表面，避免把侧墙当作地面。
             // 跳跃进行中时忽略仍接触的地面；爬坡产生的向上速度不受影响。
-            IsGrounded = groundHit.collider != null &&
+            IsGrounded = groundHit.collider != null && groundHit.normal.y > 0.3f &&
                          !(IsPhysicsActionActive && _physicsActions.IsJumping);
             if (IsGrounded)
             {
@@ -897,6 +1113,15 @@ namespace Platformer
                 Vector2 currentVelocity = Body.velocity;
                 float vx = Owner.CalculatePlayerHorizontalSpeed(currentVelocity.x, input, dt);
 
+                if (Owner.IsGrounded && Owner._groundNormal.y >= 0.9f &&
+                    Owner.TryFindStepUp(vx, dt, out Vector2 stepRoot))
+                {
+                    Owner.ApplyContactCorrection(stepRoot);
+                    Body.velocity = new Vector2(vx, 0f);
+                    ResetWallSlide();
+                    return;
+                }
+
                 float vy = currentVelocity.y;
                 if (Owner.IsGrounded && Owner._groundNormal.y > 0.3f &&
                     Mathf.Abs(Owner._groundNormal.x) > 0.02f)
@@ -1063,10 +1288,12 @@ namespace Platformer
 
                 if (Owner.IsGrounded)
                 {
-                    // 只有高速落地延迟会让 Physics 在接地后运行；本段不写速度或施力。
+                    // 高速落地保留期只衰减 X，不改写 Y，也不施加额外力。
                     _isJumping = false;
                     _varJumpTimer = 0f;
                     _varJumpDirection = Vector2.up;
+                    float nextX = Owner.ApplyPhysicsHorizontalDeceleration(Body.velocity.x, dt);
+                    Body.velocity = new Vector2(nextX, Body.velocity.y);
                     return;
                 }
 
@@ -1092,6 +1319,7 @@ namespace Platformer
                     // 横向输入由外层纯计算方法求解，这里只写回 X。
                     float nextX = Owner.CalculateAirHorizontalSpeed(
                         Body.velocity.x, Owner.CurrentHorizontalInput, AirControlAuthority, dt);
+                    nextX = Owner.ApplyPhysicsHorizontalDeceleration(nextX, dt);
                     Body.velocity = new Vector2(nextX, Body.velocity.y);
                 }
 
@@ -1126,7 +1354,7 @@ namespace Platformer
                                   ForceMode2D.Force);
                 }
 
-                // 只调整上升弧线；下落完全由 Unity 原生重力积分。
+                // 只调整上升弧线；下落由 Unity 原生重力积分，并受最大下落速度限制。
                 if (!maintainingJump && Body.velocity.y > 0f)
                 {
                     float gravityMultiplier = Owner._jumpHeld &&
@@ -1145,6 +1373,16 @@ namespace Platformer
                     Body.velocity = new Vector2(restoredWallMomentumX, Body.velocity.y);
 
                 ApplyWallSlideFade(dt);
+
+                // 预留本步原生重力积分，确保物理步结束时下落速度不超过上限。
+                float prePhysicsFallCap = -Mathf.Max(0f, Owner.maxFallSpeed) + gravity * dt;
+                if (Body.velocity.y < prePhysicsFallCap)
+                    Body.velocity = new Vector2(Body.velocity.x, prePhysicsFallCap);
+
+                // 在本步模拟前预测倒角接触，避免碰撞先把上升速度清零。
+                if (Body.velocity.y > 0f &&
+                    Owner.TryFindHeadCorrection(Body.velocity.y, dt, out Vector2 correctedRoot))
+                    Owner.ApplyContactCorrection(correctedRoot);
             }
 
             void ConsumeJumpRelease()
