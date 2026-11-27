@@ -24,7 +24,7 @@ namespace Platformer
         public float playerEyeOffset = 0.4f;
 
         [Header("玩家与相机总控")]
-        [Tooltip("统一处理输入、相机镜像和相机传送；留空时从跟随相机解析。")]
+        [Tooltip("处理相机镜像和相机传送；留空时从跟随相机解析。放门请求由玩家输入系统直接调用")]
         [FormerlySerializedAs("cameraMirror")]
         public PlayerControlManager playerControl;
 
@@ -629,7 +629,6 @@ namespace Platformer
 
         void LateUpdate()
         {
-            HandlePortalPlacementInput();
             UpdateGateSizes();
             UpdateViewTransparency();
 
@@ -640,32 +639,11 @@ namespace Platformer
             }
         }
 
-        void HandlePortalPlacementInput()
-        {
-            PlayerControlManager control = playerControl;
-            if (control == null)
-            {
-                control = ResolvePlayerControl(null);
-                if (control == null) return;
-                playerControl = control;
-            }
-            if (!control.isActiveAndEnabled) return;
-
-            // Unity 鼠标编号：0 左键、1 右键、2 中键。
-            bool placeA = control.MouseButtonPressed(0);
-            bool placeB = control.MouseButtonPressed(1);
-            if (!placeA && !placeB) return;
-
-            Vector2 mouseWorld = control.MouseWorldPosition;
-            if (placeA) TryPlacePortal(CaptureGroupSide.A, mouseWorld);
-            if (placeB) TryPlacePortal(CaptureGroupSide.B, mouseWorld);
-        }
-
         /// <summary>
-        /// 沿玩家中心到鼠标世界坐标的方向查找最近地形表面，把指定门放到命中点。
-        /// 鼠标只决定方向，不限制射程；开门方向始终与命中表面的外法线一致。
+        /// 沿请求起点到鼠标世界目标点的方向查找最近地形表面，把指定门放到命中点。
+        /// 鼠标目标只决定方向，不限制射程；开门方向始终与命中表面的外法线一致。
         /// </summary>
-        public bool TryPlacePortal(CaptureGroupSide side, Vector2 mouseWorldPosition)
+        public bool TryPlacePortal(CaptureGroupSide side, Vector2 origin, Vector2 mouseTarget)
         {
             if (player == null) return false;
 
@@ -676,10 +654,7 @@ namespace Platformer
             var controller = player.GetComponent<PlayerController2D>();
             if (controller == null) return false;
 
-            Vector2 origin = controller.CenterPoint != null
-                ? controller.CenterPoint.transform.position
-                : player.position;
-            Vector2 delta = mouseWorldPosition - origin;
+            Vector2 delta = mouseTarget - origin;
             if (delta.sqrMagnitude <= 0.00000001f) return false;
 
             int layerMask = controller.groundMask.value & ~controller.portalContactMask.value;

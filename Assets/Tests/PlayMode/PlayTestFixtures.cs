@@ -64,6 +64,7 @@ namespace Platformer.Tests
             rig.Pair = rig.Root.AddComponent<PortalPair>();
             rig.Pair.player = rig.Player.transform;
             rig.Pair.playerControl = rig.Control;
+            rig.Control.portalPair = rig.Pair;
             rig.Pair.carveTerrain = withTerrain;
 
             if (withTerrain)

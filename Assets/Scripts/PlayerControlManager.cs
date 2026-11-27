@@ -14,6 +14,9 @@ namespace Platformer
         [Tooltip("由本组件管理的玩家；留空时从激活相机行为的 Target 解析")]
         public PlayerController2D player;
 
+        [Tooltip("接收当前玩家放门请求的 PortalPair；玩家实例必须与 PortalPair.player 一致")]
+        public PortalPair portalPair;
+
         PlayerController2D _player;
         bool _hasInputBaseline;
         bool _inputBaseline;
@@ -79,6 +82,8 @@ namespace Platformer
             PlayerController2D target = FindPlayer();
             if (target == null) return;
 
+            DispatchPortalPlacementInput(target);
+
             float horizontal = 0f;
             if (leftHeld) horizontal -= 1f;
             if (rightHeld) horizontal += 1f;
@@ -88,6 +93,23 @@ namespace Platformer
                 horizontal,
                 Input.GetKeyDown(KeyCode.Space),
                 Input.GetKeyUp(KeyCode.Space));
+        }
+
+        void DispatchPortalPlacementInput(PlayerController2D target)
+        {
+            if (portalPair == null || portalPair.player != target.transform) return;
+
+            // Unity 鼠标编号：0 左键、1 右键、2 中键。
+            bool placeA = MouseButtonPressed(0);
+            bool placeB = MouseButtonPressed(1);
+            if (!placeA && !placeB) return;
+
+            Vector2 origin = target.CenterPoint != null
+                ? target.CenterPoint.transform.position
+                : target.transform.position;
+            Vector2 mouseTarget = MouseWorldPosition;
+            if (placeA) portalPair.TryPlacePortal(CaptureGroupSide.A, origin, mouseTarget);
+            if (placeB) portalPair.TryPlacePortal(CaptureGroupSide.B, origin, mouseTarget);
         }
 
         protected override void OnValidate()

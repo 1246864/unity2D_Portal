@@ -346,7 +346,7 @@ namespace Platformer.Tests
             Physics2D.SyncTransforms();
             Vector2 origin = _rig.Player.CenterPoint.transform.position;
             Assert.IsTrue(pair.TryPlacePortal(
-                CaptureGroupSide.A, origin + Vector2.right * 0.2f));
+                CaptureGroupSide.A, origin, origin + Vector2.right * 0.2f));
             Assert.AreEqual(-4f, groupA.transform.position.x, 0.001f,
                 "射线应命中测试 Tilemap 的左侧外表面。");
 

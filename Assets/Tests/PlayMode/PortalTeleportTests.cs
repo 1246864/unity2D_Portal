@@ -98,7 +98,7 @@ namespace Platformer.Tests
             int oldACount = a.OpenAnimationCount;
             int oldBCount = b.OpenAnimationCount;
 
-            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, mouse));
+            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, origin, mouse));
             Assert.AreEqual(-5.5f, a.transform.position.x, 0.001f);
             Assert.AreEqual(4f, a.transform.position.y, 0.001f);
             Assert.AreEqual(oldACount + 1, a.OpenAnimationCount);
@@ -108,14 +108,14 @@ namespace Platformer.Tests
 
             Vector3 placedAPosition = a.transform.position;
             int placedACount = a.OpenAnimationCount;
-            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.B, mouse));
+            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.B, origin, mouse));
             Assert.AreEqual(-5.5f, b.transform.position.x, 0.001f);
             Assert.AreEqual(oldBCount + 1, b.OpenAnimationCount);
             Assert.AreEqual(placedAPosition, a.transform.position);
             Assert.AreEqual(placedACount, a.OpenAnimationCount);
 
             a.StopOpenAnimation();
-            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, mouse));
+            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, origin, mouse));
             Assert.AreEqual(placedACount + 1, a.OpenAnimationCount);
             Assert.AreEqual(oldBCount + 1, b.OpenAnimationCount);
             Assert.AreEqual(0f, a.maskTop.localPosition.y, 0.0001f);
@@ -144,7 +144,7 @@ namespace Platformer.Tests
 
             Vector2 origin = _rig.Player.CenterPoint.transform.position;
             Assert.IsTrue(pair.TryPlacePortal(
-                CaptureGroupSide.B, origin + Vector2.right * 0.2f));
+                CaptureGroupSide.B, origin, origin + Vector2.right * 0.2f));
             Assert.AreEqual(-6.5f, b.transform.position.x, 0.001f,
                 "鼠标只决定方向，应选择最近的真实地形，而不是 Trigger、门或远端墙。");
             Assert.AreEqual(4f, b.transform.position.y, 0.001f);
@@ -164,7 +164,7 @@ namespace Platformer.Tests
 
             Vector2 origin = _rig.Player.CenterPoint.transform.position;
             Assert.IsTrue(pair.TryPlacePortal(
-                CaptureGroupSide.A, origin + Vector2.right));
+                CaptureGroupSide.A, origin, origin + Vector2.right));
             Assert.AreEqual(-6.5f, _rig.A.transform.position.x, 0.001f,
                 "即使玩家碰撞体被加入查询层，也必须跳过自身并命中后面的墙。");
             yield return null;
@@ -184,8 +184,8 @@ namespace Platformer.Tests
             int oldACount = a.OpenAnimationCount;
             int oldBCount = b.OpenAnimationCount;
 
-            Assert.IsFalse(pair.TryPlacePortal(CaptureGroupSide.A, origin));
-            Assert.IsFalse(pair.TryPlacePortal(CaptureGroupSide.B, origin + Vector2.up));
+            Assert.IsFalse(pair.TryPlacePortal(CaptureGroupSide.A, origin, origin));
+            Assert.IsFalse(pair.TryPlacePortal(CaptureGroupSide.B, origin, origin + Vector2.up));
             Assert.AreEqual(oldAPosition, a.transform.position);
             Assert.AreEqual(oldBPosition, b.transform.position);
             Assert.AreEqual(oldARotation, a.transform.rotation);
@@ -224,7 +224,7 @@ namespace Platformer.Tests
                 Assert.IsNotNull(expected.collider, "测试表面未按预期进入射线。");
 
                 Assert.IsTrue(pair.TryPlacePortal(
-                    CaptureGroupSide.A, origin + direction * 0.2f));
+                    CaptureGroupSide.A, origin, origin + direction * 0.2f));
                 Vector2 normal = expected.normal.normalized;
                 PortalFacing expectedFacing = normal.x < 0f
                     ? PortalFacing.Left : PortalFacing.Right;
@@ -264,7 +264,7 @@ namespace Platformer.Tests
                 _rig.Root.transform, "Relocation Target",
                 new Vector2(1.1f, 0f), new Vector2(0.2f, 4f));
             Physics2D.SyncTransforms();
-            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, Vector2.right * 0.2f));
+            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, Vector2.zero, Vector2.right * 0.2f));
             Assert.AreEqual(1f, a.transform.position.x, 0.001f);
 
             yield return new WaitForFixedUpdate();

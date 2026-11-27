@@ -298,6 +298,7 @@ MonoBehaviour:
   followPlayerTeleport: 1
   mirrorHorizontally: 0
   player: {fileID: 0}
+  portalPair: {fileID: 503124221}
 --- !u!1 &65077924
 GameObject:
   m_ObjectHideFlags: 0
