@@ -651,8 +651,9 @@ namespace Platformer
             }
             if (!control.isActiveAndEnabled) return;
 
+            // Unity 鼠标编号：0 左键、1 右键、2 中键。
             bool placeA = control.MouseButtonPressed(0);
-            bool placeB = control.MouseButtonPressed(2);
+            bool placeB = control.MouseButtonPressed(1);
             if (!placeA && !placeB) return;
 
             Vector2 mouseWorld = control.MouseWorldPosition;
