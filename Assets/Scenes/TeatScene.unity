@@ -1073,6 +1073,7 @@ GameObject:
   m_Component:
   - component: {fileID: 503124222}
   - component: {fileID: 503124221}
+  - component: {fileID: 503124223}
   m_Layer: 0
   m_Name: Portal Pair
   m_TagString: Untagged
@@ -1113,6 +1114,22 @@ MonoBehaviour:
   carveWidth: 0.8
   carveFrontMargin: 0.1
   carveTopMargin: 0.12
+--- !u!114 &503124223
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 503124220}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6a11b29a6b394c459e3e8a4dc6b710f2, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  projectilePrefab: {fileID: 1004, guid: c8a3a82793f542c2aee0c48f7b715ea4, type: 3}
+  projectileSpeed: 95
+  prewarmCount: 8
+  maxIdleCapacity: 64
 --- !u!4 &503124222
 Transform:
   m_ObjectHideFlags: 0

@@ -18,7 +18,7 @@ namespace Platformer.Tests
         [UnitySetUp]
         public IEnumerator SetUp()
         {
-            _rig = PortalTestRig.Create();
+            _rig = PortalTestRig.Create(withProjectileVisuals: true);
             yield return null;
             yield return new WaitForFixedUpdate();
         }
@@ -51,6 +51,93 @@ namespace Platformer.Tests
             var collider = surface.AddComponent<BoxCollider2D>();
             collider.size = size;
             return collider;
+        }
+
+        static PortalProjectile[] GetActiveProjectiles(PortalProjectileSystem system)
+        {
+            return system.GetComponentsInChildren<PortalProjectile>(false);
+        }
+
+        static PortalProjectile GetSingleProjectile(PortalProjectileSystem system)
+        {
+            PortalProjectile[] active = GetActiveProjectiles(system);
+            Assert.AreEqual(1, active.Length, "应只有一个活动子弹。");
+            return active[0];
+        }
+
+        static PortalProjectile FindNewProjectile(
+            PortalProjectileSystem system,
+            params PortalProjectile[] known)
+        {
+            PortalProjectile[] active = GetActiveProjectiles(system);
+            Assert.AreEqual(known.Length + 1, active.Length);
+            foreach (PortalProjectile candidate in active)
+            {
+                if (System.Array.IndexOf(known, candidate) < 0) return candidate;
+            }
+            Assert.Fail("没有找到本次发射创建的子弹。");
+            return null;
+        }
+
+        static void AssertColor(Color actual, Color expected)
+        {
+            Assert.AreEqual(expected.r, actual.r, 0.01f);
+            Assert.AreEqual(expected.g, actual.g, 0.01f);
+            Assert.AreEqual(expected.b, actual.b, 0.01f);
+            Assert.AreEqual(expected.a, actual.a, 0.01f);
+        }
+
+        static void AssertProjectileColor(PortalProjectile projectile, Color expected)
+        {
+            AssertColor(projectile.trailParticles.main.startColor.color, expected);
+            AssertColor(projectile.residualParticles.main.startColor.color, expected);
+            AssertColor(projectile.impactParticles.main.startColor.color, expected);
+        }
+
+        static IEnumerator WaitForArrival(PortalProjectile projectile, int maxFrames = 240)
+        {
+            for (int frame = 0; frame < maxFrames; frame++)
+            {
+                if (projectile.HasArrived) yield break;
+                yield return null;
+            }
+            Assert.Fail("子弹未在限定帧数内抵达终点。");
+        }
+
+        static IEnumerator WaitForImpact(PortalProjectile projectile, int maxFrames = 120)
+        {
+            for (int frame = 0; frame < maxFrames; frame++)
+            {
+                if (projectile.impactParticles.particleCount > 0) yield break;
+                yield return null;
+            }
+            Assert.Fail("撞墙粒子未在限定帧数内发射。");
+        }
+
+        static IEnumerator WaitForAllProjectilesReleased(
+            PortalProjectileSystem system,
+            int maxFrames = 10000,
+            string stage = "")
+        {
+            for (int frame = 0; frame < maxFrames; frame++)
+            {
+                if (system.ActiveProjectileCount == 0) yield break;
+                yield return null;
+            }
+
+            string details = stage + $" 活动数={system.ActiveProjectileCount}";
+            foreach (PortalProjectile projectile in GetActiveProjectiles(system))
+            {
+                details += $"；arrived={projectile.HasArrived}" +
+                           $"，trailAlive={projectile.trailParticles.IsAlive(true)}" +
+                           $"，residualAlive={projectile.residualParticles.IsAlive(true)}" +
+                           $"，impactAlive={projectile.impactParticles.IsAlive(true)}" +
+                           $"，trailPlaying={projectile.trailParticles.isPlaying}" +
+                           $"，impactPlaying={projectile.impactParticles.isPlaying}" +
+                           $"，trailCount={projectile.trailParticles.particleCount}" +
+                           $"，impactCount={projectile.impactParticles.particleCount}";
+            }
+            Assert.Fail("子弹未在粒子结束后归还对象池。" + details);
         }
 
         static void PrepareTransparencySandbox(PortalPair pair, CaptureDisplayGroup a, CaptureDisplayGroup b)
@@ -171,7 +258,7 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
-        public IEnumerator Placement_Rejects_Zero_Direction_And_Miss_Without_Changes()
+        public IEnumerator Placement_Rejects_Zero_Direction_Without_Placement_Or_Projectile()
         {
             PortalPair pair = _rig.Pair;
             CaptureDisplayGroup a = _rig.A;
@@ -185,13 +272,13 @@ namespace Platformer.Tests
             int oldBCount = b.OpenAnimationCount;
 
             Assert.IsFalse(pair.TryPlacePortal(CaptureGroupSide.A, origin, origin));
-            Assert.IsFalse(pair.TryPlacePortal(CaptureGroupSide.B, origin, origin + Vector2.up));
             Assert.AreEqual(oldAPosition, a.transform.position);
             Assert.AreEqual(oldBPosition, b.transform.position);
             Assert.AreEqual(oldARotation, a.transform.rotation);
             Assert.AreEqual(oldBRotation, b.transform.rotation);
             Assert.AreEqual(oldACount, a.OpenAnimationCount);
             Assert.AreEqual(oldBCount, b.OpenAnimationCount);
+            Assert.AreEqual(0, _rig.ProjectileSystem.ActiveProjectileCount);
             yield return null;
         }
 
@@ -242,6 +329,276 @@ namespace Platformer.Tests
                 Assert.AreEqual(-1f, Vector2.Dot(a.BackDirection, normal), 0.001f);
             }
             yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Placement_Hit_Starts_Placement_And_Concurrent_Colored_Projectiles()
+        {
+            PortalPair pair = _rig.Pair;
+            PortalProjectileSystem system = _rig.ProjectileSystem;
+            system.projectileSpeed = 2f;
+            CreatePlacementSurface(
+                _rig.Root.transform, "Projectile Target Wall",
+                new Vector2(-5f, 4f), new Vector2(1f, 4f));
+            Physics2D.SyncTransforms();
+
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+            Vector2 mouse = origin + Vector2.right * 0.2f;
+            Color blue = new Color(0.35f, 0.65f, 1f, 1f);
+            Color red = new Color(1f, 0.35f, 0.35f, 1f);
+
+            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, origin, mouse));
+            Assert.AreEqual(-5.5f, _rig.A.transform.position.x, 0.001f,
+                "放门必须在调用当帧完成，不能等待子弹。 ");
+            PortalProjectile projectileA1 = GetSingleProjectile(system);
+            Assert.IsTrue(projectileA1.IsFlying);
+            Assert.AreEqual(origin, projectileA1.StartPoint);
+            Assert.AreEqual(new Vector2(-5.5f, 4f), projectileA1.EndPoint);
+            Assert.IsTrue(projectileA1.EmitImpactOnArrival);
+            AssertProjectileColor(projectileA1, blue);
+
+            Vector2 secondOrigin = origin + Vector2.up * 0.5f;
+            Assert.IsTrue(pair.TryPlacePortal(
+                CaptureGroupSide.A, secondOrigin, secondOrigin + Vector2.right * 0.2f));
+            PortalProjectile projectileA2 = FindNewProjectile(system, projectileA1);
+            Assert.AreNotSame(projectileA1, projectileA2, "同侧连射必须同时使用不同实例。");
+            Assert.AreEqual(new Vector2(-5.5f, 4.5f), projectileA2.EndPoint);
+            AssertProjectileColor(projectileA2, blue);
+
+            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.B, origin, mouse));
+            PortalProjectile projectileB = FindNewProjectile(system, projectileA1, projectileA2);
+            Assert.AreEqual(-5.5f, _rig.B.transform.position.x, 0.001f);
+            Assert.AreEqual(new Vector2(-5.5f, 4f), projectileB.EndPoint);
+            AssertProjectileColor(projectileB, red);
+            Assert.AreEqual(3, system.ActiveProjectileCount);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Placement_Failure_Does_Not_Block_Projectile_Or_Impact()
+        {
+            PortalPair pair = _rig.Pair;
+            PortalProjectileSystem system = _rig.ProjectileSystem;
+            system.projectileSpeed = 2000f;
+            CreatePlacementSurface(
+                _rig.Root.transform, "Failed Placement Wall",
+                new Vector2(-5f, 4f), new Vector2(1f, 4f));
+            Physics2D.SyncTransforms();
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+
+            Object.Destroy(_rig.A.gameObject);
+            yield return null;
+
+            Assert.IsFalse(pair.TryPlacePortal(
+                CaptureGroupSide.A, origin, origin + Vector2.right * 0.2f));
+            PortalProjectile projectile = GetSingleProjectile(system);
+            Assert.AreEqual(new Vector2(-5.5f, 4f), projectile.EndPoint);
+            Assert.IsTrue(projectile.EmitImpactOnArrival);
+
+            yield return WaitForArrival(projectile);
+            yield return WaitForImpact(projectile);
+            Assert.Greater(projectile.impactParticles.particleCount, 0,
+                "放门失败不能撤销有效命中对应的撞墙粒子。 ");
+        }
+
+        [UnityTest]
+        public IEnumerator Disabled_Projectile_System_Does_Not_Block_Placement()
+        {
+            PortalPair pair = _rig.Pair;
+            PortalProjectileSystem system = _rig.ProjectileSystem;
+            system.enabled = false;
+            CreatePlacementSurface(
+                _rig.Root.transform, "Placement Without Visuals Wall",
+                new Vector2(-5f, 4f), new Vector2(1f, 4f));
+            Physics2D.SyncTransforms();
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+
+            Assert.IsTrue(pair.TryPlacePortal(
+                CaptureGroupSide.A, origin, origin + Vector2.right * 0.2f));
+            Assert.AreEqual(-5.5f, _rig.A.transform.position.x, 0.001f);
+            Assert.AreEqual(0, system.ActiveProjectileCount);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Placement_Ray_Is_Not_Limited_By_Miss_Visual_Distance()
+        {
+            PortalPair pair = _rig.Pair;
+            PortalProjectileSystem system = _rig.ProjectileSystem;
+            system.projectileSpeed = 2f;
+            _rig.MainCamera.orthographicSize = 0.05f;
+            _rig.MainCamera.aspect = 1f;
+            CreatePlacementSurface(
+                _rig.Root.transform, "Far Placement Wall",
+                new Vector2(20f, 4f), new Vector2(1f, 4f));
+            Physics2D.SyncTransforms();
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+
+            Assert.IsTrue(pair.TryPlacePortal(
+                CaptureGroupSide.A, origin, origin + Vector2.right * 0.2f));
+            Assert.AreEqual(19.5f, _rig.A.transform.position.x, 0.001f);
+            PortalProjectile projectile = GetSingleProjectile(system);
+            Assert.AreEqual(new Vector2(19.5f, 4f), projectile.EndPoint);
+            float missDistance = 4f * Mathf.Sqrt(2f) * 0.05f;
+            Assert.Greater(Vector2.Distance(origin, projectile.EndPoint), missDistance);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Placement_Miss_Launches_Two_Screen_Diagonals_Without_Impact()
+        {
+            PortalPair pair = _rig.Pair;
+            PortalProjectileSystem system = _rig.ProjectileSystem;
+            system.projectileSpeed = 5000f;
+            _rig.MainCamera.orthographicSize = 3f;
+            _rig.MainCamera.aspect = 1.5f;
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+            Vector3 oldAPosition = _rig.A.transform.position;
+            Vector3 oldBPosition = _rig.B.transform.position;
+            int oldACount = _rig.A.OpenAnimationCount;
+            int oldBCount = _rig.B.OpenAnimationCount;
+
+            Assert.IsFalse(pair.TryPlacePortal(
+                CaptureGroupSide.B, origin, origin + Vector2.up * 0.2f));
+            PortalProjectile projectile = GetSingleProjectile(system);
+            float expectedDistance = 4f * Mathf.Sqrt(3f * 3f + 4.5f * 4.5f);
+            Vector2 expectedEnd = origin + Vector2.up * expectedDistance;
+            Assert.AreEqual(expectedEnd.x, projectile.EndPoint.x, 0.001f);
+            Assert.AreEqual(expectedEnd.y, projectile.EndPoint.y, 0.001f);
+            Assert.IsFalse(projectile.EmitImpactOnArrival);
+            Assert.AreEqual(oldAPosition, _rig.A.transform.position);
+            Assert.AreEqual(oldBPosition, _rig.B.transform.position);
+            Assert.AreEqual(oldACount, _rig.A.OpenAnimationCount);
+            Assert.AreEqual(oldBCount, _rig.B.OpenAnimationCount);
+
+            yield return WaitForArrival(projectile);
+            Assert.AreEqual(0, projectile.impactParticles.particleCount);
+            Assert.IsFalse(projectile.impactParticles.isPlaying,
+                "miss 只保留沿途轨迹，不能播放撞墙粒子。 ");
+            yield return WaitForAllProjectilesReleased(system);
+        }
+
+        [UnityTest]
+        public IEnumerator Projectile_Pool_Reuses_Instance_Across_Colors_Hit_And_Miss()
+        {
+            PortalProjectileSystem system = _rig.ProjectileSystem;
+            system.projectileSpeed = 2000f;
+            Vector2 origin = new Vector2(40f, 40f);
+            Vector2 endPoint = origin + Vector2.right * 0.2f;
+            Color blue = new Color(0.35f, 0.65f, 1f, 1f);
+            Color red = new Color(1f, 0.35f, 0.35f, 1f);
+            Assert.AreEqual(2, system.IdleProjectileCount, "夹具应预热两个实例。");
+
+            system.Launch(CaptureGroupSide.A, origin, endPoint, true);
+            PortalProjectile projectile = GetSingleProjectile(system);
+            Assert.AreEqual(1, system.IdleProjectileCount);
+            AssertProjectileColor(projectile, blue);
+            yield return WaitForAllProjectilesReleased(system, stage: "首次 hit");
+            Assert.AreEqual(2, system.IdleProjectileCount);
+            Assert.IsFalse(projectile.gameObject.activeSelf);
+
+            system.Launch(CaptureGroupSide.B, origin, endPoint, false);
+            Assert.AreSame(projectile, GetSingleProjectile(system), "最近归还的实例应被复用。");
+            Assert.IsFalse(projectile.EmitImpactOnArrival);
+            AssertProjectileColor(projectile, red);
+            Assert.AreEqual(0, projectile.trailParticles.particleCount);
+            Assert.AreEqual(0, projectile.residualParticles.particleCount);
+            Assert.AreEqual(0, projectile.impactParticles.particleCount);
+            yield return WaitForAllProjectilesReleased(system, stage: "跨色 miss");
+
+            system.Launch(CaptureGroupSide.A, origin, endPoint, true);
+            Assert.AreSame(projectile, GetSingleProjectile(system));
+            Assert.IsTrue(projectile.EmitImpactOnArrival);
+            AssertProjectileColor(projectile, blue);
+            Assert.AreEqual(0, projectile.trailParticles.particleCount);
+            Assert.AreEqual(0, projectile.residualParticles.particleCount);
+            Assert.AreEqual(0, projectile.impactParticles.particleCount);
+            yield return WaitForArrival(projectile);
+            yield return WaitForImpact(projectile);
+            yield return WaitForAllProjectilesReleased(system, stage: "复用后 hit");
+        }
+
+        [UnityTest]
+        public IEnumerator Projectile_Moves_Toward_Target_With_World_Trail_And_Gravity_Impact()
+        {
+            PortalProjectileSystem system = _rig.ProjectileSystem;
+            system.projectileSpeed = 1f;
+            Vector2 origin = new Vector2(40f, 40f);
+            system.Launch(CaptureGroupSide.A, origin, origin + Vector2.right * 100f, true);
+            PortalProjectile projectile = GetSingleProjectile(system);
+
+            var trailMain = projectile.trailParticles.main;
+            var trailEmission = projectile.trailParticles.emission;
+            var residualMain = projectile.residualParticles.main;
+            var residualEmission = projectile.residualParticles.emission;
+            var impactMain = projectile.impactParticles.main;
+            var impactEmission = projectile.impactParticles.emission;
+            Assert.AreEqual(ParticleSystemSimulationSpace.World, trailMain.simulationSpace);
+            Assert.AreEqual(0f, trailMain.gravityModifier.constant);
+            Assert.Greater(trailMain.startSpeed.constant, 0f);
+            Assert.AreEqual(0f, trailEmission.rateOverTime.constant);
+            Assert.GreaterOrEqual(trailEmission.rateOverDistance.constant, 100f);
+            Assert.IsTrue(trailEmission.enabled);
+            Assert.AreEqual(ParticleSystemShapeType.Cone, projectile.trailParticles.shape.shapeType);
+            Assert.LessOrEqual(trailMain.startLifetime.constant, 0.2f);
+            Assert.Greater(projectile.trailConeAngle, 0f);
+            Assert.Less(projectile.trailConeAngle, 90f);
+            Assert.AreEqual(ParticleSystemSimulationSpace.World, residualMain.simulationSpace);
+            Assert.AreEqual(ParticleSystemCurveMode.TwoConstants, residualMain.gravityModifier.mode);
+            Assert.Greater(residualMain.gravityModifier.constantMin, 0f);
+            Assert.Greater(residualMain.gravityModifier.constantMax,
+                residualMain.gravityModifier.constantMin);
+            Assert.Less(residualMain.gravityModifier.constantMax, 0.1f);
+            Assert.Greater(residualMain.startSpeed.constant, 0f);
+            Assert.Greater(residualMain.startSize.constant, trailMain.startSize.constant);
+            Assert.Greater(residualMain.startLifetime.constant, trailMain.startLifetime.constant);
+            Assert.GreaterOrEqual(residualEmission.rateOverDistance.constant, 3f);
+            Assert.AreEqual(ParticleSystemSimulationSpace.World, impactMain.simulationSpace);
+            Assert.Greater(impactMain.gravityModifier.constant, 0f);
+            Assert.Greater(impactMain.startSpeed.constant, 0f);
+            Assert.Greater(impactMain.startSize.constant, trailMain.startSize.constant);
+            Assert.AreEqual(1, impactEmission.burstCount);
+            Assert.Greater(impactEmission.GetBurst(0).count.constant, 0f);
+            Assert.IsNull(projectile.GetComponent<SpriteRenderer>());
+            Assert.IsNull(projectile.GetComponent<Rigidbody2D>());
+            Assert.IsNull(projectile.GetComponent<Collider2D>());
+
+            yield return null;
+            Assert.Greater(projectile.transform.position.x, origin.x);
+            Assert.Less(projectile.transform.position.x, origin.x + 100f,
+                "子弹必须逐帧移动且不能越过预计算终点。 ");
+            Assert.IsTrue(projectile.IsFlying);
+            system.ReleaseAllProjectiles();
+        }
+
+        [UnityTest]
+        public IEnumerator Disabling_Pair_Cleans_Flying_And_Arrived_Projectiles()
+        {
+            PortalProjectileSystem system = _rig.ProjectileSystem;
+            Vector2 origin = new Vector2(40f, 40f);
+            system.projectileSpeed = 1f;
+            system.Launch(CaptureGroupSide.A, origin, origin + Vector2.right * 100f, false);
+            PortalProjectile flying = GetSingleProjectile(system);
+            system.projectileSpeed = 2000f;
+            system.Launch(CaptureGroupSide.B, origin, origin + Vector2.right * 0.2f, true);
+            PortalProjectile arrived = FindNewProjectile(system, flying);
+
+            yield return WaitForArrival(arrived);
+            yield return WaitForImpact(arrived);
+            Assert.IsTrue(flying.IsFlying);
+            _rig.Pair.enabled = false;
+
+            Assert.AreEqual(0, system.ActiveProjectileCount);
+            Assert.IsFalse(flying.gameObject.activeSelf);
+            Assert.IsFalse(arrived.gameObject.activeSelf);
+            Assert.AreEqual(0, flying.trailParticles.particleCount);
+            Assert.AreEqual(0, arrived.impactParticles.particleCount);
+            Assert.AreEqual(0, flying.residualParticles.particleCount);
+
+            _rig.Pair.enabled = true;
+            Assert.AreEqual(0, system.ActiveProjectileCount);
+            Assert.IsFalse(flying.gameObject.activeSelf);
+            Assert.IsFalse(arrived.gameObject.activeSelf);
         }
 
         [UnityTest]

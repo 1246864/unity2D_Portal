@@ -74,6 +74,10 @@ namespace Platformer
         [Tooltip("玩家位于门背面时增加的接近惩罚分")]
         [Min(0f)] public float approachBackPenalty = 10f;
 
+        [Header("射击协调")]
+        [Tooltip("射线未命中且无法从相机计算可视范围时使用的子弹射程（世界单位）")]
+        [Min(0.01f)] public float placementMissDistanceFallback = 50f;
+
         [Header("地形开洞")]
         [Tooltip("传送门激活时，把门洞矩形覆盖到的地形格改为无碰撞，再重建 CompositeCollider2D")]
         public bool carveTerrain = true;
@@ -113,6 +117,8 @@ namespace Platformer
         int _observedPlayerRevision;
         bool _hasPlayerBaseline;
         readonly RaycastHit2D[] _placementHits = new RaycastHit2D[16];
+        PortalPlacementSystem _placementSystem;
+        PortalProjectileSystem _projectileSystem;
 
         /// <summary>一个物理步内的门位姿与速度；角度始终使用物理根节点的 Z 旋转。</summary>
         struct PortalFrameState
@@ -199,6 +205,8 @@ namespace Platformer
             PushPlayerToGroups();
             PushViewSettingsToGroups();
             IgnorePlayerBodyCollision();
+            _placementSystem = new PortalPlacementSystem(this);
+            _projectileSystem = GetComponent<PortalProjectileSystem>();
         }
 
         void Start()
@@ -245,6 +253,7 @@ namespace Platformer
             _automaticViewSource = null;
             _wasLinked = false;
             _forceCapture = false;
+            if (_projectileSystem != null) _projectileSystem.ReleaseAllProjectiles();
             ResetMotionTracking();
         }
 
@@ -640,16 +649,13 @@ namespace Platformer
         }
 
         /// <summary>
-        /// 沿请求起点到鼠标世界目标点的方向查找最近地形表面，把指定门放到命中点。
-        /// 鼠标目标只决定方向，不限制射程；开门方向始终与命中表面的外法线一致。
+        /// 对一次玩家射击做射线检测，并在同一帧独立调度放门系统和子弹系统。
+        /// 返回值只表示门是否成功生成；未命中或放门失败不会撤销子弹视觉。
         /// </summary>
         public bool TryPlacePortal(CaptureGroupSide side, Vector2 origin, Vector2 mouseTarget)
         {
-            if (player == null) return false;
-
-            CaptureDisplayGroup group = side == CaptureGroupSide.A ? _groupA :
-                side == CaptureGroupSide.B ? _groupB : null;
-            if (group == null) return false;
+            if (!isActiveAndEnabled || player == null) return false;
+            if (side != CaptureGroupSide.A && side != CaptureGroupSide.B) return false;
 
             var controller = player.GetComponent<PlayerController2D>();
             if (controller == null) return false;
@@ -660,6 +666,7 @@ namespace Platformer
             int layerMask = controller.groundMask.value & ~controller.portalContactMask.value;
             if (layerMask == 0) return false;
 
+            Vector2 direction = delta.normalized;
             var filter = new ContactFilter2D
             {
                 useLayerMask = true,
@@ -667,7 +674,7 @@ namespace Platformer
                 useTriggers = false
             };
             int hitCount = Physics2D.Raycast(
-                origin, delta.normalized, filter, _placementHits, Mathf.Infinity);
+                origin, direction, filter, _placementHits, Mathf.Infinity);
 
             Rigidbody2D playerBody = player.GetComponent<Rigidbody2D>();
             RaycastHit2D nearest = default;
@@ -684,27 +691,49 @@ namespace Platformer
                 found = true;
             }
 
-            if (!found) return false;
+            if (!found)
+            {
+                Vector2 missEnd = origin + direction * ResolveMissDistance(origin);
+                if (_projectileSystem != null)
+                    _projectileSystem.Launch(side, origin, missEnd, false);
+                return false;
+            }
 
-            Vector2 normal = nearest.normal;
-            if (normal.sqrMagnitude <= 0.00000001f) return false;
-            normal.Normalize();
+            bool placed = _placementSystem != null && _placementSystem.TryPlace(side, nearest);
+            if (_projectileSystem != null)
+                _projectileSystem.Launch(side, origin, nearest.point, true);
+            return placed;
+        }
 
-            PortalFacing nextFacing = normal.x < 0f ? PortalFacing.Left : PortalFacing.Right;
-            float normalAngle = Mathf.Atan2(normal.y, normal.x) * Mathf.Rad2Deg;
-            float targetAngle = nextFacing == PortalFacing.Left ? normalAngle - 180f : normalAngle;
-            Quaternion targetRotation = Quaternion.Euler(
-                0f, 0f, Mathf.DeltaAngle(0f, targetAngle));
-            Vector3 targetPosition = nearest.point;
-            targetPosition.z = group.transform.position.z;
+        float ResolveMissDistance(Vector2 origin)
+        {
+            Camera camera = playerControl != null
+                ? playerControl.GetComponent<Camera>()
+                : null;
+            if (camera == null) camera = Camera.main;
 
-            group.Facing = nextFacing;
-            group.transform.SetPositionAndRotation(targetPosition, targetRotation);
-            NotifyPortalRelocated(group);
-            SetPortalTerrainState(group, true);
-            group.PlayOpenAnimation();
-            _forceCapture = true;
-            return true;
+            if (camera != null)
+            {
+                float halfHeight = 0f;
+                if (camera.orthographic)
+                {
+                    halfHeight = camera.orthographicSize;
+                }
+                else
+                {
+                    float depth = camera.transform.InverseTransformPoint(origin).z;
+                    if (depth > 0f)
+                        halfHeight = depth * Mathf.Tan(camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+                }
+
+                float halfWidth = halfHeight * Mathf.Abs(camera.aspect);
+                float distance = 4f * Mathf.Sqrt(
+                    halfHeight * halfHeight + halfWidth * halfWidth);
+                if (distance > 0f && !float.IsNaN(distance) && !float.IsInfinity(distance))
+                    return distance;
+            }
+
+            return Mathf.Max(0.01f, placementMissDistanceFallback);
         }
 
         /// <summary>把绑定的玩家实例下发给本对传送门下的每一个 CaptureDisplayGroup。</summary>
@@ -1014,6 +1043,11 @@ namespace Platformer
             if (_groupB != null) _groupB.StopOpenAnimation();
         }
 
+        internal void RequestCaptureRefresh()
+        {
+            _forceCapture = true;
+        }
+
         /// <summary>强制两扇门的捕获相机各拍一次，然后重新做半屏裁剪成像。</summary>
         public void RefreshCaptures()
         {
@@ -1159,6 +1193,13 @@ namespace Platformer
             float normalComponent = Vector2.Dot(vector, source.Opening);
             float tangentComponent = Vector2.Dot(vector, source.Tangent);
             return partner.Opening * -normalComponent + partner.Tangent * tangentComponent;
+        }
+
+        internal CaptureDisplayGroup GetGroup(CaptureGroupSide side)
+        {
+            if (side == CaptureGroupSide.A) return _groupA;
+            if (side == CaptureGroupSide.B) return _groupB;
+            return null;
         }
 
         void CacheGroups()

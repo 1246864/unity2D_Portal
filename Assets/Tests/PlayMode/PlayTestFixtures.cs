@@ -19,11 +19,14 @@ namespace Platformer.Tests
         public PlayerControlManager Control { get; private set; }
         public CameraFollow2D Follow { get; private set; }
         public TilemapTestRig Terrain { get; private set; }
+        public PortalProjectileSystem ProjectileSystem { get; private set; }
 
         Texture2D _viewTexture;
         Sprite _viewSprite;
 
-        public static PortalTestRig Create(bool withTerrain = false)
+        public static PortalTestRig Create(
+            bool withTerrain = false,
+            bool withProjectileVisuals = false)
         {
             var rig = new PortalTestRig
             {
@@ -75,6 +78,14 @@ namespace Platformer.Tests
                 carver.composite = rig.Terrain.Composite;
             }
 
+            if (withProjectileVisuals)
+            {
+                rig.ProjectileSystem = rig.Root.AddComponent<PortalProjectileSystem>();
+                rig.ProjectileSystem.projectilePrefab = CreateProjectileTemplate(rig);
+                rig.ProjectileSystem.prewarmCount = 2;
+                rig.ProjectileSystem.maxIdleCapacity = 4;
+            }
+
             rig.A = CreatePortal(rig, CaptureGroupSide.A, new Vector3(-4f, 0f, 0f));
             rig.B = CreatePortal(rig, CaptureGroupSide.B, new Vector3(4f, 0f, 0f));
             rig.A.Facing = PortalFacing.Right;
@@ -82,6 +93,32 @@ namespace Platformer.Tests
 
             rig.Root.SetActive(true);
             return rig;
+        }
+
+        static PortalProjectile CreateProjectileTemplate(PortalTestRig rig)
+        {
+            var template = PlayTestFixtures.CreateChild(
+                rig.Root.transform, "Test Projectile Template");
+
+            var trailGo = PlayTestFixtures.CreateChild(template.transform, "Trail");
+            var trail = trailGo.AddComponent<ParticleSystem>();
+            var trailMain = trail.main;
+            trailMain.playOnAwake = false;
+            var residualGo = PlayTestFixtures.CreateChild(template.transform, "Residual");
+            var residual = residualGo.AddComponent<ParticleSystem>();
+            var residualMain = residual.main;
+            residualMain.playOnAwake = false;
+            var impactGo = PlayTestFixtures.CreateChild(template.transform, "Impact");
+            var impact = impactGo.AddComponent<ParticleSystem>();
+            var impactMain = impact.main;
+            impactMain.playOnAwake = false;
+
+            var projectile = template.AddComponent<PortalProjectile>();
+            projectile.trailParticles = trail;
+            projectile.residualParticles = residual;
+            projectile.impactParticles = impact;
+            template.SetActive(false);
+            return projectile;
         }
 
         static CaptureDisplayGroup CreatePortal(

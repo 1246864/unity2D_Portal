@@ -352,15 +352,15 @@ namespace Platformer
         Material _beamMaterial;
         Material _viewMaterial;
 
-        static readonly Color HintBlue = new Color(0.35f, 0.65f, 1f, 1f);
-        static readonly Color HintRed = new Color(1f, 0.35f, 0.35f, 1f);
+        internal static readonly Color HintBlue = new Color(0.35f, 0.65f, 1f, 1f);
+        internal static readonly Color HintRed = new Color(1f, 0.35f, 0.35f, 1f);
         static readonly int ConnectionRevealId = Shader.PropertyToID("_ConnectionReveal");
         static readonly int OpenBrightnessId = Shader.PropertyToID("_OpenBrightness");
         static readonly int PortalColorId = Shader.PropertyToID("_PortalColor");
         static readonly int ClosedNoiseScaleId = Shader.PropertyToID("_ClosedNoiseScale");
         static readonly int ClosedNoiseSpeedId = Shader.PropertyToID("_ClosedNoiseSpeed");
         static readonly int ClosedFlowSpeedId = Shader.PropertyToID("_ClosedFlowSpeed");
-        const string PortalLightBandLayer = "Portal light band";
+        internal const string PortalLightBandLayer = "Portal light band";
         static Texture2D _hintTexture;
         static Sprite _hintSprite;
         static Material _particleMaterial;
@@ -902,7 +902,7 @@ namespace Platformer
             _particles.Play(true);
         }
 
-        static Material ParticleMaterial
+        internal static Material ParticleMaterial
         {
             get
             {
