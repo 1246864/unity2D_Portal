@@ -78,7 +78,9 @@ namespace Platformer.EditorTools
 
                 GameObject playerPrefab = BuildPlayerPrefab(sprites, playerMaterial, litMaterial);
                 Tile terrainTile = EnsureTile(TerrainTilePath, "TerrainTile", sprites["tile1x1"], TerrainColor);
-                Tile darkTile = EnsureTile(DarkTilePath, "DarkTerrainTile", sprites["tile1x1"], DarkTerrainColor);
+                Tile darkTile = EnsureTile(
+                    DarkTilePath, "DarkTerrainTile", sprites["tile1x1"], DarkTerrainColor,
+                    allowPortalPlacement: false);
                 Tile[] slopeTiles = EnsureSlopeTiles(sprites);
 
                 BuildLevelScene(playerPrefab, terrainTile, darkTile, slopeTiles, terrainMaterial);
@@ -357,12 +359,17 @@ namespace Platformer.EditorTools
             return SavePrefab(go, PrefabDir + "/Player.prefab");
         }
 
-        static Tile EnsureTile(string path, string tileName, Sprite sprite, Color color)
+        static Tile EnsureTile(
+            string path,
+            string tileName,
+            Sprite sprite,
+            Color color,
+            bool allowPortalPlacement = true)
         {
-            var tile = AssetDatabase.LoadAssetAtPath<Tile>(path);
+            var tile = AssetDatabase.LoadAssetAtPath<PortalPlacementTile>(path);
             if (tile == null)
             {
-                tile = ScriptableObject.CreateInstance<Tile>();
+                tile = ScriptableObject.CreateInstance<PortalPlacementTile>();
                 AssetDatabase.CreateAsset(tile, path);
             }
 
@@ -370,6 +377,7 @@ namespace Platformer.EditorTools
             tile.sprite = sprite;
             tile.color = color;
             tile.colliderType = Tile.ColliderType.Sprite; // 用精灵轮廓作为碰撞形状
+            tile.AllowPortalPlacement = allowPortalPlacement;
             EditorUtility.SetDirty(tile);
             return tile;
         }
@@ -386,8 +394,9 @@ namespace Platformer.EditorTools
                 Sprite sprite = sprites[SlopeSpriteNames[i]];
 
                 tiles[i] = EnsureTile($"Assets/Tiles/Slope{name}.asset", $"Slope{name}", sprite, TerrainColor);
-                tiles[i + SlopeNames.Length] =
-                    EnsureTile($"Assets/Tiles/Slope{name}Dark.asset", $"Slope{name}Dark", sprite, DarkTerrainColor);
+                tiles[i + SlopeNames.Length] = EnsureTile(
+                    $"Assets/Tiles/Slope{name}Dark.asset", $"Slope{name}Dark", sprite, DarkTerrainColor,
+                    allowPortalPlacement: false);
             }
 
             return tiles;

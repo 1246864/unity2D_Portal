@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Tilemaps;
 
 namespace Platformer
 {
@@ -20,6 +21,7 @@ namespace Platformer
             Vector2 normal = hit.normal;
             if (normal.sqrMagnitude <= 0.00000001f) return false;
             normal.Normalize();
+            if (!CanPlaceOnSurface(side, hit)) return false;
 
             PortalFacing nextFacing = normal.x < 0f ? PortalFacing.Left : PortalFacing.Right;
             float normalAngle = Mathf.Atan2(normal.y, normal.x) * Mathf.Rad2Deg;
@@ -36,6 +38,27 @@ namespace Platformer
             group.PlayOpenAnimation();
             _owner.RequestCaptureRefresh();
             return true;
+        }
+
+        static bool CanPlaceOnSurface(CaptureGroupSide side, RaycastHit2D hit)
+        {
+            if (hit.collider == null) return false;
+
+            // 普通碰撞体可直接挂载接口实现；未声明资格的普通表面保持可放置。
+            var surface = hit.collider.GetComponent<IPortalPlacementSurface>();
+            if (surface != null) return surface.CanPlacePortal(side);
+
+            Tilemap tilemap = hit.collider.GetComponentInParent<Tilemap>();
+            if (tilemap == null) return true;
+
+            // 射线点位于碰撞表面，向砖块内部偏移一点再取格，避免落到相邻空格。
+            Vector2 insidePoint = hit.point - hit.normal.normalized * 0.001f;
+            TileBase tile = tilemap.GetTile(tilemap.WorldToCell(insidePoint));
+            if (tile is IPortalPlacementSurface tileSurface)
+                return tileSurface.CanPlacePortal(side);
+
+            // 兼容未迁移的内置 Tile；Tilemap 已命中但无法解析方块时安全地拒绝。
+            return tile != null;
         }
     }
 }

@@ -404,6 +404,51 @@ namespace Platformer.Tests
         }
 
         [UnityTest]
+        public IEnumerator Placement_Tile_Permission_Controls_Placement_And_Preserves_Failure_Workflow()
+        {
+            _rig.Destroy();
+            _rig = PortalTestRig.Create(withTerrain: true, withProjectileVisuals: true);
+            yield return null;
+            yield return new WaitForFixedUpdate();
+
+            var forbiddenTile = _rig.Terrain.CreateSolidTile(false);
+            _rig.Terrain.FillSolidRect(forbiddenTile, -6, -6, 2, 5);
+            _rig.Terrain.TilemapCollider.ProcessTilemapChanges();
+            _rig.Terrain.Composite.GenerateGeometry();
+            Physics2D.SyncTransforms();
+
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+            Vector3 oldPosition = _rig.A.transform.position;
+            Quaternion oldRotation = _rig.A.transform.rotation;
+            PortalFacing oldFacing = _rig.A.Facing;
+            int oldOpenCount = _rig.A.OpenAnimationCount;
+
+            Assert.IsFalse(_rig.Pair.TryPlacePortal(
+                CaptureGroupSide.A, origin, origin + Vector2.right));
+            Assert.AreEqual(oldPosition, _rig.A.transform.position);
+            Assert.AreEqual(oldRotation, _rig.A.transform.rotation);
+            Assert.AreEqual(oldFacing, _rig.A.Facing);
+            Assert.AreEqual(oldOpenCount, _rig.A.OpenAnimationCount);
+
+            PortalProjectile projectile = GetSingleProjectile(_rig.ProjectileSystem);
+            Assert.AreEqual(new Vector2(-6f, 4f), projectile.EndPoint);
+            Assert.IsTrue(projectile.EmitImpactOnArrival,
+                "不可放置只拦截开门，不应撤销有效地形命中的撞墙表现。");
+
+            var allowedTile = _rig.Terrain.CreateSolidTile(true);
+            _rig.Terrain.FillSolidRect(allowedTile, -6, -6, 2, 5);
+            _rig.Terrain.TilemapCollider.ProcessTilemapChanges();
+            _rig.Terrain.Composite.GenerateGeometry();
+            Physics2D.SyncTransforms();
+
+            Assert.IsTrue(_rig.Pair.TryPlacePortal(
+                CaptureGroupSide.B, origin, origin + Vector2.right));
+            Assert.AreEqual(-6f, _rig.B.transform.position.x, 0.001f);
+            Assert.AreEqual(4f, _rig.B.transform.position.y, 0.001f);
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator Disabled_Projectile_System_Does_Not_Block_Placement()
         {
             PortalPair pair = _rig.Pair;

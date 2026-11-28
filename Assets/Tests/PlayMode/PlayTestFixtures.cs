@@ -233,7 +233,7 @@ namespace Platformer.Tests
             return rig;
         }
 
-        public Tile CreateSolidTile()
+        public Tile CreateSolidTile(bool? allowPortalPlacement = null)
         {
             return CreateTile("Test Solid", new[]
             {
@@ -241,7 +241,7 @@ namespace Platformer.Tests
                 new Vector2(32f, 0f),
                 new Vector2(32f, 32f),
                 new Vector2(0f, 32f)
-            });
+            }, allowPortalPlacement);
         }
 
         public Tile CreateSlopeTile()
@@ -254,7 +254,10 @@ namespace Platformer.Tests
             });
         }
 
-        Tile CreateTile(string name, Vector2[] physicsShape)
+        Tile CreateTile(
+            string name,
+            Vector2[] physicsShape,
+            bool? allowPortalPlacement = null)
         {
             // OverridePhysicsShape 使用相对纹理矩形左下角的像素坐标。
             const int size = 32;
@@ -276,7 +279,17 @@ namespace Platformer.Tests
             sprite.hideFlags = HideFlags.DontSave;
             sprite.OverridePhysicsShape(new[] { physicsShape });
 
-            var tile = ScriptableObject.CreateInstance<Tile>();
+            Tile tile;
+            if (allowPortalPlacement.HasValue)
+            {
+                var placementTile = ScriptableObject.CreateInstance<PortalPlacementTile>();
+                placementTile.AllowPortalPlacement = allowPortalPlacement.Value;
+                tile = placementTile;
+            }
+            else
+            {
+                tile = ScriptableObject.CreateInstance<Tile>();
+            }
             tile.name = name;
             tile.sprite = sprite;
             tile.colliderType = Tile.ColliderType.Sprite;
