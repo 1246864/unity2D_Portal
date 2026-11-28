@@ -188,7 +188,7 @@ namespace Platformer.Tests
             int oldBCount = b.OpenAnimationCount;
 
             Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, origin, mouse));
-            Assert.AreEqual(-5.5f, a.transform.position.x, 0.001f);
+            Assert.AreEqual(-5.6f, a.transform.position.x, 0.001f);
             Assert.AreEqual(4f, a.transform.position.y, 0.001f);
             Assert.AreEqual(oldACount + 1, a.OpenAnimationCount);
             Assert.AreEqual(oldBCount, b.OpenAnimationCount);
@@ -198,7 +198,7 @@ namespace Platformer.Tests
             Vector3 placedAPosition = a.transform.position;
             int placedACount = a.OpenAnimationCount;
             Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.B, origin, mouse));
-            Assert.AreEqual(-5.5f, b.transform.position.x, 0.001f);
+            Assert.AreEqual(-5.6f, b.transform.position.x, 0.001f);
             Assert.AreEqual(oldBCount + 1, b.OpenAnimationCount);
             Assert.AreEqual(placedAPosition, a.transform.position);
             Assert.AreEqual(placedACount, a.OpenAnimationCount);
@@ -234,7 +234,7 @@ namespace Platformer.Tests
             Vector2 origin = _rig.Player.CenterPoint.transform.position;
             Assert.IsTrue(pair.TryPlacePortal(
                 CaptureGroupSide.B, origin, origin + Vector2.right * 0.2f));
-            Assert.AreEqual(-6.5f, b.transform.position.x, 0.001f,
+            Assert.AreEqual(-6.6f, b.transform.position.x, 0.001f,
                 "鼠标只决定方向，应选择最近的真实地形，而不是 Trigger、门或远端墙。");
             Assert.AreEqual(4f, b.transform.position.y, 0.001f);
             yield return null;
@@ -254,7 +254,7 @@ namespace Platformer.Tests
             Vector2 origin = _rig.Player.CenterPoint.transform.position;
             Assert.IsTrue(pair.TryPlacePortal(
                 CaptureGroupSide.A, origin, origin + Vector2.right));
-            Assert.AreEqual(-6.5f, _rig.A.transform.position.x, 0.001f,
+            Assert.AreEqual(-6.6f, _rig.A.transform.position.x, 0.001f,
                 "即使玩家碰撞体被加入查询层，也必须跳过自身并命中后面的墙。");
             yield return null;
         }
@@ -289,6 +289,7 @@ namespace Platformer.Tests
         {
             PortalPair pair = _rig.Pair;
             CaptureDisplayGroup a = _rig.A;
+            pair.placementSurfaceOffset = 0.25f;
             CreatePlacementSurface(
                 _rig.Root.transform, "Right Wall",
                 new Vector2(-5f, 4f), new Vector2(1f, 4f));
@@ -321,8 +322,9 @@ namespace Platformer.Tests
                 float expectedAngle = expectedFacing == PortalFacing.Left
                     ? normalAngle - 180f : normalAngle;
 
-                Assert.AreEqual(expected.point.x, a.transform.position.x, 0.001f);
-                Assert.AreEqual(expected.point.y, a.transform.position.y, 0.001f);
+                Vector2 expectedPosition = expected.point + normal * pair.placementSurfaceOffset;
+                Assert.AreEqual(expectedPosition.x, a.transform.position.x, 0.001f);
+                Assert.AreEqual(expectedPosition.y, a.transform.position.y, 0.001f);
                 Assert.AreEqual(1.5f, a.transform.position.z, 0.001f);
                 Assert.AreEqual(expectedFacing, a.Facing);
                 Assert.AreEqual(0f, Mathf.DeltaAngle(
@@ -350,12 +352,12 @@ namespace Platformer.Tests
             Color red = new Color(1f, 0.35f, 0.35f, 1f);
 
             Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, origin, mouse));
-            Assert.AreEqual(-5.5f, _rig.A.transform.position.x, 0.001f,
+            Assert.AreEqual(-5.6f, _rig.A.transform.position.x, 0.001f,
                 "放门必须在调用当帧完成，不能等待子弹。 ");
             PortalProjectile projectileA1 = GetSingleProjectile(system);
             Assert.IsTrue(projectileA1.IsFlying);
             Assert.AreEqual(origin, projectileA1.StartPoint);
-            Assert.AreEqual(new Vector2(-5.5f, 4f), projectileA1.EndPoint);
+            Assert.Less(Vector2.Distance(new Vector2(-5.5f, 4f), projectileA1.EndPoint), 0.001f);
             Assert.IsTrue(projectileA1.EmitImpactOnArrival);
             AssertProjectileColor(projectileA1, blue);
 
@@ -364,13 +366,13 @@ namespace Platformer.Tests
                 CaptureGroupSide.A, secondOrigin, secondOrigin + Vector2.right * 0.2f));
             PortalProjectile projectileA2 = FindNewProjectile(system, projectileA1);
             Assert.AreNotSame(projectileA1, projectileA2, "同侧连射必须同时使用不同实例。");
-            Assert.AreEqual(new Vector2(-5.5f, 4.5f), projectileA2.EndPoint);
+            Assert.Less(Vector2.Distance(new Vector2(-5.5f, 4.5f), projectileA2.EndPoint), 0.001f);
             AssertProjectileColor(projectileA2, blue);
 
             Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.B, origin, mouse));
             PortalProjectile projectileB = FindNewProjectile(system, projectileA1, projectileA2);
-            Assert.AreEqual(-5.5f, _rig.B.transform.position.x, 0.001f);
-            Assert.AreEqual(new Vector2(-5.5f, 4f), projectileB.EndPoint);
+            Assert.AreEqual(-5.6f, _rig.B.transform.position.x, 0.001f);
+            Assert.Less(Vector2.Distance(new Vector2(-5.5f, 4f), projectileB.EndPoint), 0.001f);
             AssertProjectileColor(projectileB, red);
             Assert.AreEqual(3, system.ActiveProjectileCount);
             yield return null;
@@ -394,7 +396,7 @@ namespace Platformer.Tests
             Assert.IsFalse(pair.TryPlacePortal(
                 CaptureGroupSide.A, origin, origin + Vector2.right * 0.2f));
             PortalProjectile projectile = GetSingleProjectile(system);
-            Assert.AreEqual(new Vector2(-5.5f, 4f), projectile.EndPoint);
+            Assert.Less(Vector2.Distance(new Vector2(-5.5f, 4f), projectile.EndPoint), 0.001f);
             Assert.IsTrue(projectile.EmitImpactOnArrival);
 
             yield return WaitForArrival(projectile);
@@ -431,7 +433,7 @@ namespace Platformer.Tests
             Assert.AreEqual(oldOpenCount, _rig.A.OpenAnimationCount);
 
             PortalProjectile projectile = GetSingleProjectile(_rig.ProjectileSystem);
-            Assert.AreEqual(new Vector2(-6f, 4f), projectile.EndPoint);
+            Assert.Less(Vector2.Distance(new Vector2(-6f, 4f), projectile.EndPoint), 0.001f);
             Assert.IsTrue(projectile.EmitImpactOnArrival,
                 "不可放置只拦截开门，不应撤销有效地形命中的撞墙表现。");
 
@@ -443,8 +445,104 @@ namespace Platformer.Tests
 
             Assert.IsTrue(_rig.Pair.TryPlacePortal(
                 CaptureGroupSide.B, origin, origin + Vector2.right));
-            Assert.AreEqual(-6f, _rig.B.transform.position.x, 0.001f);
+            Assert.AreEqual(-6.1f, _rig.B.transform.position.x, 0.001f);
             Assert.AreEqual(4f, _rig.B.transform.position.y, 0.001f);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Placement_Tile_Wall_Requires_Full_Height_And_Offsets_From_Corner()
+        {
+            _rig.Destroy();
+            _rig = PortalTestRig.Create(withTerrain: true, withProjectileVisuals: true);
+            yield return null;
+            yield return new WaitForFixedUpdate();
+
+            PortalPair pair = _rig.Pair;
+            pair.maskTopOffset = 2f;
+            pair.maskBottomOffset = -2f;
+            var allowedTile = _rig.Terrain.CreateSolidTile(true);
+            _rig.Terrain.FillSolidRect(allowedTile, -6, -6, 4, 6);
+            _rig.Terrain.TilemapCollider.ProcessTilemapChanges();
+            _rig.Terrain.Composite.GenerateGeometry();
+            Physics2D.SyncTransforms();
+
+            Vector2 origin = _rig.Player.CenterPoint.transform.position;
+            Vector3 oldPosition = _rig.A.transform.position;
+            Assert.IsFalse(pair.TryPlacePortal(
+                CaptureGroupSide.A, origin, origin + Vector2.right));
+            Assert.AreEqual(oldPosition, _rig.A.transform.position,
+                "连续墙面只有 3 格、门高为 4 时必须放置失败。");
+            PortalProjectile shortWallProjectile = GetSingleProjectile(_rig.ProjectileSystem);
+            Assert.Less(Vector2.Distance(
+                new Vector2(-6f, 4f), shortWallProjectile.EndPoint), 0.001f);
+
+            _rig.Terrain.FillSolidRect(allowedTile, -6, -6, 7, 7);
+            _rig.Terrain.TilemapCollider.ProcessTilemapChanges();
+            _rig.Terrain.Composite.GenerateGeometry();
+            Physics2D.SyncTransforms();
+
+            Assert.IsTrue(pair.TryPlacePortal(
+                CaptureGroupSide.B, origin, origin + Vector2.right));
+            Assert.AreEqual(-6.1f, _rig.B.transform.position.x, 0.001f);
+            Assert.AreEqual(6f, _rig.B.transform.position.y, 0.001f,
+                "命中 4 格墙的底角时，门应向上偏移到完整墙面内。");
+            PortalProjectile cornerProjectile = FindNewProjectile(
+                _rig.ProjectileSystem, shortWallProjectile);
+            Assert.Less(Vector2.Distance(
+                new Vector2(-6f, 4f), cornerProjectile.EndPoint), 0.001f,
+                "自动偏移只改变门的位置，不改变子弹实际命中点。");
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Placement_Tile_Slope_Scans_Tangent_And_Offsets_On_Same_Normal()
+        {
+            _rig.Destroy();
+            _rig = PortalTestRig.Create(withTerrain: true);
+            yield return null;
+            yield return new WaitForFixedUpdate();
+
+            PortalPair pair = _rig.Pair;
+            pair.maskTopOffset = 2f;
+            pair.maskBottomOffset = -2f;
+            var slopeTile = _rig.Terrain.CreateSolidTile(true);
+            slopeTile.sprite.OverridePhysicsShape(new[]
+            {
+                new[]
+                {
+                    new Vector2(32f, 0f), new Vector2(32f, 32f), new Vector2(0f, 32f)
+                }
+            });
+            _rig.Terrain.Tilemap.SetTile(new Vector3Int(0, 0, 0), slopeTile);
+            _rig.Terrain.TilemapCollider.ProcessTilemapChanges();
+            _rig.Terrain.Composite.GenerateGeometry();
+            Physics2D.SyncTransforms();
+
+            Vector2 origin = new Vector2(-2f, -2f);
+            Vector2 hitPoint = new Vector2(0.9f, 0.1f);
+            Vector3 oldPosition = _rig.A.transform.position;
+            Assert.IsFalse(pair.TryPlacePortal(CaptureGroupSide.A, origin, hitPoint),
+                "单格斜边短于门高时，不能因为格子存在就放置成功。");
+            Assert.AreEqual(oldPosition, _rig.A.transform.position);
+
+            for (int i = 1; i < 4; i++)
+                _rig.Terrain.Tilemap.SetTile(new Vector3Int(-i, i, 0), slopeTile);
+            _rig.Terrain.TilemapCollider.ProcessTilemapChanges();
+            _rig.Terrain.Composite.GenerateGeometry();
+            Physics2D.SyncTransforms();
+            Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.B, origin, hitPoint));
+
+            Vector2 normal = new Vector2(-1f, -1f).normalized;
+            Vector2 tangent = new Vector2(-normal.y, normal.x);
+            Vector2 segmentEnd = new Vector2(1f, 0f);
+            Vector2 expectedSurface = segmentEnd - tangent * (pair.PortalHeight * 0.5f);
+            Vector2 expectedPosition = expectedSurface + normal * pair.placementSurfaceOffset;
+            Assert.AreEqual(expectedPosition.x, _rig.B.transform.position.x, 0.001f,
+                "门中心应沿命中斜面的切线方向向连续边内部偏移。");
+            Assert.AreEqual(expectedPosition.y, _rig.B.transform.position.y, 0.001f);
+            Assert.AreEqual(1f, Vector2.Dot(_rig.B.OpeningDirection, normal), 0.001f,
+                "斜面放置必须保留实际命中面的法线，不能吸附到竖墙。");
             yield return null;
         }
 
@@ -462,7 +560,7 @@ namespace Platformer.Tests
 
             Assert.IsTrue(pair.TryPlacePortal(
                 CaptureGroupSide.A, origin, origin + Vector2.right * 0.2f));
-            Assert.AreEqual(-5.5f, _rig.A.transform.position.x, 0.001f);
+            Assert.AreEqual(-5.6f, _rig.A.transform.position.x, 0.001f);
             Assert.AreEqual(0, system.ActiveProjectileCount);
             yield return null;
         }
@@ -483,9 +581,9 @@ namespace Platformer.Tests
 
             Assert.IsTrue(pair.TryPlacePortal(
                 CaptureGroupSide.A, origin, origin + Vector2.right * 0.2f));
-            Assert.AreEqual(19.5f, _rig.A.transform.position.x, 0.001f);
+            Assert.AreEqual(19.4f, _rig.A.transform.position.x, 0.001f);
             PortalProjectile projectile = GetSingleProjectile(system);
-            Assert.AreEqual(new Vector2(19.5f, 4f), projectile.EndPoint);
+            Assert.Less(Vector2.Distance(new Vector2(19.5f, 4f), projectile.EndPoint), 0.001f);
             float missDistance = 4f * Mathf.Sqrt(2f) * 0.05f;
             Assert.Greater(Vector2.Distance(origin, projectile.EndPoint), missDistance);
             yield return null;
@@ -677,7 +775,7 @@ namespace Platformer.Tests
                 new Vector2(1.1f, 0f), new Vector2(0.2f, 4f));
             Physics2D.SyncTransforms();
             Assert.IsTrue(pair.TryPlacePortal(CaptureGroupSide.A, Vector2.zero, Vector2.right * 0.2f));
-            Assert.AreEqual(1f, a.transform.position.x, 0.001f);
+            Assert.AreEqual(0.9f, a.transform.position.x, 0.001f);
 
             yield return new WaitForFixedUpdate();
             Assert.Less(Vector2.Distance(controller.transform.position, Vector2.zero), 0.05f,

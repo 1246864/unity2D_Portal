@@ -75,6 +75,11 @@ namespace Platformer
         [Min(0f)] public float approachBackPenalty = 10f;
 
         [Header("射击协调")]
+        [InspectorName("门体离墙悬浮距离")]
+        [Tooltip("放门时，门中心沿命中表面法线向外偏移的距离（世界单位）；0 = 贴合墙面")]
+        [Min(0f)] public float placementSurfaceOffset = 0.1f;
+
+        [InspectorName("未命中子弹射程")]
         [Tooltip("射线未命中且无法从相机计算可视范围时使用的子弹射程（世界单位）")]
         [Min(0.01f)] public float placementMissDistanceFallback = 50f;
 
@@ -699,7 +704,8 @@ namespace Platformer
                 return false;
             }
 
-            bool placed = _placementSystem != null && _placementSystem.TryPlace(side, nearest);
+            bool placed = _placementSystem != null &&
+                          _placementSystem.TryPlace(side, nearest, filter);
             if (_projectileSystem != null)
                 _projectileSystem.Launch(side, origin, nearest.point, true);
             return placed;
