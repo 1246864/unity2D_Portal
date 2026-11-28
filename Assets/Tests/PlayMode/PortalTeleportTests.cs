@@ -89,7 +89,9 @@ namespace Platformer.Tests
 
         static void AssertProjectileColor(PortalProjectile projectile, Color expected)
         {
-            AssertColor(projectile.trailParticles.main.startColor.color, expected);
+            Color trail = Color.Lerp(expected, Color.white, Mathf.Clamp01(projectile.trailColorBrighten));
+            trail.a = expected.a;
+            AssertColor(projectile.trailParticles.main.startColor.color, trail);
             AssertColor(projectile.residualParticles.main.startColor.color, expected);
             AssertColor(projectile.impactParticles.main.startColor.color, expected);
         }
@@ -538,7 +540,8 @@ namespace Platformer.Tests
             Assert.Greater(trailMain.startSpeed.constant, 0f);
             Assert.AreEqual(0f, trailEmission.rateOverTime.constant);
             Assert.GreaterOrEqual(trailEmission.rateOverDistance.constant, 100f);
-            Assert.IsTrue(trailEmission.enabled);
+            Assert.IsFalse(trailEmission.enabled,
+                "短粒子在飞满起始发射距离前必须保持关闭。");
             Assert.AreEqual(ParticleSystemShapeType.Cone, projectile.trailParticles.shape.shapeType);
             Assert.LessOrEqual(trailMain.startLifetime.constant, 0.2f);
             Assert.Greater(projectile.trailConeAngle, 0f);
@@ -568,6 +571,13 @@ namespace Platformer.Tests
             Assert.Less(projectile.transform.position.x, origin.x + 100f,
                 "子弹必须逐帧移动且不能越过预计算终点。 ");
             Assert.IsTrue(projectile.IsFlying);
+            projectile.trailStartDistance = 0.01f;
+            for (int frame = 0;
+                 frame < 30 && !projectile.trailParticles.emission.enabled;
+                 frame++)
+                yield return null;
+            Assert.IsTrue(projectile.trailParticles.emission.enabled,
+                "飞满起始发射距离后必须打开短粒子发射。 ");
             system.ReleaseAllProjectiles();
         }
 

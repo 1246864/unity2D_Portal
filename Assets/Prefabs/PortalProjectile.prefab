@@ -51,23 +51,27 @@ MonoBehaviour:
   residualParticles: {fileID: 4004}
   impactParticles: {fileID: 3004}
   speed: 95
-  trailLifetime: 0.2
-  trailSize: 0.035
-  trailRateOverDistance: 10
-  trailSpeed: 2
-  trailConeAngle: 14
+  trailLifetime: 0.03
+  trailSize: 0.1
+  trailRateOverDistance: 20
+  trailSpeed: 10
+  trailConeAngle: 20
   residualLifetime: 2
   residualSize: 0.03
-  residualRateOverDistance: 2
-  residualSpeed: 0.35
+  residualRateOverDistance: 3
+  residualSpeed: 0.8
   residualGravityMin: 0.3
   residualGravityMax: 0.4
   impactLifetime: 1
-  impactSpeed: 5
+  impactSpeed: 15
   impactSize: 0.08
-  impactGravity: 2
+  impactGravity: 5
   impactCount: 36
   impactConeAngle: 60
+  trailStartDistance: 1
+  trailColorBrighten: 0.703
+  trailVisibleStartDistance: 1
+  trailFullColorDistance: 3
   impactPreDistance: 0.3
   impactBounceFirst: 0.44
   impactBounceRest: 0.077
@@ -75,6 +79,21 @@ MonoBehaviour:
   impactCollisionMask:
     serializedVersion: 2
     m_Bits: 320
+  waveAmplitude: 0.1
+  waveWavelength: 1
+  sinePhaseOffset: 0
+  secondSinePhaseOffset: 0
+  sineScrollSpeed: 10
+  secondSineScrollSpeed: -10
+  sinePointLifetime: 0.05
+  secondSinePointLifetime: 0.1
+  waveVisibleStartDistance: 2
+  waveFullColorDistance: 5
+  waveColorBrighten: 0.315
+  sineWidth: 0.05
+  secondSineWidth: 0.02
+  wavePointSpacing: 0.05
+  waveMaxPoints: 512
 --- !u!1 &2001
 GameObject:
   m_ObjectHideFlags: 0

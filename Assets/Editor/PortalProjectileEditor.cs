@@ -23,6 +23,10 @@ public sealed class PortalProjectileEditor : Editor
         Field("trailRateOverDistance", "短粒子每单位距离发射数");
         Field("trailSpeed", "短粒子爆炸力度");
         Field("trailConeAngle", "短粒子扩散夹角");
+        Field("trailStartDistance", "短粒子起始发射距离");
+        Field("trailColorBrighten", "短粒子颜色提亮程度");
+        Field("trailVisibleStartDistance", "短粒子起始显示距离");
+        Field("trailFullColorDistance", "短粒子达到目标颜色距离");
 
         Header("长寿命随机方向残留粒子");
         Field("residualLifetime", "长粒子存活时间");
@@ -44,6 +48,23 @@ public sealed class PortalProjectileEditor : Editor
         Field("impactBounceRest", "后续碰撞反弹系数");
         Field("impactBounceDecayTime", "反弹衰减时间占比");
         Field("impactCollisionMask", "撞墙粒子地图与传送门碰撞层");
+
+        Header("路径双正弦细曲线");
+        Field("waveAmplitude", "波动幅度");
+        Field("waveWavelength", "波长");
+        Field("sinePhaseOffset", "正弦初始相位（角度）");
+        Field("secondSinePhaseOffset", "第二正弦初始相位（角度）");
+        Field("sineScrollSpeed", "正弦相位滚动速度");
+        Field("secondSineScrollSpeed", "第二正弦相位滚动速度");
+        Field("sinePointLifetime", "正弦曲线点存活时间");
+        Field("secondSinePointLifetime", "第二正弦曲线点存活时间");
+        Field("waveVisibleStartDistance", "曲线起始显示距离");
+        Field("waveFullColorDistance", "达到目标颜色距离");
+        Field("waveColorBrighten", "曲线颜色提亮程度");
+        Field("sineWidth", "正弦曲线宽度");
+        Field("secondSineWidth", "第二正弦曲线宽度");
+        Field("wavePointSpacing", "曲线点间距");
+        Field("waveMaxPoints", "最大曲线点数");
 
         serializedObject.ApplyModifiedProperties();
     }
